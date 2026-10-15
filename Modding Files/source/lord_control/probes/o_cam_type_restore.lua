@@ -1,0 +1,1 @@
+local ok, res = pcall(function() core:set_integer_preference("default_battle_camera_type", 0) return core:get_integer_preference("default_battle_camera_type") end) if ok then return res end return "ERR " .. tostring(res)

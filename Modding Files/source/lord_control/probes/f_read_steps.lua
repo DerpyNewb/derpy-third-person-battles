@@ -1,0 +1,1 @@
+local ok, r = pcall(function() local S = _G.DERPY_CAM_STEPS return {done = S.done, start = S.start, finish = S.finish, moving = S.moving, n = #S.steps, steps = S.steps} end) if ok then return r end return "ERR " .. tostring(r)

@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local u = bm:get_player_army():units():item(4) local p = u:position() return {phase = bm:get_current_phase_name(), paused = tostring(bm:is_paused and bm:is_paused()), x = p:get_x(), z = p:get_z(), idle = u:is_idle(), moving = u:is_moving(), ammo = u:ammo_left(), t = os.clock()} end) if ok then return res end return "ERR " .. tostring(res)

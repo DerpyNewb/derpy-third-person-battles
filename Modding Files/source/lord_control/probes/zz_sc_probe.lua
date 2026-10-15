@@ -1,0 +1,1 @@
+local ok, res = pcall(function() _G.DERPY_SC = {} core:remove_listener("derpy_sc_probe") core:add_listener("derpy_sc_probe", "ShortcutPressed", true, function(context) local k = tostring(context.string) _G.DERPY_SC[k] = (_G.DERPY_SC[k] or 0) + 1 end, true) return "listening" end) if ok then return res end return "ERR " .. tostring(res)

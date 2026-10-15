@@ -1,0 +1,1 @@
+local ok, r = pcall(function() local O = _G.DERPY_CAM_ONCE local f = O.frames return {done = O.done, before = O.before, right_after = O.right_after, f1 = f[1], f2 = f[2], f3 = f[3], f5 = f[5], f10 = f[10], f20 = f[20], f30 = f[30]} end) if ok then return r end return "ERR " .. tostring(r)

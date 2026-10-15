@@ -1,0 +1,1 @@
+local ok, r = pcall(function() core:remove_listener("derpy_cam_track_key") bm:remove_real_callback("derpy_cam_track") bm:camera():change_height_range(-1, -1) return "restored default height range, listener removed" end) if ok then return r end return "ERR " .. tostring(r)

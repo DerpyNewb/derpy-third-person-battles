@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local T = _G.DERPY_GATE return {field = T.field, baseline = T.a0 - (T.a6 or 0), gated = (T.a6 or 0) - (T.a12 or 0), mine = T.mine} end) if ok then return res end return "ERR " .. tostring(res)

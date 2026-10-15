@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local T = _G.DERPY_SMOOTH return {done = T.done, err = T.err, elapsed = T.elapsed, frames = T.frames, s_changes = T.s_changes, m_changes = T.m_changes, s_hold = T.s_hold, m_hold = T.m_hold, samples = T.samples} end) if ok then return res end return "ERR " .. tostring(res)

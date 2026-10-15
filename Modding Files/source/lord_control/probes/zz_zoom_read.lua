@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local F = _G.DERPY_FOLLOW return {on = F.on, err = F.err, wheel = F.wheel ~= nil, zoom = F.zoom, frames = F.frames} end) if ok then return res end return "ERR " .. tostring(res)

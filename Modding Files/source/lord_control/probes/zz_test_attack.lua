@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local F = _G.DERPY_FOLLOW F.attack_fn(true, false) return {attacks = F.attacks, target = F.target, no_target = F.no_target, unit = F.unit_name} end) if ok then return res end return "ERR " .. tostring(res)

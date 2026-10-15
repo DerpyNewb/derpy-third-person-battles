@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local T = _G.DERPY_NUDGE return {before = T.before, right_after = T.right_after, trace = table.concat(T.trace, " | ")} end) if ok then return res end return "ERR " .. tostring(res)

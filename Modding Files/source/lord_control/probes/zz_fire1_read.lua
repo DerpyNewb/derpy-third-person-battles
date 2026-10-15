@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local T = _G.DERPY_F1 return {ammo0 = T.ammo0, ammo_end = T.ammo_end, gate = T.gate, trace = table.concat(T.trace, " | ")} end) if ok then return res end return "ERR " .. tostring(res)

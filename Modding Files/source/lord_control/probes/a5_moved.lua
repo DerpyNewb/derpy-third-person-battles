@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local u local units = bm:get_player_army():units() for i = 1, units:count() do if units:item(i):is_commanding_unit() then u = units:item(i) end end local q, s = u:position(), _G.DERPY_A4 return {moved = math.sqrt((q:get_x() - s[1]) ^ 2 + (q:get_z() - s[2]) ^ 2)} end) if ok then return res end return "ERR " .. tostring(res)

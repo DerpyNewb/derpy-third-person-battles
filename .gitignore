@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.skilltree_cache/
+*.pack
+*.bak*
+
+# Creative Assembly-derived art and game files are never published. They ship in the .pack only.
+*.png
+*.dds
+*.jpg
+*.jpeg
+*.webp
+*.tga
+*.bin
+*.loc
+*.xlsx
+*.json
+*.npz
+*.twui.xml
+# ours: written by tools/gen_third_person_hud.py, it names CA's art by path only
+!Modding Files/source/third_person/ui/derpy_tp/hud.twui.xml

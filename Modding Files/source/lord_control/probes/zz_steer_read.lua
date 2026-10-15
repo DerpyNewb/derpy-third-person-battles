@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local T = _G.DERPY_STEER return {start = T.start, target = T.target, writes = T.writes, trace = table.concat(T.trace, " | ")} end) if ok then return res end return "ERR " .. tostring(res)

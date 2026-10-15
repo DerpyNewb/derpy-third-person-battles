@@ -1,0 +1,1 @@
+local ok, res = pcall(function() if bm:get_current_phase_name() == "Deployment" then bm:end_current_battle_phase() return "ending deployment" end return bm:get_current_phase_name() end) if ok then return res end return "ERR " .. tostring(res)

@@ -1,0 +1,1 @@
+local ok, res = pcall(function() local F = _G.DERPY_FOLLOW return {on = F.on, stopped = F.stopped, err = F.err, mode = F.mode, lead = F.lead, order_every = F.order_every, orders = F.orders, writes = F.writes, frames = F.frames} end) if ok then return res end return "ERR " .. tostring(res)
