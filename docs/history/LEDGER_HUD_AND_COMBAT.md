@@ -139,3 +139,8 @@ Suite 194/194; mutants control 8/8, range 7/7, blend 5/5, fix back to its 6 pre-
 - Ruling: Q charge needs F.running and a move key; Q alone does nothing - "charging running ... q as a continuous press"; cost if wrong: one condition.
 - Tests 239/239; mutants_round16 33/33 killed; actions re-aimed 29/29; t9/round15 re-aimed (t9 back to its 3 old stale); old stale sets unchanged (fix 6, t10 7, t8 3, t9 3). check_lua_api / literal-left clean.
 - Not fixable by script (report): units with no JUMPING_ATTACK clip (zorn_golden, gazul, heavythunder, snipers, hunter) have no jump; flinch needs a land_units DB change, the author's call.
+
+## Public repo (2026-10-15)
+- https://github.com/DerpyNewb/derpy-third-person-battles, first commit b27673d, 296 files; sync with tools/sync_third_person_repo.py.
+- Ruling: data.lua published (keys and numbers only, the harness needs it); probe .json/.npz dumps and the 2026-10-14 HUD plan (names the Windows profile) left out - cost if wrong: one manifest line.
+- Fixed for a bare clone: gen_tp_emitter creates its cache folder; build --selftest skips check_lua_api when CA's docs are absent.
