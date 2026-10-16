@@ -142,22 +142,10 @@ An **action** is a script-like unit of work the man carries beside his command. 
 | `+0x132` | destroy his command when it starts |
 | `+0x133` | clear the holder when it is done |
 
-**The runner**, `exe+3088218(holder)`, as Ghidra prints it:
-
-```c
-if (h->has != 1) return 0;
-if (!action->done) {
-    if (!h->started) {
-        if (h->kill_command == 1) destroy(h->command_holder);   // exe+2db5a20
-        action->ticks = 0;
-        action->vt->start(action);                             // slot 1
-        h->started = 1;
-    }
-    if (!action->done) { action->vt->update(action); action->ticks++; if (!action->done) return 1; }
-}
-if (h->clear_when_done) clear(h);                               // exe+2db5ac4
-return 1;
-```
+**The runner**, `exe+3088218(holder)`, does nothing without an action. Otherwise, while the action is not done:
+on its first run it destroys his command if `+0x132` asks (`exe+2db5a20`), zeroes the tick count, calls the
+action's start (slot 1) and marks it started; then it calls the update (slot 2) and counts the tick. Once the
+action is done it clears the holder if `+0x133` asks (`exe+2db5ac4`).
 
 **The play command** (tag 0x28 in the deterministic command stream; reader `exe+2ecf4dc`; what `P.play` pushes):
 it reads the man, the slot (u16), the mask (u32) and one byte, then builds a **clip action** (vtable `exe+390c0b8`,
@@ -179,24 +167,18 @@ holder, so they meet the same gate.
 
 ## 7. The man's update and the gate
 
-`exe+3086f04`, the branch a fighting man takes (`+0x108` bit 0x10 set, bits 8 and 4 clear, `+0xb20` null), as
-Ghidra prints it with the offsets named (Ghidra types him as `longlong *`, so its `param_1[0xdf]` is `+0x6f8`:
-**multiply its indices by 8**):
+`exe+3086f04`, the branch a fighting man takes (`+0x108` bit 0x10 set, bits 8 and 4 clear, `+0xb20` null), goes
+one of two ways each tick:
 
-```c
-if ((m->order_kind == 0 && (m->x128 == NULL || !check(m->x128 + 0x78)))
-    || ((m->queued.has != 1 || m->queued.done == 1)                 // exe+3087378 .. exe+3087388: THE GATE
-        && m->running.has == 1 && m->running.action->vt[0x80]() == 1)) {
-    switch (m->order_kind) {
-    case 4: case 0xc: case 0xd: case 0xe: case 0xf: case 0x10: case 0x11: case 0x12: case 0x14: case 0x15:
-        break;                                          // to the reset
-    default:
-        action_update(m);                               // exe+3075e7c: runs a queued action first
-        return;
-    }
-}
-reset_and_run_command(m);                               // exe+306d1ac: resets parked actions, runs the command
-```
+- **His action update**, `exe+3075e7c`, which runs a queued action first. He gets it when no order reached him
+  this tick (`+0x324` is 0, and `+0x128` is null or passes its `+0x78` check), or when **nothing is parked**
+  (queued has is not 1, or its done is 1: the bytes at `exe+3087378 .. exe+3087388`, **the gate**) and a running
+  action says it blocks orders (its `+0x80`).
+- **The reset**, `exe+306d1ac`, which resets parked actions and runs his command. He gets it otherwise, and also
+  whenever the order kind is 4, 0xc-0x12, 0x14 or 0x15.
+
+So a parked action plus any order that tick means the reset. (The decompiled C of both functions is kept in a
+local file, `BATTLE_ENGINE_RE_DECOMPILED.md`, and is not published.)
 
 `+0x324`, `order_kind`, is written by each command-start routine (`exe_re.py stores 324` lists them):
 
