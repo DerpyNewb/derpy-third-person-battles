@@ -37,7 +37,7 @@ return function(mct, K)
 	S.aim_back = get("camera_aim_back", 32) / 10
 	S.melee_distance = get("camera_melee_distance", 35) / 10
 	S.turn_rate = math.rad(get("move_turn_rate", 360))
-	S.run_hold = get("combat_run_hold", false) == true
+	S.walk_hold = get("combat_walk_hold", false) == true
 	S.swing_cooldown = get("combat_swing_cooldown", 15) / 10
 	S.reload_factor = get("combat_reload", 100) / 100
 	S.charge_cooldown = get("combat_charge_cooldown", 100) / 10

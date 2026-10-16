@@ -1,4 +1,4 @@
--- The keys the MCT page offers, their Windows virtual-key codes, and the 24 actions with their
+-- The keys the MCT page offers, their Windows virtual-key codes, and the 27 actions with their
 -- defaults and labels. The MCT page and the battle script both loadfile this, so they cannot
 -- disagree. A name can stand for two keys: "+" is the main-row plus and the numpad plus.
 local K = {names = {}, vk = {}}
@@ -18,22 +18,30 @@ add("Enter", 0x0D) add("Backspace", 0x08) add("Insert", 0x2D) add("Delete", 0x2E
 add("Page Up", 0x21) add("Page Down", 0x22) add("Up", 0x26) add("Down", 0x28) add("Left", 0x25) add("Right", 0x27)
 add("+", {0xBB, 0x6B}) add("-", {0xBD, 0x6D})
 
-K.order = {"toggle", "forward", "back", "left", "right", "run", "look_free", "attack", "mode", "charge", "jump", "fly", "zoom_in", "zoom_out",
-	"ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
+K.order = {"toggle", "forward", "back", "left", "right", "walk", "sprint", "look_free", "attack", "mode", "jump", "fly", "zoom_in",
+	"zoom_out", "cheer", "hide_ui", "minimap", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
 	"ability_10"}
 
-K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D", run = "Shift",
-	look_free = "Middle mouse", attack = "Left mouse", mode = "Right mouse", charge = "Q", jump = "E", fly = "Space", zoom_in = "+", zoom_out = "-",
+K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D", walk = "Z", sprint = "Shift",
+	look_free = "Middle mouse", attack = "Left mouse", mode = "Right mouse", jump = "E", fly = "Space", zoom_in = "+", zoom_out = "-",
+	cheer = "O", hide_ui = "P", minimap = "M",
 	ability_1 = "1", ability_2 = "2", ability_3 = "3", ability_4 = "4", ability_5 = "5", ability_6 = "6",
 	ability_7 = "7", ability_8 = "8", ability_9 = "9", ability_10 = "0"}
 
 K.labels = {toggle = "Third person on and off", forward = "Walk forward", back = "Walk back", left = "Walk left",
-	right = "Walk right", run = "Run (press to switch, or hold: see Combat)", look_free = "Free the mouse while held",
+	right = "Walk right", walk = "Walk (press to switch, or hold: see Combat)", look_free = "Free the mouse while held",
 	attack = "Attack and fire", mode = "Melee or ranged; artillery aiming",
-	charge = "Charge (hold while running; click to attack)", jump = "Jump attack",
-	fly = "Fly or land (flying units)", zoom_in = "Zoom in", zoom_out = "Zoom out",
+	sprint = "Sprint and charge (hold while moving; click to attack)", jump = "Jump attack",
+	fly = "Fly or land (flying units)", zoom_in = "Zoom in", zoom_out = "Zoom out", cheer = "Cheer",
+	hide_ui = "Hide or show the interface (works paused)", minimap = "Show or hide the minimap",
 	ability_1 = "Ability 1", ability_2 = "Ability 2", ability_3 = "Ability 3", ability_4 = "Ability 4",
 	ability_5 = "Ability 5", ability_6 = "Ability 6", ability_7 = "Ability 7", ability_8 = "Ability 8",
 	ability_9 = "Ability 9", ability_10 = "Ability 10"}
+
+-- the game's shortcut on each key it binds without a modifier, of the keys above (default_keys, read 2026-10-15): while
+-- third person is on, the one on a key an action has is off (P paused the game as it hid the interface). M and Shift
+-- the game binds only with a modifier
+K.game = {P = "toggle_pause", O = "visibility_toggle_radar", K = "toggle_ui", Space = "show_allied_units_proxies",
+	Z = "cam_down"}
 
 return K

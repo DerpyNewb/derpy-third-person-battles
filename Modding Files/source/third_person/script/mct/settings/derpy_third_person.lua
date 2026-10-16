@@ -65,8 +65,8 @@ slider("camera", "camera_melee_distance", "Distance in melee",
 	.. "Distance behind.", 35, 15, 150)
 
 m:add_new_section("combat", "Combat")
-checkbox("combat", "combat_run_hold", "Hold to run",
-	"On, you run only while the run key is held. Off, a press switches between walking and running.", false)
+checkbox("combat", "combat_walk_hold", "Hold to walk",
+	"On, you walk only while the walk key is held. Off, a press switches between running and walking.", false)
 slider("combat", "move_turn_rate", "Turning speed",
 	"Degrees a second one man turns toward a new direction. Higher turns sharper.", 360, 90, 1440)
 slider("combat", "combat_swing_cooldown", "Time between swings",

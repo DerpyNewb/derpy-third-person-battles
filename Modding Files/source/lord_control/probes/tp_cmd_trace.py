@@ -12,7 +12,7 @@ import time
 import memscan
 
 FIELDS = [  # name, model offset, struct format
-    ("x", 0x88, "<f"), ("z", 0x90, "<f"), ("face", 0xb0, "<H"), ("state", 0x318, "<i"), ("vt", 0x330, "<Q"),
+    ("x", 0x88, "<f"), ("z", 0x90, "<f"), ("face", 0xb0, "<H"), ("slot", 0x278, "<H"), ("state", 0x318, "<i"), ("vt", 0x330, "<Q"),
     ("done", 0x340, "<B"), ("c30", 0x360, "<i"), ("px", 0x368, "<f"), ("pz", 0x370, "<f"), ("run", 0x390, "<i"),
     ("speed", 0x394, "<f"), ("head", 0x398, "<H"), ("c6c", 0x39c, "<i"), ("b7c", 0x3ac, "<B"), ("b7d", 0x3ad, "<B"),
     ("gait", 0x3ae, "<B"), ("b7f", 0x3af, "<B"), ("b81", 0x3b1, "<B"), ("b82", 0x3b2, "<B"), ("init", 0x3c0, "<B"),

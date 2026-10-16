@@ -143,6 +143,39 @@ def check_data():
         bad.append("data.lua rows: got %s, want %s %s" % (got[:9], want, r.stderr.strip()))
     elif int(got[9]) < 450 or int(got[10]) < 450:  # a broken generation, not an exact count: 493 ranged land units in 9.0
         bad.append("data.lua is too small: %s unit types, %s abilities" % (got[9], got[10]))
+    # each shot a fire clip spawns (third_person_fires.py): CA's ratling gun 18 from 1 s, the ironbreakers' throw past 2 s
+    probe = ('local d = dofile([[%s]]) local f = d.fires or {} local r = f["wh2_dlc12_skv_inf_ratling_gun_0"] or {} '
+             'local i = f["wh_main_dwf_inf_ironbreakers"] or {} print(#r, (r[1] or {})[1], (i[1] or {})[1], (i[1] or {})[4])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    # every unit with a fire clip has its shot too, the installed mods' included: a modded unit learned off its card had
+    # no weapon sound (the author, 2026-10-15: "theres also no sound effect when firing")
+    probe2 = ('local d = dofile([[%s]]) local n = 0 for k in pairs(d.fires or {}) do '
+              'if not d.shots[k] then n = n + 1 end end print(n)' % DATA)
+    missing = subprocess.run([LUA, "-e", probe2], capture_output=True, text=True).stdout.strip()
+    if missing != "0":
+        bad.append("data.lua: %s units with a fire clip have no shot - run --gen" % missing)
+    # and where: the throw's FIRE_POS 0.94 m ahead of him (a position, not only a time)
+    if got[:2] != ["18", "1"] or not (got[2:4] and "nil" not in got[2:4] and float(got[2]) > 2 and float(got[3]) > 0.5):
+        bad.append("data.lua fires: ratling gun %s spawns from %s s, ironbreakers at %s s - run --gen"
+                   % tuple((got + ["?"] * 3)[:3]))
+    # each raise's play time, as the game played them (the script log, 2026-10-16): the Streltsi's 1.1 s, Akshina's 0.8 s
+    probe = ('local d = dofile([[%s]]) local r = d.raises or {} local s = r["wh3_main_ksl_inf_streltsi_0"] or {} '
+             'local a = r["wh3_dlc24_ksl_inf_akshina_ambushers_ror"] or {} print(s[2], s[3], a[2])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["1.1", "1.1", "0.8"]:
+        bad.append("data.lua raises: Streltsi %s, Akshina %s - run --gen" % (got[:2], got[2:]))
+    # the longest charge attack, no shorter than the one the game played: Akshina's 484 ran 1.6 s (probes/zz_tp_charge_run.lua)
+    probe = ('local d = dofile([[%s]]) print((d.runs or {})["wh3_dlc24_ksl_inf_akshina_ambushers_ror"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.strip()
+    if not (got not in ("", "nil") and 1.6 <= float(got) < 3):
+        bad.append("data.lua runs: Akshina %s - run --gen" % got)
+    # a body the aim stops at (the author, 2026-10-16: it "shoots above" the Ogre under the crosshair): Golgfag's Maneaters
+    # 1.2 by 3.1 m, armoured Kossars 0.6 by 1.9 (battle_entities)
+    probe = ('local d = dofile([[%s]]) local b = d.bodies or {} local o = b["wh3_dlc26_ogr_inf_golgfags_maneaters"] or {} '
+             'local k = b["wh3_main_ksl_inf_armoured_kossars_1"] or {} print(o[1], o[2], k[1], k[2])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["1.2", "3.1", "0.6", "1.9"]:
+        bad.append("data.lua bodies: Golgfag's Maneaters %s, Kossars %s - run --gen" % (got[:2], got[2:]))
     return bad
 
 def exe_stamp():
@@ -166,34 +199,74 @@ def ability_kind(r):
 
 
 def gen():
-    """Write data.lua from CA's db.pack: main_units -> land_units.primary_missile_weapon ->
+    """Write data.lua from db.pack and the installed mods: land_units.primary_missile_weapon ->
     missile_weapons.default_projectile -> projectiles (and missile_weapons.audio_type ->
     audio_missile_weapon_types.fire_start_event), and unit_special_abilities' target flags."""
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     from read_vanilla_db import load, DB_PACK
 
-    def rows(table):
-        return [r for _p, _v, rs in load(DB_PACK, table + "_tables") for r in rs]
+    import third_person_fires
+    # the installed mods' rows too (the author, 2026-10-15: a modded unit's shot, learned off its card, had no weapon
+    # sound): a mod's row over CA's, the first mod in name order over the rest, as third_person_fires reads them
+    mods = third_person_fires.mod_packs()
 
-    lu = {r["key"]: r for r in rows("land_units")}
-    mw = {r["key"]: r for r in rows("missile_weapons")}
-    pr = {r["key"]: r for r in rows("projectiles")}
-    aw = {r["key"]: r for r in rows("audio_missile_weapon_types")}
-    shots = {}
-    for r in rows("main_units"):
-        land = lu.get(r["land_unit"])
-        weapon = land and mw.get(land["primary_missile_weapon"])
+    def keyed(table):
+        out = {}
+        for p in mods + [DB_PACK]:
+            try:
+                for _p, _v, rs in load(p, table + "_tables"):
+                    for r in rs:
+                        out.setdefault(r["key"], r)
+            except Exception:  # a pack without the table, or a table version the schema does not know
+                pass
+        return out
+
+    lu, mw, pr, aw = keyed("land_units"), keyed("missile_weapons"), keyed("projectiles"), keyed("audio_missile_weapon_types")
+    shots, speeds = {}, {}
+    for key, land in lu.items():
+        # keyed by the land unit: unit:type() returns a land_units key (CA's doc), and 176 main units sit on a land
+        # unit of another name
+        weapon = mw.get(land["primary_missile_weapon"])
         proj = weapon and pr.get(weapon["default_projectile"])
         if proj:
-            # keyed by the land unit: unit:type() returns a land_units key (CA's doc), and 176 main units
-            # sit on a land unit of another name; main units sharing one land unit share its weapon
             bang = (aw.get(weapon["audio_type"]) or {}).get("fire_start_event") or ""
-            shots[r["land_unit"]] = (proj["key"], float(proj["base_reload_time"]), int(proj["projectile_number"]), bang)
-    kinds = {r["key"]: ability_kind(r) for r in rows("unit_special_abilities") if not r["passive"]}
+            shots[key] = (proj["key"], float(proj["base_reload_time"]), int(proj["projectile_number"]), bang)
+            speeds[key] = float(proj["muzzle_velocity"])
+    # each man's body for the aim's hit test (combat.lua's first_enemy): his entity's radius and height; a rider's
+    # the larger radius and his mount's height plus half his own (ponytail: a guess at the saddle; a measured rider
+    # height if a shot at cavalry lands off). Only the ones that are not a man's 0.5 by 1.8 m
+    be, mounts = keyed("battle_entities"), keyed("mounts")
+    bodies = {}
+    for key, land in lu.items():
+        man = be.get(land["man_entity"])
+        if not man:
+            continue
+        r, h = float(man["radius"]), float(man["height"])
+        mount = be.get((mounts.get(land["mount"]) or {}).get("entity"))
+        if mount:
+            r, h = max(r, float(mount["radius"])), float(mount["height"]) + h / 2
+        r, h = round(r, 2), round(h, 2)
+        if (r, h) != (0.5, 1.8):
+            bodies[key] = (r, h)
+    kinds = {k: ability_kind(r) for k, r in keyed("unit_special_abilities").items() if not r["passive"]}
+    TF = third_person_fires
+    raises, runs = {}, {}
+    fires, fires_low, fires_high = TF.build((TF.FIRE, TF.GRENADIER), (TF.FIRE_LOW,), (TF.FIRE_HIGH,), raises=raises,
+                                            runs=runs)
     lines = ["-- GENERATED by tools/build_third_person.py --gen from db.pack, exe build 0x%08x. Do not edit." % exe_stamp(),
              "-- shots: land unit key (what unit:type() returns) -> {projectile key, base_reload_time, projectiles per shot,",
              "--   the weapon's fire sound event if it has one}",
              "-- abilities: non-passive ability key -> what it aims at: ground, enemy, friend, self or none",
+             "-- fires: land unit key -> each shot its fire clip spawns, {s into the clip, x right, y up, z ahead of his",
+             "--   animroot in m} (FIRE_POS, third_person_fires.py;",
+             "--   the installed mods' units too); fires_low, fires_high: the same off FIRE_LOW and FIRE_HIGH",
+             "-- speeds: land unit key -> its projectile's muzzle_velocity, m/s (combat.lua picks the low, level or high",
+             "--   clips by the angle the shot leaves at)",
+             "-- raises: land unit key -> {low, level, high}: each SHOOT_READY_TO_AIM clip's play time, s, off its .anim; 0,",
+             "--   none (combat.lua sends fire just before the raise ends)",
+             "-- runs: land unit key -> its longest MOVING_ATTACK clip, s (combat.lua ends a charge attack on the run there)",
+             "-- bodies: land unit key -> {radius, height} of each man in m, off battle_entities (a rider: his mount's height",
+             "--   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)",
              "return {", "\tshots = {"]
     for k in sorted(shots):
         key, reload, n, bang = shots[k]
@@ -201,10 +274,27 @@ def gen():
     lines += ["\t},", "\tabilities = {"]
     for k in sorted(kinds):
         lines.append('\t\t["%s"] = "%s",' % (k, kinds[k]))
+    for name, table in (("fires", fires), ("fires_low", fires_low), ("fires_high", fires_high)):
+        lines += ["\t},", "\t%s = {" % name]
+        for k in sorted(table):
+            lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("{%s}" % ", ".join("%g" % v for v in e) for e in table[k])))
+    lines += ["\t},", "\traises = {"]
+    for k in sorted(raises):
+        lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("%g" % t for t in raises[k])))
+    lines += ["\t},", "\truns = {"]
+    for k in sorted(runs):
+        lines.append('\t\t["%s"] = %g,' % (k, runs[k]))
+    lines += ["\t},", "\tspeeds = {"]
+    for k in sorted(speeds):
+        lines.append('\t\t["%s"] = %g,' % (k, speeds[k]))
+    lines += ["\t},", "\tbodies = {"]
+    for k in sorted(bodies):
+        lines.append('\t\t["%s"] = {%g, %g},' % (k, bodies[k][0], bodies[k][1]))
     lines += ["\t},", "}", ""]
     with open(DATA, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
-    print("wrote %s: %d unit types, %d abilities" % (DATA, len(shots), len(kinds)))
+    print("wrote %s: %d unit types, %d abilities, %d fire clips, %d raises, %d charge attacks, %d bodies"
+          % (DATA, len(shots), len(kinds), len(fires), len(raises), len(runs), len(bodies)))
 
 
 def check_loc():

@@ -85,9 +85,9 @@ return function(E)
 		local kind = kind_of(n, key)
 		local ok, err, via_context
 		if kind == "ground" then
-			local x, y, z = E.combat.aim_point(reach(n))
+			local x, _, z = E.combat.aim_point(reach(n))
 			if not x then return "no aim yet" end
-			ok, err = pcall(F.uc.perform_special_ability_ground, F.uc, key, v(x, y, z))
+			ok, err = pcall(F.uc.perform_special_ability_ground, F.uc, key, v(x, bm:get_terrain_height(x, z), z))
 		elseif kind == "enemy" then
 			local target, far = nearest_to_ray(true, reach(n))
 			if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key end

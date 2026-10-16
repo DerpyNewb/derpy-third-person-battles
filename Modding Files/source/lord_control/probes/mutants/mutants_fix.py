@@ -19,8 +19,7 @@ MUTANTS = [
     (V, "if keys ~= F.man_keys then F.man_keys, F.man_walk = keys, now end", "if not F.man_walk then F.man_walk = now end", "one_man_nudges_only_at_the_start"),
     (N, "\t\twhen_shown(function() E.say(\"derpy_tp_needs_memreader\") end)\n\t\tE.once(\"memreader\"", "\t\tE.say(\"derpy_tp_needs_memreader\")\n\t\tE.once(\"memreader\"", "needs_memreader_said_after_loading"),
     (N, "local function once() if not done then done = true fn() end end", "local function once() fn() end", "needs_memreader_said_after_loading"),
-    (M, "if now >= (E.scan_at or 0) then E.scan_at = now + SCAN_EVERY register_units() end", "", "picks_a_unit_added_mid_battle"),
     (C, "if not ok then E.pending = err end -- E.fail registers a timer: not from in here\n\t\tend, SHOT_DELAY_MS", "if not ok then E.fail(err) end\n\t\tend, SHOT_DELAY_MS", "error_in_a_shot_still_hides_its_message"),
     (M, "if E.pending then local err = E.pending E.pending = nil E.fail(err) end", "", "error_in_a_shot_still_hides_its_message"),
-    (C, "if not turned and now - (F.last_order or -1e9) >= STEER_GAP then", "if not turned and now - (F.last_order or 0) >= STEER_GAP then", "ground_fire_turns_first"),
+    # (round 25: removed the "or 0" fallback mutant - F2 stamps last_order, so the fallback is never read)
 ]

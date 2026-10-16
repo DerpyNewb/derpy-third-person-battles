@@ -47,6 +47,8 @@ local UNIT = {}
 UNIT.__index = UNIT
 function UNIT:position() if self._error then error("test: position() failed") end return v(self._x, 0, self._z) end
 function UNIT:bearing() return self._bearing end
+-- where the engine has him going: his own spot once halted or attacking (CA's entry for ordered_position)
+function UNIT:ordered_position() local o = self._ordered return o and v(o[1], 0, o[2]) or self:position() end
 function UNIT:type() return self._type end
 function UNIT:name() return self._type end
 function UNIT:unique_ui_id() return self._id end
@@ -56,6 +58,7 @@ function UNIT:is_artillery() return self._arty end
 function UNIT:is_war_machine() return self._war_machine or self._arty end
 function UNIT:is_currently_flying() return self._flying end
 function UNIT:can_fly() return self._can_fly == true end
+function UNIT:trigger_sound_taunt() rec("taunt", self._id) end
 function UNIT:is_in_melee() return self._melee == true end
 function UNIT:missile_range() return self._range end
 function UNIT:ammo_left() return self._ammo end
@@ -93,7 +96,8 @@ function H.unit(o)
 	local men = o.men or 1
 	for i = 1, men do -- one rank along x, centred on the unit, facing +z (bearing 0)
 		u._models[i] = {id = next_id * 1000 + i, x = u._x + (i - (men + 1) / 2), y = 0, z = u._z,
-			slots = o.slots, reload = o.reload_slot or (u._type:find("crossbowmen") and 1554 or 1564)}
+			slots = o.slots, reload = o.reload_slot or (u._type:find("crossbowmen") and 1554 or 1564), hp = 100, hp_max = 100,
+			clip_ms = o.clip_ms}
 		if o.reload_slot == false then u._models[i].reload = false end
 	end
 	local list = o.enemy and H.enemies or H.units
@@ -104,6 +108,7 @@ local function listof(items) return {count = function() return #items end, item 
 
 -- unit controllers record every call as "uc:<method>", unit id, args
 local UC = {}
+local ORDERS = {goto_location = true, goto_location_angle_width = true, attack_unit = true, attack_location = true, halt = true}
 UC.__index = function(self, name)
 	return function(_, ...)
 		if name == "perform_special_ability" then local key, target = ... assert(getmetatable(target) == UNIT, "battle.unit expected") end
@@ -111,6 +116,16 @@ UC.__index = function(self, name)
 			error("calling 'perform_special_ability' on bad self (error: unit '1' does not support this special ability)")
 		end
 		rec("uc:" .. name, self._u._id, ...)
+		-- an order within 0.5 s of the one before is dropped (the recorder, 2026-10-15: a walk 0.4 s after a halt left him
+		-- ordered to his own spot, idle, for as long as W was held)
+		local u = self._u
+		if ORDERS[name] then
+			local dropped = H.T - (u._order_t or -1e9) < 0.5 - 1e-9 -- 30 frames of 1/60 sum to under 0.5
+			u._order_t = H.T
+			if dropped then rec("dropped_order", u._id, name)
+			elseif name == "goto_location" or name == "goto_location_angle_width" then local p = ... u._ordered = {p.x, p.z}
+			else u._ordered = nil end
+		end
 		if name == "fire_at_will" then self._u._faw = (...) end
 		if name == "change_behaviour_active" then local b, on = ... if b == "defend" then self._u._defend = on end end
 		if name == "halt" then self._u._prior_walk = false end
@@ -130,12 +145,13 @@ local function make_bm()
 		if H.in_oneshot then rec("dropped_timer", id) return end
 		H.timers[id] = {fn = fn, at = H.T + ms / 1000}
 	end
-	function B:time_elapsed_ms() return H.game_ms end -- model time: stands still while H.paused
+	function B:time_elapsed_ms() return H.model_ms() end -- model time: stands still while H.paused
 	function B:remove_real_callback(id) H.timers[id] = nil end
 	function B:camera() return H.cam end
 	function B:get_terrain_height(x, z) return H.ground and H.ground(x, z) or 0 end
 	function B:disable_orders(b) rec("disable_orders", b) end
 	function B:enable_cinematic_ui(a, b, c) rec("cinematic_ui", a, b, c) end
+	function B:disable_shortcut(name, off) rec("disable_shortcut", name, off) end
 	B.battle = {enable_tooltips = function(_, b) rec("tooltips", b) end, set_banners_enabled = function(_, b) rec("banners", b) end,
 		suppress_unit_voices = function(_, b) rec("voices_off", b) end} -- CA's battle interface, bm.battle
 	function B:is_multiplayer() return H.mp end
@@ -145,7 +161,7 @@ local function make_bm()
 	function B:trigger_projectile_launch(key, from, to) rec("launch", key, from, to) end
 	function B:register_phase_change_callback(name, fn) H.phase[name] = fn end
 	function B:register_unit_selection_callback(u, fn) H.selection_cbs[#H.selection_cbs + 1] = {u, fn} end
-	function B:num_units_selected() return H.selected and 1 or 0 end
+	function B:num_units_selected() local n = 0 for _ in pairs(H.sel) do n = n + 1 end return n end
 	function B:clear_selection() rec("clear_selection") H.select(nil) end
 	function B:get_player_army() return {units = function() return listof(H.units) end} end
 	function B:get_player_alliance() return {armies = function() return listof({B:get_player_army()}) end} end
@@ -154,10 +170,11 @@ local function make_bm()
 	end
 	return B
 end
--- as a click does: the unit selected before is deselected first (nil clears the selection)
+-- as a click does: the unit selected before is deselected first (nil clears the selection). H.sel is what the game
+-- says is selected (num_units_selected, CcoBattleUnit.IsSelected); a shift-click adds to it
 function H.select(u)
 	local was = H.selected
-	H.selected = u
+	H.selected, H.sel = u, u and {[u] = true} or {}
 	if was and was ~= u then for _, cb in ipairs(H.selection_cbs) do if cb[1] == was then cb[2](was, false) end end end
 	if u then for _, cb in ipairs(H.selection_cbs) do if cb[1] == u then cb[2](u, true) end end end
 end
@@ -166,7 +183,7 @@ end
 local COMP = {}
 COMP.__index = COMP
 local function comp(id, parent)
-	local c = setmetatable({id = id, kids = {}, visible = true, x = 0, y = 0}, COMP)
+	local c = setmetatable({id = id, kids = {}, visible = true, x = 0, y = 0, parent = parent}, COMP)
 	if parent then parent.kids[#parent.kids + 1] = c end
 	return c
 end
@@ -242,6 +259,16 @@ function COMP:SetImageRotation(i, a) rec("rot", self.id, i, a) self.rot = self.r
 function COMP:SetInteractive(b) self.interactive = b end
 function COMP:GetContextObjectId(kind) if kind == "CcoBattleUnit" then return self.cco end end
 function COMP:MoveTo(x, y) self.x, self.y = x, y end
+-- CA's uicomponent:Adopt(address, [index]): the child leaves its old parent; index 0-based, -1 or none the end
+function COMP:Address() return self end
+function COMP:Adopt(c, i)
+	if type(c) ~= "table" or getmetatable(c) ~= COMP then error("Adopt takes an address") end
+	rec("adopt", self.id, c.id, i)
+	local old = c.parent
+	if old then for k, x in ipairs(old.kids) do if x == c then table.remove(old.kids, k) break end end end
+	c.parent = self
+	if i and i >= 0 then table.insert(self.kids, math.min(i + 1, #self.kids + 1), c) else self.kids[#self.kids + 1] = c end
+end
 function COMP:SimulateLClick() rec("click", self.id) end
 function COMP:GetCurrentStateImageOpacity(i) return (self.opacity or {})[i] or 255 end
 function COMP:SetCurrentStateImageOpacity(i, o)
@@ -260,7 +287,7 @@ function find_uicomponent(root, ...)
 	return c
 end
 core = {get_env = function() return _G end, get_ui_root = function() return H.root end,
-	get_screen_resolution = function() return 1920, 1080 end}
+	get_screen_resolution = function() return H.screen[1], H.screen[2] end}
 function out(msg) H.log[#H.log + 1] = tostring(msg) end
 -- CA's unit context, by expression: H.cco[expr] is the value, or a function that returns it or throws
 common = {get_context_value = function(kind, id, expr)
@@ -272,13 +299,17 @@ common = {get_context_value = function(kind, id, expr)
 		return ({x = sx, y = sy, z = sz})[f]
 	end
 	rec("cco", kind, id, expr)
+	if kind == "CcoBattleUnit" and expr == "IsSelected" then
+		for u in pairs(H.sel) do if tostring(u:unique_ui_id()) == id then return true end end
+		return false
+	end
 	local val = ((H.cco_ids or {})[id] or H.cco)[expr] -- H.cco_ids[id]: another unit's context, by its ui id
 	if type(val) == "function" then return val() end
 	return val
 end, call_context_command = function(kind, id, expr) rec("cco_cmd", kind, id, expr) end}
 function H.default_cco()
 	return {IconPath = "ui/units/icons/test_card.png", Name = "Test Regiment", ["BattleAbilityList.Size"] = 0,
-		ReloadPercentMax = 0}
+		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000}
 end
 -- CA's lib_battle sound helpers: new_sfx(event, is_cinematic, is_vo) and play_sound(position, sfx)
 function new_sfx(event, cinematic, vo) return {event = event, cinematic = cinematic, vo = vo} end
@@ -329,30 +360,44 @@ local function fake_platform()
 	end
 	function P.models(unit) local t = {} for _, m in ipairs(unit._models) do if m.alive ~= false then t[#t + 1] = m end end return t end
 	function P.model_pos(m) return m.x, m.y, m.z end
-	function P.has_slot(m, slot) return m.slots and m.slots[slot] == true or not m.slots and slot < 1900 end
+	function P.model_hp(m) return m.hp, m.hp_max end
+	-- a man with no slot list has every slot under 1900 but AIM_LOW/LEVEL/HIGH (1547-1549): the shot tests before the
+	-- aim hold (2026-10-16) time a raise straight into its fire; a test of the hold lists his slots
+	function P.has_slot(m, slot)
+		return m.slots and m.slots[slot] == true or not m.slots and slot < 1900 and (slot < 1547 or slot > 1549)
+	end
 	function P.reload_slot(m) if m.reload ~= false then return m.reload end end
 	function P.mount(m) return m.mount end
 	function P.place(m, x, z) rec("place", m.id, x, z) m.x, m.z = x, z end
 	-- measured 2026-10-14 (probes/zz_tp_unclip.lua): a walk started under a running full-body clip leaves the clip
 	-- latched for good, and he slides in its pose
-	function P.steer(m, x, z, run, yaw)
-		rec("steer", m.id, x, z, run, yaw)
+	function P.steer(m, x, z, run, yaw, speed)
+		rec("steer", m.id, x, z, run, yaw, speed)
 		if P.anim_slot(m) and m.mask ~= 0 then rec("slide", m.id, m.anim_slot) m.anim_end = math.huge end
 	end
 	function P.hold(m, x, z, yaw) rec("hold", m.id, x, z, yaw) end
+	function P.command(m) return m.command or "walk" end
+	function P.guard(m) rec("guard", m and m.id) return false end
+	function P.disarm(m) rec("disarm", m and m.id) end
+	function P.arm(m) rec("arm", m and m.id) end
+	function P.gate(on) rec("gate", on) return true end
 	function P.anim_slot(m)
-		if m.anim_end and H.game_ms >= m.anim_end and not H.anim_hold then m.anim_slot = nil end
+		if m.anim_end and H.model_ms() >= m.anim_end and not H.anim_hold then m.anim_slot = nil end
+		-- H.report_ms: the engine reports a new clip late (measured 2026-10-15: 0.19-0.31 s in a busy battle)
+		if m.report_at and H.model_ms() < m.report_at then return m.reported end
 		return m.anim_slot
 	end
 	function P.play(m, slot, mask)
 		rec("play", m.id, slot, mask)
+		m.reported, m.report_at = P.anim_slot(m), H.model_ms() + (H.report_ms or 0)
 		m.mask = mask or 0
 		m.anim_slot = slot ~= 42 and slot or nil -- WALK_1, mask 0, no event metadata: the engine reports no clip
-		m.anim_end = H.game_ms + (slot == 1564 and 7000 or slot == 1554 and 1000 or 4000) -- reload, raise to aim, the rest
+		-- reload, raise to aim, the rest; o.clip_ms: a clip's own length
+		m.anim_end = H.model_ms() + ((m.clip_ms or {})[slot] or slot == 1564 and 7000 or slot == 1554 and 1000 or 4000)
 		return true
 	end
 	function P.face(m, yaw) rec("face", m.id, yaw) end
-	function P.alive(unit, m) return m.alive ~= false end
+	function P.alive(unit, m) return m.alive ~= false and m.hp > 0 end
 	function P.same(a, b) return a == b end
 	function P.check_men(unit) if unit._men_ok == false then return false, "test: men off" end return true end
 	return P
@@ -360,6 +405,10 @@ end
 
 -- clock and timers: 60 frames a second; a one-shot's id is freed before it runs, as CA's is
 os.clock = function() return H.T end
+-- the model clock: the game steps it, and its clip reports, in 100 ms ticks (measured 2026-10-15: every
+-- bm:time_elapsed_ms() a whole tenth, sampled each frame); H.tick_ms steps it here, smooth without
+function H.model_ms() return H.tick_ms and math.floor(H.game_ms / H.tick_ms + 1e-9) * H.tick_ms or H.game_ms end
+
 function H.step(seconds)
 	for _ = 1, math.max(1, math.floor(seconds * 60 + 0.5)) do
 		H.T = H.T + 1 / 60
@@ -395,18 +444,26 @@ function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
 	H.T, H.calls, H.timers, H.keys, H.focus, H.mouse, H.wheel_notches = 100, {}, {}, {}, true, {0, 0}, 0
-	H.log, H.phase, H.selection_cbs, H.selected = {}, {}, {}, nil
+	H.log, H.phase, H.selection_cbs, H.selected, H.sel = {}, {}, {}, nil, {}
 	H.units, H.enemies, next_id = {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
 	H.mp, H.replay = opts.mp or false, opts.replay or false
-	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold = 0, false, false, false, false
+	H.screen, H.tick_ms = opts.screen or {1920, 1080}, opts.tick_ms
+	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold, H.report_ms = 0, false, false, false, false, 0
 	H.features = opts.features or {input = true, anim = true, wheel = true}
 	H.root = comp("root")
 	H.cco, H.cco_ids, H.w2s = H.default_cco(), nil, nil
-	H.eye, H.look, H.ground = nil, nil, nil
+	H.eye, H.look, H.ground, H.roof = nil, nil, nil, nil
+	-- H.cam_lag: frames the engine's reported position trails the asked eye (measured 2026-10-15: two)
+	H.cam_lag, H.eyes = opts.cam_lag or 0, {}
 	H.cam = {
-		move_to = function(_, eye, look) H.eye, H.look = eye, look end,
+		move_to = function(_, eye, look) H.eye, H.look = eye, look H.eyes[#H.eyes + 1] = eye end,
 		enable_functionality = function(_, name, on) rec("camera_functions", name, on) end,
-		position = function() return H.eye or v(0, 0, 0) end,
+		-- the engine's floor: an eye over a roof (H.roof(x, z), a building's top) is put 1.55 m above it
+		position = function()
+			local e = H.eyes[math.max(1, #H.eyes - H.cam_lag)] or v(0, 0, 0)
+			local r = H.roof and H.roof(e.x, e.z)
+			return r and e.y < r + 1.55 and v(e.x, r + 1.55, e.z) or e
+		end,
 		change_height_range = function(_, lo, hi) rec("camera_height_range", lo, hi) end,
 	}
 	math.randomseed(1)

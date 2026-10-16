@@ -16,7 +16,7 @@ MUTANTS = [
     (R, "(rz * OTS_SIDE - fz * S.aim_back) * zm", "(rz * OTS_SIDE - fz * 3.2) * zm", "the_aiming_camera_sits_the_set_distance_back"),
     (C, "(math.random() * 2 - 1) * E.S.spread, (math.random() * 2 - 1) * E.S.spread", "(math.random() * 2 - 1) * 1.5, (math.random() * 2 - 1) * 1.5", "the_spread_setting_can_close_the_volley"),
     (C, 'if shot and shot.phase == "reload" and E.S.reload_factor < 1 and now >= F.ready_at then', "if false then", RL),
-    (C, "if f ~= 1 then F.ready_at", "if false then F.ready_at", RL),
-    (C, "(reload_len[F.utype] or E.D.shots[F.utype][2]) * f", "E.D.shots[F.utype][2] * f", RL),
+    # (2026-10-16: the clip-length scaling went with "the game's reload time decides"; the factor itself)
+    (C, "F.ready_at = now + E.D.shots[F.utype][2] * E.S.reload_factor\n", "F.ready_at = now + E.D.shots[F.utype][2]\n", RL),
     (G, 'slider("camera", "camera_height"', 'local _ = ("camera", "camera_height"', "mct_defaults_agree_with_settings"),
 ]

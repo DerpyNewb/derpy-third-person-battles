@@ -1,6 +1,6 @@
 L = "script/derpy_tp/platform.lua"
 MV = "script/derpy_tp/move.lua"
-LEAD = "P.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw)"
+LEAD = "P.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw, speed)"
 STOP = 'if mr.eq(command, walk_a) or mr.eq(command, walk_b) then mr.call(walk_stop, "pointer(pointer)", m) end'
 MUTANTS = [
     # walking: his own walk takes the point in place, anything else is replaced natively
@@ -23,11 +23,11 @@ MUTANTS = [
     (L, STOP, 'mr.call(walk_stop, "pointer(pointer)", m)', "holding_still_leaves_a_standing_man_alone"),
     (L, STOP, "", "holding_still_stops_a_running_walk_natively"),
     (L, "end\n\t\tP.face(m, yaw)\n\tend", "end\n\tend", "holding_still_leaves_a_standing_man_alone"),
-    (MV, "P.hold(m, F.man_hold[1], F.man_hold[2], F.face_yaw or E.rig.yaw)", "P.steer(m, F.man_hold[1], F.man_hold[2], false, E.rig.yaw)", "one_man_walks_alone"),
+    (MV, "P.hold(m, F.man_hold[1], F.man_hold[2], not sw and (F.face_yaw or E.rig.yaw) or nil)", "P.steer(m, F.man_hold[1], F.man_hold[2], false, E.rig.yaw)", "one_man_walks_alone"),
     (MV, "P.hold(F.model, x, z, F.face_yaw or E.rig.yaw)", "P.steer(F.model, x, z, false, E.rig.yaw)", "one_man_stop_cancels_its_lead_point"),
     (MV, "if F.model and P.alive(F.unit, F.model) then", "if false then", "one_man_stop_cancels_its_lead_point"),
     (MV, LEAD, "P.place(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD) " + LEAD, "one_man_never_nudges_through_a_wall"),
-    (MV, LEAD, LEAD.replace(", F.face_yaw)", ")"), "solo_moves_with_own_facing_and_run_toggle"),
+    (MV, LEAD, LEAD.replace(", F.face_yaw, speed)", ", nil, speed)"), "solo_moves_with_own_facing_and_run_toggle"),
     # starting and the fallback
     ("script/derpy_tp/main.lua", "and P.features.steer and not F.arty", "and not F.arty", "unknown_walk_commands_play_the_regiment_whole"),
     ("script/derpy_tp/main.lua", "F.uc:halt()", "do end", "solo_start_cancels_the_existing_attack_order"),

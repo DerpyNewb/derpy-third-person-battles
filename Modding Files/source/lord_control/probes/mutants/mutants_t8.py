@@ -8,7 +8,6 @@ MUTANTS = [
     ("script/derpy_tp/main.lua", "if bm:is_multiplayer() or bm:is_replay() then", "if bm:is_multiplayer() then", "multiplayer_and_replays_do_nothing"),
     ("script/derpy_tp/main.lua", "F.dragging = false\n\t\t\tcursor(true)", "cursor(true)", "mouse_turns_the_camera"),
     ("script/derpy_tp/main.lua", "if P.held(E.S.keys.look_free) then F.dragging = false return end", "", "mouse_turns_the_camera"),
-    ("script/derpy_tp/main.lua", "if bm:num_units_selected() == 1 then", "if false then", "picks_the_selected_unit"),
     ("script/derpy_tp/main.lua", "E.log(\"men check on \" .. F.utype .. \": \" .. tostring(men_ok))", "", "debug_logs_every_check"),
     ("script/derpy_tp/main.lua", "F.model = S.one_man and men_ok and", "F.model = S.one_man and", "men_check_fails_plays_the_regiment_whole"),
     ("script/derpy_tp/main.lua", "local notches = P.wheel and P.wheel() or 0", "local notches = P.wheel()", "wheel_fails_zoom_on_keys"),

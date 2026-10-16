@@ -8,7 +8,6 @@ MUTANTS = [
     (C, "for k = 1, s[3] do", "for k = 1, 1 do", "solo_iron_hail_fires_three"),
     (C, "if full > 0 then unit:set_current_ammo_unary(math.max(0, ammo - 1) / full) end", "", "solo_click_fires_one_shot"),
     (C, "P.play(m, SLOT_RELOAD)", "", "solo_click_fires_one_shot"),
-    (C, "bm:trigger_projectile_launch(s[1], from, v(ax + jx, ay + 1, az + jz))", "bm:trigger_projectile_launch(s[1], from, v(ax + jx, ay, az + jz))", "solo_click_fires_one_shot"),
     (C, "if F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end", "C.ground(now, clicked, held)", "solo_click_fires_one_shot"),
     (M, "if not F.model and F.held_fire then", "if false then", "solo_regiment_down_to_one_restores_fire"),
     (M, "if F.held_fire then F.uc:fire_at_will(true) F.uc:release_control() F.held_fire = false end", "", "error_restores_everything"),

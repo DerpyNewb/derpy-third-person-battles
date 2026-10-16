@@ -9,6 +9,11 @@ local M = {}
 -- RVA here must be exact in float32, which tools/third_person_patterns.py checks.
 local BUILDS = {
 	["6ac6d907"] = {cmd_type = 0x3901cd0, battle = 0x4479ee0, cmd_push = 0x2e969ac, battle_sub = 0x468, gate_a = 0x3b0, gate_b = 0x3b1, queue = 0x644e8, walk_a = 0x3912b98, walk_b = 0x3add278, walk_start = 0x306a8fc, walk_speed = 0x3036640, walk_stop = 0x3069d7c},
+	-- the 2026-10-16 patch: walk fields found on disk by the call graph 6ac6d907 recorded (each slot's callee, the
+	-- constructor loading walk_b, its caller on model+0x328/+0x330, the speed call on model+0x2e8, the stop on +0x318);
+	-- the walk parameter block the engine's builder writes is unchanged. move_a, move_b, melee: the engine's own moves and
+	-- melee attack on a man, measured live (P.guard)
+	["6acec6f4"] = {cmd_type = 0x39077e8, battle = 0x4480da0, cmd_push = 0x2e9b974, battle_sub = 0x468, gate_a = 0x3b0, gate_b = 0x3b1, queue = 0x644e8, walk_a = 0x3919350, walk_b = 0x3ae2400, walk_start = 0x306f954, walk_speed = 0x303b744, walk_stop = 0x306edd4, move_a = 0x39199f8, move_b = 0x3ae1928, melee = 0x3ad24b8, queued_gate = 0x3087378},
 }
 -- an unknown build: play_anim_for_captain builds the command we forge (9.0: exe+2efc2f8, the only match).
 -- It gives the command type (lea, disp at +3), the battle global (mov, disp at +0x23), the battle object,
@@ -19,6 +24,9 @@ local PATTERN = "48 8D 05 ?? ?? ?? ?? 48 89 44 24 30 48 89 74 24 38 66 44 89 74 
 	.. "48 8D 54 24 30 48 8B 89 ?? ?? ?? ?? E8"
 
 local MODELS_N, MODELS_DATA, MODEL_POS = 0xa4, 0xa8, 0x88 -- unit object: live model count and array; model: x, y, z
+-- model: his maximum and current hit points, int32 (measured 2026-10-15: summed over his men the current is the unit's
+-- CcoBattleUnit HealthValue exactly, for all 16 units of an army, a lord and 200 Plaguebearers among them)
+local MODEL_HP_MAX, MODEL_HP = 0xb18, 0xb1c
 -- Persistent steering copies. The point at +0x368/+0x370 belongs to the polymorphic command at +0x330;
 -- in a state-change command +0x368 is an integer animation state (2026-10-13 crash, exe+3082cb7).
 local STEER = {{0x1e0, 0x1e8}, {0x194, 0x198}}
@@ -187,10 +195,20 @@ function M.build(mr)
 		P.features.anim = true
 		return true
 	end
+	-- a man's animation fragment, +0x308 (what P.has_slot reads): a u16 clip index per slot from +0x50, 0xffff for none,
+	-- one per regiment and skeleton. P.disarm points the man played alone at a copy with no attack clips
+	local FRAG, FRAG_COPY = 0x308, 0x50 + 6004 * 2 -- a fragment is 0x1284; a slot scan read 6000 slots past each safely
+	local function is_attack(s) return s >= 454 and s <= 463 or s >= 484 and s <= 500 or s >= 1901 and s <= 1950 end
+	local copy_of, orig_of = {}, {} -- by address: the regiment's fragment -> its copy, and back
+	local function unpoint(x)
+		local o = orig_of[mr.tostring(mr.read_pointer(x, FRAG))]
+		if o then mr.write(x, FRAG, o) end
+	end
 	function P.play(m, slot, mask) -- mask 6 holds a full-body clip even when it has no event metadata
 		if not P.features.anim then return false end
 		local b = battle_obj()
 		if not b or mr.read_uint8(b, A.gate_a) ~= 0 or mr.read_uint8(b, A.gate_b) ~= 0 then return false end
+		if is_attack(slot) then unpoint(m) end -- his own swing, on his own table: on the copy the engine finds no clip
 		mr.write(cmd, 0, A.cmd_type)
 		mr.write(cmd, 8, m)
 		mr.write(cmd, 0x10, mr.uint16(slot))
@@ -199,6 +217,23 @@ function M.build(mr)
 		mr.call(A.push, "uint8(pointer, pointer)", mr.read_pointer(b, A.queue), cmd)
 		return true
 	end
+	-- A pushed clip waits in his queued action slot (+0x5c8) until his update (exe+3086f04) runs it, and it resets it
+	-- instead on any tick an order reached him (+0x324 not 0); in a melee his regiment orders him every tick (measured
+	-- 2026-10-16, probes/zz_tp_melee_spam.lua, Teutogen Guard under two units, a click every 2.4 s): 4 and 0 swings of
+	-- 10 started. That jump (exe+3087388, to the reset at exe+30873e6) sent to his action update (exe+30873dc) instead:
+	-- 10 and 10, in 200-400 ms. Game code, so it runs on the battle thread, with nothing to race.
+	-- ponytail: while it is in, a queued action on ANY man beats that tick's order; in a battle the pack plays only
+	-- P.play queues one. A per-man check needs a code cave
+	local GATE = {0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09, 0x44, 0x38, 0xbf, 0, 0x06, 0, 0, 0x75}
+	local gate = row and row.queued_gate and mr.patch and at(base, row.queued_gate)
+	local function gate_bytes(jump) local t = {unpack(GATE)} t[#t + 1] = jump return string.char(unpack(t)) end
+	local reset, update = gate_bytes(0x5c), gate_bytes(0x52)
+	function P.gate(on) -- memreader's patch writes only over the bytes it expects
+		if not gate then return false end
+		if on then return mr.patch(gate, reset, update) ~= nil end
+		return mr.patch(gate, update, reset) ~= nil
+	end
+	P.gate(false) -- a battle left while it was in (no stop) left it in
 
 	-- the wheel: our own DirectInput 8 mouse, one per battle, kept in a global so a reload reuses it -----
 	function P.open_wheel()
@@ -257,9 +292,14 @@ function M.build(mr)
 		return t
 	end
 	function P.model_pos(m) return mr.read_float(m, MODEL_POS), mr.read_float(m, MODEL_POS + 4), mr.read_float(m, MODEL_POS + 8) end
+	function P.model_hp(m)
+		m = P.mount(m) or m
+		return mr.read_int32(m, MODEL_HP), mr.read_int32(m, MODEL_HP_MAX)
+	end
 	function P.has_slot(m, slot) -- engine lookup exe+1482074; checks the model's active fragment, including mods
 		if not P.features.steer then return false end
-		local anim = mr.read_pointer(m, 0x308)
+		local anim = mr.read_pointer(m, FRAG)
+		anim = orig_of[mr.tostring(anim)] or anim -- disarmed, he still has his swings
 		return not mr.is_null(anim) and mr.read_uint16(anim, 0x50 + slot * 2) ~= 0xffff
 	end
 	function P.reload_slot(m)
@@ -267,7 +307,7 @@ function M.build(mr)
 		if P.has_slot(m, 1554) then return 1554 end
 	end
 	function P.mount(m)
-		if not P.has_slot(m, 1901) then return nil end
+		if not P.features.steer then return nil end
 		local parent = mr.read_pointer(m, 0x2e0) -- rider parent, also followed by native exe+305468c
 		if not mr.is_null(parent) then return parent end
 	end
@@ -277,18 +317,22 @@ function M.build(mr)
 	end
 	function P.face(m, yaw)
 		if not P.features.steer or not yaw then return nil end
+		m = P.mount(m) or m
 		local angle = math.floor((yaw % (2 * math.pi)) * 0x10000 / (2 * math.pi))
 		mr.write(m, 0xb0, mr.uint16(angle))
 		return angle
 	end
 	function P.place(m, x, z) mr.write(m, MODEL_POS, x) mr.write(m, MODEL_POS + 8, z) end
-	function P.steer(m, x, z, run, yaw)
+	-- scale: times the engine's own speed for his gait (a sprint's 1.2)
+	function P.steer(m, x, z, run, yaw, scale)
+		m = P.mount(m) or m
 		for _, f in ipairs(STEER) do mr.write(m, f[1], x) mr.write(m, f[2], z) end
 		if not P.features.steer then return end
 		local angle = P.face(m, yaw)
 		local command = mr.read_pointer(m, 0x330)
 		local unit = mr.read_pointer(m, 0x2e8)
 		local speed = not mr.is_null(unit) and mr.call(walk_speed, "float(pointer, uint8)", unit, run and 1 or 0)
+		if speed and scale then speed = speed * scale end
 		if mr.eq(command, walk_b) then
 			local moved = mr.read_float(m, 0x368) ~= x or mr.read_float(m, 0x370) ~= z
 			mr.write(m, 0x368, x)
@@ -311,24 +355,84 @@ function M.build(mr)
 			mr.call(walk_start, "pointer(pointer, pointer)", m, walk)
 		end
 	end
+	-- what he is doing, for the log: "walk" under our walk or the engine's, else "other" (a fight, a stand, a clip)
+	function P.command(m)
+		if not P.features.steer then return nil end
+		local c = mr.read_pointer(m, 0x330)
+		return (mr.eq(c, walk_a) or mr.eq(c, walk_b)) and "walk" or "other"
+	end
 	-- Holding still. Measured 2026-10-14 (probes/tp_cmd_trace.py): a walk that has reached its point, or was
 	-- refreshed toward his own feet, keeps him moving until its command is replaced, and while F2 held him
 	-- nothing replaced it. The engine's own stop, exe+3069d7c, swaps a running walk for "stand in his state"
 	-- (390cba8, what uc:halt leaves on each man); any other command is the engine's to finish.
 	function P.hold(m, x, z, yaw)
+		m = P.mount(m) or m
 		for _, f in ipairs(STEER) do mr.write(m, f[1], x) mr.write(m, f[2], z) end
 		if not P.features.steer then return end
 		local command = mr.read_pointer(m, 0x330)
 		if mr.eq(command, walk_a) or mr.eq(command, walk_b) then mr.call(walk_stop, "pointer(pointer)", m) end
 		P.face(m, yaw)
 	end
+	-- The engine's own orders on a man played alone, stopped by its own stop (measured 2026-10-16,
+	-- probes/zz_tp_regiment_test.lua, Kossars in a lasting melee, nobody at the keys): the regiment's walk, two moves
+	-- and the melee attack moved him 24.1 m in 30 s; stopped, 11 m, 8.5 m of it standing. The stop destroys any
+	-- command, so the list is what was measured. Left to run: his idle (3919b28: stopped, a regiment charging past
+	-- carried him 31.6 m standing against 4.9 m in it), knockbacks, knockdowns and the getting up, a dead man's
+	local engine = {}
+	if P.features.steer then
+		for _, k in ipairs({"walk_a", "move_a", "move_b", "melee"}) do if row[k] then engine[#engine + 1] = at(base, row[k]) end end
+	end
+	function P.guard(m)
+		m = P.mount(m) or m
+		if #engine == 0 or P.model_hp(m) <= 0 then return false end
+		local c = mr.read_pointer(m, 0x330)
+		for _, e in ipairs(engine) do
+			if mr.eq(c, e) then mr.call(walk_stop, "pointer(pointer)", m) return true end
+		end
+		return false
+	end
+	-- No auto attack (measured 2026-10-16, probes/zz_tp_auto_attack.lua, the High Elves 30 s in a lasting melee, nobody
+	-- at the keys): the stop above lands after the engine's melee has started its swing inside the battle's own tick, and
+	-- the swing plays out - Tyrion swung 917 frames of 1195. On a copy of his fragment whose attack slots read none, the
+	-- engine finds no swing to start on him: 0 (probes/zz_tp_mask_experiment.lua). His regiment keeps the shared one.
+	-- Copies are kept for the battle in a global: a man may still point at one once this module is gone (a dead man)
+	local keep = _G.DERPY_TP_FRAGS or {}
+	_G.DERPY_TP_FRAGS = keep
+	local function point(x)
+		local a = mr.read_pointer(x, FRAG)
+		if mr.is_null(a) or orig_of[mr.tostring(a)] then return end
+		local key = mr.tostring(a)
+		local c = copy_of[key]
+		if not c then
+			local block = mr.alloc(FRAG_COPY)
+			keep[#keep + 1] = block
+			c = mr.add(block, 0) -- a plain pointer, written as the experiment wrote it
+			for off = 0, FRAG_COPY - 8, 8 do mr.write(c, off, mr.read_pointer(a, off)) end
+			for s = 454, 1950 do if is_attack(s) then mr.write(c, 0x50 + s * 2, mr.uint16(0xffff)) end end
+			copy_of[key], orig_of[mr.tostring(c)] = c, a
+		end
+		mr.write(x, FRAG, c)
+	end
+	function P.disarm(m) -- the horse's swings and the rider's
+		if not P.features.steer then return end
+		local body = P.mount(m)
+		if body then point(body) end
+		point(m)
+	end
+	function P.arm(m)
+		if not P.features.steer then return end
+		local body = P.mount(m)
+		if body then unpoint(body) end
+		unpoint(m)
+	end
 	function P.same(a, b) return mr.eq(a, b) end
 	function P.alive(unit, m)
-		for _, x in ipairs(P.models(unit)) do if mr.eq(x, m) then return true end end
+		for _, x in ipairs(P.models(unit)) do if mr.eq(x, m) then return P.model_hp(m) > 0 end end
 		return false
 	end
 	-- the live check (spec section 8), run at every start: the count matches the men alive, every model's
-	-- type marker lies in the exe's image, the models centre within 5 m of the unit, and
+	-- type marker lies in the exe's image, their centre or one of them within 5 m of the unit's position (a deep
+	-- block's centre is 5-6 m behind it, measured 2026-10-15; two men far apart have nobody at it), and
 	-- the steering copies lie near their man or were never set. Measured 2026-10-13: a lord on a Longma is
 	-- another model class than infantry (exe+3ac4908, not +390d4f8); a man never ordered holds 0, 0.
 	local image_end = rva(base, pe + 0x50) -- SizeOfImage
@@ -338,22 +442,25 @@ function M.build(mr)
 		if n < 1 or n ~= unit:number_of_men_alive() then return false, "model count " .. n .. " against " .. unit:number_of_men_alive() .. " men" end
 		local ms = P.models(unit)
 		local lo, hi = mr.tostring(base), mr.tostring(image_end)
-		local sx, sz = 0, 0
+		local q = unit:position()
+		local qx, qz, near, sx, sz = q:get_x(), q:get_z(), 1e18, 0, 0
 		for _, m in ipairs(ms) do
 			-- one unit may hold two classes (measured 2026-10-14: an Ironbreaker regiment's two officers are
 			-- exe+3ac5c40 beside its infantry's +390d4f8, with the same fields); each must still be one of the exe's
 			local s = mr.tostring(mr.read_pointer(m, 0))
 			if s < lo or s >= hi then return false, "a model type is not in the game's exe" end
 			local x, _, z = P.model_pos(m)
-			sx, sz = sx + x, sz + z
+			near, sx, sz = math.min(near, (x - qx) ^ 2 + (z - qz) ^ 2), sx + x, sz + z
+			local body = P.mount(m) or m
 			for _, f in ipairs(STEER) do
-				local tx, tz = mr.read_float(m, f[1]), mr.read_float(m, f[2])
+				local tx, tz = mr.read_float(body, f[1]), mr.read_float(body, f[2])
 				if (tx ~= 0 or tz ~= 0) and (tx ~= tx or tz ~= tz or (tx - x) ^ 2 + (tz - z) ^ 2 > 90000) then return false, "a steering copy is not near its man" end
 			end
 		end
-		local q = unit:position()
-		local dx, dz = sx / n - q:get_x(), sz / n - q:get_z()
-		if dx * dx + dz * dz > 25 then return false, "the models centre " .. math.floor(math.sqrt(dx * dx + dz * dz)) .. " m from the unit" end
+		local centre = (sx / n - qx) ^ 2 + (sz / n - qz) ^ 2
+		if not (near <= 25 or centre <= 25) then
+			return false, "the men centre " .. math.floor(math.sqrt(centre)) .. " m from the unit, the nearest " .. math.floor(math.sqrt(near)) .. " m"
+		end
 		P.features.men = true
 		return true
 	end

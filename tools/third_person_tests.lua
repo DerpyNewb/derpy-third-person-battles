@@ -66,13 +66,16 @@ T.the_follow_delay_comes_from_the_settings = function()
 	check(tight.sx > 5 and loose.sx < 1, "0 s: on him at once; 1 s: still where he was: " .. tight.sx .. ", " .. loose.sx)
 end
 
--- a gun's reload is its own clip (1564); at 100% the clip alone decides, shorter ends it early, longer holds the next
--- shot. Harness clips: aim 1, fire 4, reload 7 s; the data's reload is 13 s, used until a whole clip has been seen
+-- a gun's reload is its own clip (1564), and the game's reload time decides the next shot, the setting's share of it:
+-- a clip shorter than it does not free the shot (the author, 2026-10-16: "reload time not being followed, I can click
+-- fire button when the reloading animation is finished"), shorter cuts the clip. Harness clips: aim 1, fire 4, reload
+-- 7 s; the data's reload is 13 s
 T.the_reload_setting_scales_one_mans_reload = function()
 	local GUN = "wh3_main_cth_inf_iron_hail_gunners_0"
 	local function gap(pct)
 		H.fresh({mct = {combat_reload = pct}, units = {{general = true}, {type = GUN, men = 21, x = 40, range = 160, ammo = 3960}}})
 		H.select(H.units[2]) H.tap("F2") H.step(0.1)
+		H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 		H.down("Left mouse")
 		local times = {}
 		for _ = 1, 60 * 80 do
@@ -86,9 +89,10 @@ T.the_reload_setting_scales_one_mans_reload = function()
 	end
 	local full, half = gap(100), gap(50)
 	local double, double_learned = gap(200)
-	check(double_learned and near(double_learned, 5000 + 14000, 100), "200% of the clip once its length is known: "
+	-- 150 ms: a learned raise's lead counts from its send (combat.lua), a frame before its report here; 30,916 ms before that
+	check(double_learned and near(double_learned, 5000 + 26000, 150), "200% of the game's time, the clip seen or not: "
 		.. tostring(double_learned))
-	check(full and near(full, 12000, 100), "100%: the clip's own pace: " .. tostring(full))
+	check(full and near(full, 5000 + 13000, 100), "100%: the game's reload time, past the 7 s clip: " .. tostring(full))
 	check(half and near(half, 5000 + 6500, 100), "50%: half the reload time, the clip cut: " .. tostring(half))
 	check(double and near(double, 5000 + 26000, 100), "200%: held past the clip: " .. tostring(double))
 end
@@ -331,6 +335,30 @@ T.a_hill_behind_pulls_the_camera_in_not_up = function()
 	check(H.eye.y < 5 and H.eye.z > -6, "pulled in toward him, not lifted over the hill: y " .. H.eye.y .. ", z " .. H.eye.z)
 end
 
+-- the author, 2026-10-15: "camera issue also not fixed, when near the buidling, it should ignore terrain and buildings"
+-- (screenshots: the view on a roof). The engine's floor counts a roof where bm:get_terrain_height does not, and there is
+-- no call to turn it off: the eye comes in along its boom while the engine lifts it, and goes back out once it is clear
+T.a_building_behind_pulls_the_camera_in_not_up = function()
+	general_on()
+	H.step(2)
+	local m = H.units[1]:position()
+	local function boom() return math.sqrt((H.eye.x - m:get_x()) ^ 2 + (H.eye.z - m:get_z()) ^ 2) end
+	local free = boom()
+	H.roof = function(_, z) if z < -1.5 then return 6 end end -- a building behind him, up to 1.5 m off his back
+	H.step(3)
+	local got = H.cam:position()
+	check(got.y - H.eye.y < 0.3, "the engine no longer lifts the eye: asked " .. H.eye.y .. ", put at " .. got.y)
+	check(H.eye.z > -1.5, "it came in toward him, out of the building: z " .. H.eye.z)
+	-- standing still by the wall, the eye stays in: it does not try the roof again and pop up over it
+	local lifted = 0
+	for _ = 1, 300 do H.step(1 / 60) if H.cam:position().y - H.eye.y > 0.3 then lifted = lifted + 1 end end
+	check(lifted == 0, "no frame over the roof in 5 s by the wall: " .. lifted)
+	H.roof = nil
+	H.E.rig.look(60, 0) -- he turns away from it: the eye goes back out
+	H.step(5)
+	check(math.abs(boom() - free) < 0.05, "clear again, it goes back out: " .. boom() .. " against " .. free)
+end
+
 -- the author, 2026-10-15: "near ground the camera goes up above the unit". Measured live: with the floor at (0, 100) the
 -- engine still keeps the eye ~1.55 m over the ground under it (asked 0.53, got 1.58), lifting the whole view; so the
 -- rig never asks for less, and comes in along its boom instead
@@ -344,13 +372,14 @@ end
 
 T.walking_orders_a_single_entity = function()
 	general_on()
+	H.step(0.5) -- clear of the start's halt: an order inside 0.5 s of it is dropped
 	H.down("W")
 	H.step(3)
 	check(H.count("uc:goto_location") == 1, "one order: the unit has not moved within 6 m of its 15 m point")
 	local c = H.last("uc:goto_location")
-	check(near(c[3].z, 15) and c[4] == false, "15 m ahead, walking")
-	H.tap("Shift")
-	check(H.count("uc:goto_location") == 2 and H.last("uc:goto_location")[4] == true, "run toggled re-orders")
+	check(near(c[3].z, 15) and c[4] == true, "15 m ahead, running")
+	H.tap("Z")
+	check(H.count("uc:goto_location") == 2 and H.last("uc:goto_location")[4] == false, "walk toggled re-orders")
 	H.up("W")
 	H.step(0.1)
 	check(H.count("uc:halt") >= 1, "releasing W halts")
@@ -528,10 +557,25 @@ T.clicking_another_unit_keeps_the_controlled_one_selected = function()
 	check(H.last("select_in_ui")[2] == u._id, "by selecting it in the UI")
 end
 
+-- the author, 2026-10-15: "there are alsop instances that the camera jumps one unit to another". Log: card 1010 clicked,
+-- F2 took 1012, the unit before - the set kept from selection callbacks still held it. CA's helper runs them all from
+-- one selection handler, which another script can take over, and then no callback comes. F2 asks the game
+T.f2_takes_the_unit_the_game_has_selected = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}, {type = "wh_test_melee", men = 21, x = 80}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1) H.tap("F2") H.step(0.1)
+	H.sel, H.selected = {[H.units[3]] = true}, H.units[3] -- the third clicked; no callback told
+	H.tap("F2") H.step(0.1)
+	check(H.E.F.unit == H.units[3], "the unit the game has selected: got the unit " .. H.E.F.unit._id)
+	H.sel, H.selected = {[H.units[2]] = true}, H.units[2] -- in play, another clicked with no callback
+	H.step(0.1)
+	check(H.selected == H.units[3] and H.sel[H.units[3]] and not H.sel[H.units[2]], "his unit selected again")
+end
+
 T.shift_clicking_another_unit_drops_it_again = function()
 	local u = playing({type = "wh_test_melee", men = 21, x = 40})
 	local g = H.units[1]
-	for _, cb in ipairs(H.selection_cbs) do if cb[1] == g then cb[2](g, true) end end -- added, his stays
+	H.sel[g] = true -- shift-clicked: added, his stays
+	for _, cb in ipairs(H.selection_cbs) do if cb[1] == g then cb[2](g, true) end end
 	local n = H.count("clear_selection")
 	H.step(0.1)
 	check(H.count("clear_selection") > n and H.selected == u, "only the controlled unit stays selected")
@@ -552,6 +596,7 @@ T.swing_plays_on_one_man_with_cooldown = function()
 	H.tap("Left mouse")
 	local p = H.all("play")
 	check(#p == 1 and p[1][2] == 2011 and p[1][3] == 454, "ATTACK_1 on the front man only")
+	H.E.F.model.anim_end = H.game_ms + 100 H.step(0.3) -- a short clip: its hold is over, the cooldown is not
 	H.tap("Left mouse")
 	check(H.count("play") == 1, "no second swing inside 1.5 s")
 	H.step(1.5)
@@ -562,7 +607,7 @@ end
 T.swing_falls_back_to_an_attack_order = function()
 	H.fresh({features = {input = true, anim = false, wheel = true}, enemies = {{z = 30, men = 10}}})
 	H.tap("F2")
-	H.step(0.1)
+	H.step(0.6) -- clear of the start's halt
 	H.tap("Left mouse")
 	check(H.count("play") == 0, "no forged swing without the animation command")
 	check(H.count("uc:attack_unit") == 1 and H.last("uc:attack_unit")[3] == H.enemies[1], "an attack order on the enemy ahead")
@@ -598,6 +643,7 @@ end
 
 T.ground_fire_commits_one_shot = function()
 	local u = playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
+	H.step(0.5) -- clear of the start's halt
 	local halts = H.count("uc:halt")
 	check(H.E.F.ranged, "a unit that can shoot starts in ranged mode")
 	H.tap("Left mouse")
@@ -624,6 +670,7 @@ end
 
 T.ground_fire_turns_first = function()
 	local u = playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
+	H.step(0.5) -- clear of the start's halt
 	H.mouse = {393, 0} -- a quarter turn of the camera
 	H.step(1 / 60)
 	H.tap("Left mouse")
@@ -663,6 +710,17 @@ T.crosshair_shows_in_ranged_mode_only = function()
 end
 
 local XBOW = "wh3_main_cth_inf_jade_warrior_crossbowmen_1"
+-- how far p lies off the camera's ray, the line through the screen centre: the crosshair
+local function off_crosshair(p)
+	local R = H.E.rig
+	local dx, dy, dz = R.lx - R.ex, R.ly - R.ey, R.lz - R.ez
+	local n = math.sqrt(dx * dx + dy * dy + dz * dz)
+	dx, dy, dz = dx / n, dy / n, dz / n
+	local wx, wy, wz = p.x - R.ex, p.y - R.ey, p.z - R.ez
+	local cx, cy, cz = wy * dz - wz * dy, wz * dx - wx * dz, wx * dy - wy * dx
+	return math.sqrt(cx * cx + cy * cy + cz * cz)
+end
+
 local function crossbowmen(extra)
 	local o = {type = XBOW, men = 21, x = 40, range = 160, ammo = 3960}
 	for k, val in pairs(extra or {}) do o[k] = val end
@@ -685,10 +743,16 @@ end
 T.solo_click_fires_one_shot = function()
 	local u = crossbowmen()
 	H.tap("Left mouse")
-	H.step(1.5) -- 1 s raising to aim, then the bolt 300 ms into the firing clip
+	H.step(1.5) -- 1 s raising to aim, then the bolt at the firing clip's start (its FIRE_POS is at 0)
+	check(H.E.F.shot and H.E.F.shot.phase == "fire", "the bolt is off; the firing clip still runs his shot")
 	local l = H.all("launch")
 	check(#l == 1 and l[1][2] == "wh3_cth_crossbow_bolt", "one crossbow bolt")
-	check(near(l[1][3].y, 1.5) and near(l[1][4].y, 1), "from his chest, to 1 m above the aim")
+	local _, my = H.E.P.model_pos(H.E.F.model)
+	check(near(l[1][3].y, my + 1.06, 0.01), "from the crossbow, 1.06 m up (its FIRE_POS): " .. l[1][3].y)
+	-- looking level the crosshair meets no ground in his 160 m: the bolt flies along it to his reach
+	local mx, _, mz = H.E.P.model_pos(H.E.F.model)
+	check(off_crosshair(l[1][4]) < 0.05 and near(math.sqrt((l[1][4].x - mx) ^ 2 + (l[1][4].z - mz) ^ 2), 160, 0.1),
+		"along the crosshair to his reach: " .. off_crosshair(l[1][4]) .. " m off it")
 	check(u._ammo == 3959, "one bolt off the regiment's ammo, got " .. u._ammo)
 	local p = H.all("play")
 	check(#p == 2 and p[1][2] == 2011 and p[1][3] == 1554 and p[2][3] == 1557, "he raised to aim; the firing animation is still playing")
@@ -698,12 +762,15 @@ T.solo_click_fires_one_shot = function()
 end
 
 T.solo_hold_repeats_at_the_reload_pace = function()
-	crossbowmen({reload_slot = 1564}) -- harness clips: aim 1 s, fire 4 s, reload 7 s; shots at 1.3, 13.3, 25.3 s
+	-- harness clips: aim 1 s, fire 4 s, reload 7 s, under the game's 13 s reload: shots at 1.3, 19.3, 37.3 s
+	crossbowmen({reload_slot = 1564})
 	H.down("Left mouse")
 	H.step(7)
 	check(H.count("launch") == 1, "still reloading: no timer-based repeat")
 	H.step(19)
-	check(H.count("launch") == 3, "held fire repeats after each complete aim/fire/reload cycle")
+	check(H.count("launch") == 2, "held fire repeats once the reload time is over")
+	H.step(18)
+	check(H.count("launch") == 3, "and again a whole cycle later")
 end
 
 T.solo_click_during_reload_is_kept = function()
@@ -760,6 +827,7 @@ end
 
 T.solo_projectile_delay_uses_model_time = function()
 	crossbowmen()
+	H.E.D.fires[H.E.F.utype] = {{0.3}} -- a spawn into the clip (the jade crossbow's own is at 0)
 	H.tap("Left mouse") H.step(1.1) -- past the 1 s raise to aim, inside the firing clip
 	H.paused = true H.step(2)
 	check(H.all("play")[2][3] == 1557 and H.count("launch") == 0, "pausing the firing clip pauses its release")
@@ -774,7 +842,8 @@ T.solo_idle_animation_cannot_count_as_a_reload = function()
 	H.E.F.shot.started = false
 	man.anim_slot, man.anim_end = 1439, nil
 	H.step(10)
-	check(H.count("launch") == 1 and H.E.F.shot.phase == "reload", "idle clips never mark an unplayed reload complete")
+	-- round 25: an unstarted clip gives up after LOCK_WAIT, so he is not rooted; the reload's time still holds the shot
+	check(H.count("launch") == 1 and H.E.F.ready_at > H.model_ms() / 1000, "an unplayed reload never counts as done")
 end
 
 
@@ -794,6 +863,21 @@ T.solo_dead_man_launches_nothing = function()
 	H.step(0.5)
 	check(H.count("launch") == 0 and u._ammo == 3960, "he died in his fire animation: no bolt, no ammo")
 	check(H.E.F.model and H.E.F.model ~= man, "the next front-centre man took over")
+end
+
+-- a next man who cannot shoot alone is played all the same, in melee: never his regiment whole (the author, 2026-10-15,
+-- of the hand-over to it: "it happens when switching to ranged", "it also triggers the whole battalion to shoot or throw")
+T.a_next_man_who_cannot_shoot_alone_is_played_in_melee = function()
+	local u = crossbowmen()
+	local man = H.E.F.model
+	for _, m in ipairs(u._models) do if m ~= man then m.slots = {[42] = true, [454] = true} end end -- no fire clip
+	man.alive = false
+	H.step(0.1)
+	check(H.E.F.model ~= nil and H.E.F.model ~= man and not H.E.F.ranged, "the next man, in melee")
+	local next_man = H.E.F.model
+	H.tap("Right mouse") H.step(0.1)
+	check(H.E.F.model == next_man and not H.E.F.ranged, "the mode key: still him, no ranged mode")
+	check(H.count("uc:attack_location") == 0, "the regiment is never ordered to fire")
 end
 
 T.solo_ammo_runs_out = function()
@@ -1194,8 +1278,167 @@ T.pause_holds_fire = function()
 	check(H.count("launch") == 1, "unpaused and still held: he shoots")
 end
 
+-- the author, 2026-10-16: "battalion actions also affect the unit which shouldnt be and its moving itself the unit
+-- whenever the battalion is affected". The engine's own orders on the man played alone are stopped every frame the
+-- battle runs: idle, and under a swing; never paused
+T.the_man_played_alone_is_kept_from_the_engines_orders = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local man = H.E.F.model
+	local n = H.count("guard")
+	H.step(1)
+	check(man and H.count("guard") - n >= 55, "every frame: " .. H.count("guard") - n)
+	check(H.last("guard")[2] == man.id, "on him")
+	H.tap("Left mouse") H.step(0.1)
+	n = H.count("guard")
+	H.step(0.3)
+	check(H.E.F.lock and H.count("guard") - n >= 15, "under a swing too: " .. H.count("guard") - n)
+	H.paused = true
+	H.step(1)
+	n = H.count("guard")
+	H.step(1)
+	check(H.count("guard") == n, "paused: nothing")
+end
+
+T.a_regiment_played_whole_is_not_guarded = function()
+	H.fresh({units = {{general = true, men = 20}}})
+	H.P.features.steer = false
+	H.tap("F2") H.step(1)
+	check(H.E.F.on and H.E.F.model == nil and H.count("guard") == 0, "played whole: " .. H.count("guard"))
+	check(H.count("disarm") == 0, "and not disarmed: " .. H.count("disarm"))
+end
+
+-- measured live 2026-10-16 (probes/zz_tp_auto_attack.lua, the High Elves 30 s in a lasting melee, nobody at the keys):
+-- the stop above lands after the engine's swing has started, and the swing plays out - Tyrion swung 917 frames of
+-- 1195, Calith 113 of 135. His fragment pointed at a copy with no attack clips: 0 and 0 (probes/zz_tp_mask_experiment.lua).
+-- Disarmed every frame he is played; armed for his own swing until its clip is over, and at the end
+T.the_man_played_alone_has_no_swing_but_his_own = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local man = H.E.F.model
+	check(H.last("disarm") and H.last("disarm")[2] == man.id, "disarmed as he is taken")
+	H.tap("Left mouse")
+	check(H.last("arm") and H.last("arm")[2] == man.id, "his own swing arms him")
+	local n = H.count("disarm")
+	H.step(2)
+	check(H.E.F.lock or H.E.F.swung, "the clip still under way")
+	check(H.count("disarm") == n, "never disarmed under his own clip: " .. H.count("disarm") - n)
+	H.step(3)
+	check(not H.E.F.lock and not H.E.F.swung and H.count("disarm") > n, "disarmed again once it is over")
+	H.step(2)
+	H.tap("E") -- a jump attack: a lock, no swing kept past it
+	n = H.count("disarm")
+	H.step(0.5)
+	check(H.E.F.lock and not H.E.F.swung and H.count("disarm") == n, "never disarmed under his jump")
+	H.step(4)
+	check(not H.E.F.lock and H.last("disarm")[2] == man.id, "disarmed again before the end")
+	local a = H.count("arm")
+	H.tap("F2")
+	n = H.count("disarm")
+	H.step(0.5)
+	check(H.count("arm") > a and H.last("arm")[2] == man.id and H.count("disarm") == n, "armed at the end and left so")
+end
+
+-- the gate (a_queued_swing_beats_the_ticks_order) is in while a man is played alone, and only then
+T.the_gate_is_in_while_a_man_is_played_alone = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	check(H.last("gate") and H.last("gate")[2] == true, "on as he is taken")
+	H.tap("F2") H.step(0.5)
+	check(H.last("gate")[2] == false, "off at the end")
+	local n = H.count("gate")
+	H.tap("F2") H.step(0.5)
+	check(H.E.F.on and H.count("gate") == n + 1, "on again with the next start")
+	H.fresh({units = {{general = true, men = 20}}})
+	H.P.features.steer = false
+	H.tap("F2") H.step(0.5)
+	check(H.E.F.on and H.E.F.model == nil and H.count("gate") == 0, "a regiment played whole leaves the game's own")
+	H.tap("F2") H.step(0.5)
+	check(H.count("gate") == 0, "and its stop too")
+end
+
+-- a unit of one played whole: CA's attack order is his swing
+T.a_single_entitys_attack_order_arms_him = function()
+	H.fresh({features = {input = true, anim = false, wheel = true}, enemies = {{z = 30, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	local man = H.units[1]._models[1]
+	check(H.last("disarm") and H.last("disarm")[2] == man.id, "disarmed while nothing is ordered")
+	H.tap("Left mouse") H.step(0.1)
+	check(H.E.F.native_attack and H.last("arm") and H.last("arm")[2] == man.id, "armed for his attack order")
+	local n = H.count("disarm")
+	H.step(1)
+	check(H.count("disarm") == n, "and kept so")
+end
+
+-- nothing is written to a dead man (his model may be gone); the next man is disarmed
+T.the_next_man_is_disarmed_and_the_dead_left_alone = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local man = H.E.F.model
+	man.hp = 0
+	H.step(0.1)
+	local now = H.E.F.model
+	check(now and now ~= man and H.last("disarm")[2] == now.id, "the next man disarmed")
+	H.tap("F2") H.step(0.1)
+	for _, c in ipairs(H.all("arm")) do check(c[2] ~= man.id, "nothing written to the dead man") end
+	check(H.last("arm") and H.last("arm")[2] == now.id, "the next man armed at the end")
+	H.fresh() H.tap("F2") H.step(0.1)
+	local lord = H.units[1]._models[1]
+	check(H.last("disarm")[2] == lord.id, "a unit of one disarmed")
+	lord.hp = 0
+	H.step(0.1)
+	check(not H.E.F.on and H.count("arm") == 0, "dead, he is left alone")
+end
+
+-- measured live 2026-10-16 (probes/zz_tp_melee_spam.lua, Teutogen Guard in a real melee, the key every 0.25 s): of 10
+-- swings sent, 3 never played - each sent while he blocked (DEFEND_1/2, 474/475, under the engine's defend command 3ae2de8),
+-- which holds a queued clip back until the block ends. The lock gave up after LOCK_WAIT, he was disarmed, and the swing
+-- found no clip when the block ended (the author: "spamming melee button when near enemy still doesnt work"). Armed until
+-- it has played, LOCK_MAX at most: 8 of 10 played, the other replaced by the next click's
+T.a_swing_held_back_by_a_block_still_plays = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local man = H.E.F.model
+	H.report_ms = 1500 -- held back 1.5 s, past LOCK_WAIT
+	H.tap("Left mouse")
+	H.step(1.2)
+	check(not H.E.F.lock, "the lock gave up: he is free to move")
+	local n = H.count("disarm")
+	H.step(0.5)
+	check(H.E.P.anim_slot(man) == 454, "the swing plays")
+	H.step(2) -- 3.7 s: the 4 s clip still playing, past LOCK_MAX
+	check(H.E.P.anim_slot(man) == 454, "still playing")
+	check(H.count("disarm") == n, "never disarmed while it waited or played: " .. H.count("disarm") - n)
+	H.step(2)
+	check(H.count("disarm") > n, "disarmed once it is over")
+end
+
+T.a_swing_that_never_plays_gives_him_back_after_lock_max = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.report_ms = 60000 -- never
+	H.tap("Left mouse")
+	H.step(2.5)
+	local n = H.count("disarm")
+	H.step(0.3)
+	check(H.count("disarm") == n, "still armed 2.8 s after the send")
+	H.step(0.5)
+	check(H.count("disarm") > n, "disarmed past LOCK_MAX")
+end
+
+-- the author, 2026-10-15: "the unit being controlled bugs out and will not respond if near an enemy". The recorder: W let
+-- go and pressed again 0.4 s later; the walk order went out and the engine kept him ordered to his own spot, idle, for as
+-- long as W was held. It drops an order within 0.5 s of the one before (the halt), and nothing sent it again
+-- (round 25: every order the script sends now waits STEER_GAP, so the drop is the engine's own - an order the script did
+-- not send, or a window wider than the 0.5 s measured)
+T.a_walk_order_the_engine_dropped_is_sent_again = function()
+	general_on()
+	H.step(1)
+	H.E.F.unit._order_t = H.T -- an order the script never saw, just now
+	H.down("W") H.step(2)
+	local u = H.E.F.unit
+	check(H.count("dropped_order") >= 1, "the walk after the halt was dropped")
+	check(u:ordered_position():get_z() > u:position():get_z() + 10, "he is ordered on, not left where he stood: ordered z "
+		.. u:ordered_position():get_z())
+end
+
 T.walking_orders_keep_half_a_second_apart = function()
 	general_on()
+	H.step(0.5) -- clear of the start's halt: an order inside 0.5 s of it is dropped
 	H.down("W")
 	H.step(0.1)
 	H.down("D") H.step(0.1) H.up("D") H.step(0.1) H.down("A") H.step(0.1) H.up("A") H.step(0.1)
@@ -1277,6 +1520,7 @@ end
 
 T.solo_dead_man_launches_nothing_before_the_frame_sees_it = function()
 	local u = crossbowmen()
+	H.E.D.fires[H.E.F.utype] = {{0.3}} -- a spawn into the clip (the jade crossbow's own is at 0)
 	H.tap("Left mouse") H.step(1.1) -- past the 1 s raise to aim, inside the firing clip, before its release
 	check(H.E.F.shot.phase == "fire" and H.count("launch") == 0, "firing, not yet released")
 	H.timers["derpy_tp"] = nil -- exercise combat without the frame's model replacement
@@ -1415,7 +1659,7 @@ T.platform_animation_slot_expires_with_its_native_handle = function()
 	check(P.anim_slot(m) == 1564, "a reload without metadata stays active through its body mask")
 end
 -- one unit of men in the fake image; each man {x =, z =, marker = address, steer = three {x, z} copies}
-local function fake_unit(mr, put, BASE, men)
+local function fake_unit(mr, put, BASE, men, at)
 	local UD, OBJ, DATA = BASE + 0x6000000, BASE + 0x6000100, BASE + 0x6001000
 	put(UD + 8, OBJ, 8) put(OBJ + 0xa4, #men, 4) put(OBJ + 0xa8, DATA, 8)
 	local sx, sz = 0, 0
@@ -1428,11 +1672,24 @@ local function fake_unit(mr, put, BASE, men)
 		sx, sz = sx + m.x, sz + m.z
 	end
 	return {_addr = UD, number_of_men_alive = function() return #men end,
-		position = function() return {get_x = function() return sx / #men end, get_z = function() return sz / #men end} end}
+		position = function() return {get_x = function() return at and at[1] or sx / #men end,
+			get_z = function() return at and at[2] or sz / #men end} end}
 end
 
 -- measured live 2026-10-13 (Cathay, 9.0): men never ordered hold 0, 0 in their steering copies, and the
 -- third copy, which also takes the aim point (handoff 9j), reads half-set
+-- measured 2026-10-15: a deep block's men centre 5.4-6.2 m from the unit's position (Chosen, 160 men 16 wide;
+-- Plaguebearers, 192 men 19 wide), which failed the check and played them whole. A man stands near the unit's position;
+-- a model list that is not this unit's has nobody there
+T.men_check_takes_a_deep_block = function()
+	local P, mr, put, BASE = real_platform()
+	local men = {}
+	for r = 0, 14 do men[#men + 1] = {x = 0, z = -r, marker = BASE + 0x390d4f8, steer = {{0, 0}, {0, 0}, {0, 0}}} end
+	local ok, why = P.check_men(fake_unit(mr, put, BASE, men, {0, 0}))
+	check(ok, "a column 15 m deep, its position at the front: " .. tostring(why))
+	check(not P.check_men(fake_unit(mr, put, BASE, men, {0, 30})), "nobody within 5 m of the unit: not its men")
+end
+
 T.men_check_accepts_men_never_ordered = function()
 	local P, mr, put, BASE = real_platform()
 	local function man(x, z) return {x = x, z = z, marker = BASE + 0x390d4f8, steer = {{0, 0}, {0, 0}, {x, 0}}} end
@@ -1543,33 +1800,204 @@ T.holding_still_leaves_a_standing_man_alone = function()
 	end
 end
 
+-- measured live 2026-10-16 (probes/zz_tp_regiment_test.lua, Kossars in a lasting melee, nobody at the keys): the
+-- commands the engine itself puts on the man played alone moved him 24.1 m in 30 s; stopped with its own stop the
+-- moment they are on him, 11 m, 8.5 m of it standing. On build 6acec6f4: the regiment's walk, two moves and the melee
+-- attack (the auto attack; the author, 2026-10-14: "absolute control and no auto attack")
+local function patched_platform()
+	H.real_platform = true
+	local M = assert(loadfile("/script/derpy_tp/platform"))()
+	H.real_platform = false
+	local mr, put, BASE = fake_image(0x6acec6f4)
+	return M.build(mr), mr, put, BASE
+end
+
+T.the_engines_own_orders_on_him_are_stopped = function()
+	for _, vt in ipairs({0x3919350, 0x39199f8, 0x3ae1928, 0x3ad24b8}) do
+		local P, mr, put, BASE = patched_platform()
+		local m = mr.add(mr.base, 0x6300000)
+		put(m.addr + 0x330, BASE + vt, 8)
+		put(m.addr + 0xb1c, 80, 4)
+		local stopped
+		function mr.call(f, sig, a) if f.addr == BASE + 0x306edd4 then stopped = a end end
+		check(P.guard(m) == true and stopped and stopped.addr == m.addr, string.format("the engine's stop on 0x%x", vt))
+	end
+end
+
+-- left to run: his own walk, clip and stand; the engine's idle (0x3919b28: stopped, a regiment charging past carried
+-- him 31.6 m standing, against 4.9 m in it); a knockback, a knockdown and the getting up (he was hit); a dead man's
+T.his_own_commands_his_idle_and_a_hit_are_left_to_run = function()
+	for _, vt in ipairs({0x3ae2400, 0x3911fb0, 0x39126f0, 0x3919b28, 0x3ae2b38, 0x3ae2a08, 0x3912820}) do
+		local P, mr, put, BASE = patched_platform()
+		local m = mr.add(mr.base, 0x6300000)
+		put(m.addr + 0x330, BASE + vt, 8)
+		put(m.addr + 0xb1c, 80, 4)
+		mr.calls = {}
+		check(P.guard(m) == false and #mr.calls == 0, string.format("0x%x left to run", vt))
+	end
+	local P, mr, put, BASE = patched_platform()
+	local m = mr.add(mr.base, 0x6300000)
+	put(m.addr + 0x330, BASE + 0x3ad24b8, 8)
+	mr.calls = {}
+	check(P.guard(m) == false and #mr.calls == 0, "a dead man's last swing is the engine's")
+end
+
+-- his animation fragment, +0x308: a vtable, then a u16 clip index per slot from +0x50, 0xffff for none; one per
+-- regiment and skeleton (measured 2026-10-16, probes/zz_tp_frag_probe.lua). Writes land in memory here, so a copy
+-- reads back. The fake's qwords are doubles: slot values stay under 32 to keep 4 of them exact in one
+local function fragment_platform()
+	local P, mr, put, BASE = patched_platform()
+	local free = 0x7000000
+	function mr.alloc() free = free + 0x10000 return mr.add(mr.base, free) end
+	function mr.write(p, o, v)
+		mr.writes[#mr.writes + 1] = v mr.wrote[p.addr + o] = v
+		if type(v) == "table" then put(p.addr + o, v.addr, 8) else put(p.addr + o, v, 2) end
+	end
+	local function fragment(addr) put(addr, BASE + 0x39d9448, 8) for s = 0, 2329 do put(addr + 0x50 + s * 2, s % 31, 2) end end
+	return P, mr, put, BASE, fragment
+end
+
+T.the_man_played_alone_points_at_a_fragment_with_no_attack_clips = function()
+	local P, mr, put, BASE, fragment = fragment_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), mr.add(mr.base, 0x6310000)
+	local shared, hshared = BASE + 0x6400000, BASE + 0x6402000
+	fragment(shared) fragment(hshared)
+	put(m.addr + 0x308, shared, 8) put(horse.addr + 0x308, hshared, 8) put(m.addr + 0x2e0, horse.addr, 8)
+	P.disarm(m)
+	local mine, hmine = mr.read_pointer(m, 0x308), mr.read_pointer(horse, 0x308)
+	check(mine.addr ~= shared and hmine.addr ~= hshared and mine.addr ~= hmine.addr, "rider and horse each on a copy")
+	check(mr.read_pointer(mine, 0).addr == BASE + 0x39d9448, "the copy carries the fragment's head")
+	for _, f in ipairs({mine, hmine}) do
+		for _, s in ipairs({454, 459, 463, 484, 494, 500, 1901, 1941, 1950}) do
+			check(mr.read_uint16(f, 0x50 + s * 2) == 0xffff, "no attack clip in slot " .. s)
+		end
+		for _, s in ipairs({0, 42, 135, 453, 464, 483, 501, 1094, 1557, 1564, 1900, 1951, 2329}) do
+			check(mr.read_uint16(f, 0x50 + s * 2) == s % 31, "slot " .. s .. " kept")
+		end
+	end
+	check(mr.read_uint16(mr.add(mr.base, shared - BASE), 0x50 + 454 * 2) == 454 % 31, "his regiment keeps its swings")
+	check(P.has_slot(m, 454) and P.has_slot(horse, 1901), "his own swings still read as his")
+	P.disarm(m)
+	check(mr.read_pointer(m, 0x308).addr == mine.addr, "every frame: the same copy")
+	P.arm(m)
+	check(mr.read_pointer(m, 0x308).addr == shared and mr.read_pointer(horse, 0x308).addr == hshared, "armed: the regiment's again")
+	P.arm(m)
+	check(mr.read_pointer(m, 0x308).addr == shared, "twice is harmless")
+	P.disarm(m)
+	check(mr.read_pointer(m, 0x308).addr == mine.addr, "one copy per fragment, made once")
+end
+
+-- his own swing is pushed with his own table under it, or the engine finds no clip to play
+T.his_own_swing_is_pushed_on_his_own_fragment = function()
+	local P, mr, put, BASE, fragment = fragment_platform()
+	local G, B = BASE + 0x5000000, BASE + 0x5100000
+	put(BASE + 0x4480da0, G, 8) put(G + 0x468, B, 8) put(B + 0x644e8, BASE + 0x5200000, 8)
+	check(P.check_anim(), "the command route")
+	local m, shared = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	fragment(shared)
+	put(m.addr + 0x308, shared, 8)
+	local under
+	function mr.call(f) if f.addr == BASE + 0x2e9b974 then under = mr.read_pointer(m, 0x308).addr end end
+	P.disarm(m)
+	local mine = mr.read_pointer(m, 0x308).addr
+	P.play(m, 42, 0)
+	check(under == mine, "a walk keeps him disarmed")
+	for _, s in ipairs({454, 489, 1902}) do
+		P.disarm(m)
+		under = nil
+		check(P.play(m, s, 6) and under == shared, "his own clip " .. s .. " on his own table")
+	end
+end
+
+T.no_fragment_is_touched_on_another_build = function()
+	local P, mr, put, BASE = real_platform()
+	P.features.steer = false
+	local m = mr.add(mr.base, 0x6300000)
+	put(m.addr + 0x308, BASE + 0x6400000, 8)
+	P.disarm(m)
+	check(mr.wrote[m.addr + 0x308] == nil, "nothing disarmed")
+end
+
+-- his queued clip against the order his regiment gives him each tick of a melee (measured 2026-10-16,
+-- probes/zz_tp_melee_spam.lua, Teutogen Guard under two units, a click every 2.4 s): his update (exe+3086f04) resets a
+-- queued action on a tick an order reached him, 4 and 0 of 10 swings started; its jump at exe+3087388 sent to his
+-- action update instead, 10 and 10. memreader's patch writes only over the bytes it expects
+local GATE_AT = 0x3087378
+local GATE = {0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09, 0x44, 0x38, 0xbf, 0, 0x06, 0, 0, 0x75, 0x5c}
+local function gate_platform(jump, stamp)
+	H.real_platform = true
+	local M = assert(loadfile("/script/derpy_tp/platform"))()
+	H.real_platform = false
+	local mr, put, BASE = fake_image(stamp or 0x6acec6f4)
+	for i, b in ipairs(GATE) do put(BASE + GATE_AT + i - 1, b, 1) end
+	if jump then put(BASE + GATE_AT + #GATE - 1, jump, 1) end
+	local function bytes(a, n) local s = {} for i = 0, n - 1 do s[#s + 1] = mr.read_uint8(mr.base, a - BASE + i) end return s end
+	mr.patches = {}
+	function mr.patch(p, expected, new)
+		mr.patches[#mr.patches + 1] = p.addr
+		local now = bytes(p.addr, #expected)
+		local function same(s) for i = 1, #s do if now[i] ~= s:byte(i) then return false end end return true end
+		if same(new) then return new end
+		if not same(expected) then return nil, "other bytes" end
+		for i = 1, #new do put(p.addr + i - 1, new:byte(i), 1) end
+		return expected
+	end
+	return M.build(mr), mr, BASE, function() return bytes(BASE + GATE_AT, #GATE) end
+end
+
+T.a_queued_swing_beats_the_ticks_order = function()
+	local P, mr, BASE, now = gate_platform()
+	local function jump() return now()[#GATE] end
+	check(jump() == 0x5c, "the game's own jump while nobody is played")
+	check(P.gate(true) and jump() == 0x52, "on: to his action update, got " .. string.format("%x", jump()))
+	for i = 1, #GATE - 1 do check(now()[i] == GATE[i], "byte " .. i .. " of the gate untouched") end
+	check(P.gate(true) and jump() == 0x52, "twice is harmless")
+	check(P.gate(false) and jump() == 0x5c, "off: the game's own again")
+	check(P.gate(false) and jump() == 0x5c, "twice is harmless")
+end
+
+T.a_battle_left_with_the_gate_on_finds_it_off = function()
+	local P, mr, BASE, now = gate_platform(0x52)
+	check(now()[#GATE] == 0x5c, "the platform puts the game's jump back as it loads")
+end
+
+T.the_gate_is_left_alone_where_it_is_not_the_gate = function()
+	local P, mr, BASE, now = gate_platform(0x33) -- other bytes there: a patch moved the code
+	check(not P.gate(true) and now()[#GATE] == 0x33, "nothing written over code it does not know")
+	P, mr, BASE, now = gate_platform(nil, 0x6ac6d907)
+	check(not P.gate(true) and #mr.patches == 0 and now()[#GATE] == 0x5c, "no gate on a build that has none")
+end
+
 T.unknown_walk_commands_play_the_regiment_whole = function()
 	H.fresh({units = {{general = true, men = 20}}})
 	H.P.features.steer = false
-	H.tap("F2")
+	H.tap("F2") H.step(0.5) -- clear of the start's halt
 	H.down("W") H.step(0.1)
 	check(H.E.F.model == nil and H.last("uc:goto_location"), "unknown steering falls back to a regiment move order")
 end
 
 -- seen in game 2026-10-14: Ironbreakers (a modded unit, range 60, not in the shot table, no firing slot) played as
 -- their captain: the fire button ordered the whole regiment to shoot, it walked into range and pulled him back. Then
--- (the author, 2026-10-15) "other ranged units lose their ranged option": a regiment whose man cannot shoot alone is
--- played whole, so its shot is the regiment's and no one man is pulled along
-T.a_regiment_whose_man_cannot_shoot_alone_keeps_its_shot = function()
+-- (the author, 2026-10-15) "pressing f2 will still move the entire battalion", and, with the mode key handing the shot
+-- to the regiment whole: "the camera jumping is also not fixed", "it happens when switching to ranged", "it also
+-- triggers the whole battalion to shoot or throw". A man who cannot shoot alone is played, in melee, with no ranged mode
+T.a_man_who_cannot_shoot_alone_has_no_ranged_mode = function()
 	H.fresh({units = {{general = true, type = "wh_test_mod_grenadiers", men = 20, range = 60, ammo = 10}}})
 	H.tap("F2")
 	H.step(0.1)
-	check(H.E.F.model == nil and not H.E.F.solo, "played whole")
-	check(H.E.F.ranged, "so it starts in ranged mode")
+	local man = H.E.F.model
+	check(man ~= nil and not H.E.F.solo and not H.E.F.ranged, "F2: one man, in melee")
 	H.tap("Right mouse") H.step(0.1)
-	check(not H.E.F.ranged, "and the mode key takes it to melee")
+	check(H.E.F.model == man and not H.E.F.ranged, "the mode key: the same man, still in melee")
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("uc:attack_location") == 0 and H.count("uc:goto_location") == 0, "his regiment is never ordered")
 end
 
 -- seen in game 2026-10-14: a lord in a war machine (Greybeard's tank, 5 crew, not artillery) was steered as one
 -- crewman, who cannot leave his vehicle: nothing moved
 T.a_war_machine_is_played_whole = function()
 	H.fresh({units = {{general = true, men = 5, war_machine = true}}})
-	H.tap("F2")
+	H.tap("F2") H.step(0.5) -- clear of the start's halt: an order inside 0.5 s of it is dropped
 	H.down("W") H.step(0.1)
 	check(H.E.F.model == nil and H.last("uc:goto_location"), "the war machine moves by a unit order")
 end
@@ -1582,9 +2010,12 @@ T.unknown_build_has_no_walk_command_writes = function()
 	local P = M.build(mr)
 	local m = mr.add(mr.base, 0x6300000)
 	put(m.addr + 0x330, BASE + 0x3add278, 8)
+	put(m.addr + 0x2e0, BASE + 0x6400000, 8)
+	check(P.mount(m) == nil, "unknown builds do not follow 9.0's parent offset")
 	mr.calls = {} -- building the platform called the game already
 	P.steer(m, -37.5, 294.8)
 	P.hold(m, -37.5, 294.8)
+	check(P.guard(m) == false, "nothing guarded on another build")
 	check(P.features.steer == false, "unknown build cannot steer one man")
 	check(mr.wrote[m.addr + 0x368] == nil, "9.0's command marker is not assumed on another build")
 	check(#mr.calls == 0, "no 9.0 function is called on another build")
@@ -1748,6 +2179,7 @@ end
 
 T.a_step_does_not_cut_the_aim_or_the_firing_clip = function()
 	crossbowmen({type = GUNNERS})
+	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 	H.tap("Left mouse")
 	local steers = H.count("steer")
 	H.down("W") H.step(1.4)
@@ -1808,7 +2240,7 @@ end
 
 T.solo_moves_with_own_facing_and_run_toggle = function()
 	crossbowmen()
-	H.down("W") H.tap("Shift")
+	H.down("W") H.step(1 / 60)
 	local c = H.last("steer")
 	check(c[5] == true and c[6] == H.E.rig.yaw, "movement passes run and camera facing to the controlled model")
 end
@@ -1897,6 +2329,9 @@ T.the_hud_sits_in_the_bottom_corners_and_centre = function()
 	check(p.x == m and p.y + L.groups.left[2] - L.at.portrait[3] == 1080 - m, "left group at the bottom-left margin")
 	check(math.abs(f.x + f.w / 2 - 960) <= 1, "one slot: centred on the screen: " .. f.x)
 	check(mode.x + L.groups.right[1] == 1920 - m, "right group at the bottom-right margin")
+	local a = hud_part("act_attack_frame")
+	check(a.y == 1080 - m - (L.groups.right[2] + L.stack + L.groups.actions[2]), "room beside one ability: the buttons sit "
+		.. "just over the right plate: " .. a.y)
 end
 
 -- seen in game 2026-10-14: four abilities sat left of centre, the bar centred for ten
@@ -1967,7 +2402,7 @@ end
 
 T.men_alive_shows_for_a_regiment_only = function()
 	hud_on({men = 1})
-	check(not hud_part("men"):Visible(), "one man: no count")
+	check(not hud_part("men"):Visible() and not hud_part("men_icon"):Visible(), "one man: no count, no icon")
 	hud_on({men = 40})
 	H.units[1]._models[3].alive = false H.step(1 / 60)
 	check(hud_part("men"):Visible() and hud_part("men").text == "39 / 40", "a regiment: alive of initial")
@@ -2218,17 +2653,21 @@ end
 -- Iron Hail's base_reload_time is 13 s. In game the clip is 14 s: the ring fills at 13 and stays full to 14.
 T.the_reload_ring_fills_through_the_reload_for_one_man = function()
 	crossbowmen({type = GUNNERS})
+	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 	H.tap("Left mouse") H.step(6)
 	local r = ring_part("reload_ring")
 	check(r:Visible(), "reloading: the ring shows")
 	check(near(ring_part("loading_ring_L1").rot[0], angle(1 / 13, 1), 0.05), "1 s of 13: the first half turns")
 	check(near(ring_part("loading_ring_L2").rot[0], angle(1 / 13, 2), 0.05), "the second half waits")
 	H.step(7)
+	check(r:Visible(), "the clip over at 12 s, the game's 13 s reload is not (2026-10-16): the ring still shows")
+	H.step(5.5)
 	check(not r:Visible(), "the reload is over: the ring hides")
 end
 
 T.a_cut_reload_keeps_the_ring_to_the_ready_time = function()
 	crossbowmen({type = GUNNERS})
+	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 	H.tap("Left mouse") H.step(6)
 	H.down("W") H.step(1) H.up("W") -- the step cuts the reload; he is ready 13 s after it started, at 18 s
 	check(ring_part("reload_ring"):Visible(), "still reloading by the clock: the ring stays")
@@ -2378,7 +2817,7 @@ T.a_war_machine_swings_with_a_crew_that_has_the_clip = function()
 	H.tap("Left mouse") H.step(1 / 60)
 	check(H.count("play") == 5 and H.count("uc:attack_unit") == 0, "the crew swing: " .. H.count("play"))
 	H.fresh({units = {{general = true, men = 5, war_machine = true, slots = {[1557] = true}}}, enemies = {{x = 0, z = 20}}})
-	H.tap("F2") H.step(0.1)
+	H.tap("F2") H.step(0.6) -- clear of the start's halt
 	H.tap("Left mouse") H.step(1 / 60)
 	check(H.count("play") == 0, "no clip sent to a crew without it")
 	check(H.count("uc:attack_unit") == 1, "an attack order on the enemy ahead instead")
@@ -2438,6 +2877,7 @@ end
 -- leaves SHOT_DELAY after the raise's end, not after the command
 T.an_early_fire_command_still_waits_for_the_fire_clip = function()
 	crossbowmen()
+	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 	local function launch_after_aim()
 		local seen, aim_at = #H.all("play"), nil
 		local launches = H.count("launch")
@@ -2519,10 +2959,12 @@ end
 
 T.a_ground_ability_lands_no_farther_than_its_range = function()
 	ranged_ability({TargetGround = true}, 20)
+	H.ground = function(_, z) return z * 0.01 end -- a gentle rise the view still meets ~37 m off
 	H.tap("1") H.step(0.3)
 	H.tap("Left mouse") H.step(1 / 60)
 	local c = H.last("uc:perform_special_ability_ground")
 	check(c and math.abs(c[4].z - 20) < 0.5, "the crosshair's ground is ~37 m off; a 20 m reach lands at 20: " .. tostring(c and c[4].z))
+	check(math.abs(c[4].y - H.ground(c[4].x, c[4].z)) < 0.01, "on the ground there, not in the air: " .. c[4].y)
 end
 
 -- the author, 2026-10-14: "weapons teleport in transitioning from ready aim animation to fire animation". The raise to
@@ -2548,6 +2990,7 @@ end
 
 T.later_shots_send_fire_before_the_raise_ends = function()
 	crossbowmen()
+	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 	local first = aim_to_fire_gap()
 	check(first and first >= 1000, "the first shot waits for the raise to end: " .. tostring(first) .. " ms")
 	H.step(15)
@@ -2608,13 +3051,6 @@ T.a_flying_unit_is_played_whole = function()
 	check(H.E.F.model == nil and H.E.F.ranged, "a shooting one too, and it can shoot")
 end
 
--- a regiment with no shot it can name (no data, no context) cannot shoot one man alone: played whole, its shot kept
-T.a_regiment_whose_man_cannot_shoot_alone_is_played_whole = function()
-	playing({type = "wh_test_rockets", men = 12, range = 255, ammo = 100, x = 40, reload_slot = false})
-	check(H.E.F.model == nil, "played whole")
-	check(H.E.F.ranged, "and it keeps its shot")
-end
-
 -- the author, 2026-10-15: "im still controlling the entire weapons team". Measured: each of a rocket team's 12 men has
 -- FIRE_LEVEL and no raise or reload clip. One man fires the clip, and his reload is the projectile's time on the clock
 local function rocket_man()
@@ -2626,6 +3062,24 @@ local function rocket_man()
 	H.cco_ids = {cco_2 = t}
 	H.select(H.units[2]) H.tap("F2") H.step(0.1)
 end
+-- the author, 2026-10-15: "it happens when switching to ranged", "it also triggers the whole battalion to shoot or
+-- throw" (Exalted Plaguebearers). Measured: their man has no FIRE_LEVEL; the Death's Head is thrown from GRENADIER (949,
+-- hu04d_plaguebearer_favoured_missile_attack_grenadier_01, FIRE_POS at 1.962 s). He throws it alone
+T.an_exalted_plaguebearer_throws_his_death_head_alone = function()
+	local u = playing({type = "wh3_main_nur_inf_plaguebearers_1", men = 20, x = 40, range = 70, ammo = 10,
+		reload_slot = false, slots = {[42] = true, [454] = true, [949] = true}})
+	local man = H.E.F.model
+	check(man ~= nil and H.E.F.solo and H.E.F.ranged, "one man, throwing alone")
+	H.tap("Left mouse") H.step(0.1)
+	local p = H.last("play")
+	check(p and p[2] == man.id and p[3] == 949, "the grenade throw, on him only: " .. tostring(p and p[3]))
+	H.step(1.7)
+	check(H.count("launch") == 0, "not before the throw's release")
+	H.step(0.4)
+	check(H.count("launch") == 1 and u._ammo == 9, "one Death's Head at 1.96 s: " .. H.count("launch"))
+	check(H.count("uc:attack_location") == 0 and H.E.F.model == man, "the regiment never fires, the camera stays on him")
+end
+
 T.a_weapon_team_man_fires_alone_and_reloads_on_the_clock = function()
 	rocket_man()
 	check(H.E.F.model ~= nil and H.E.F.solo and H.E.F.ranged, "one man of the team, shooting alone")
@@ -2636,19 +3090,6 @@ T.a_weapon_team_man_fires_alone_and_reloads_on_the_clock = function()
 	check(H.count("launch") == 2, "20 s on, the next: " .. H.count("launch"))
 end
 
--- the author, 2026-10-15: "weapon teams still no melee option". Measured: the mortar team is artillery and its crew
--- have ATTACK_1-2; left click swings, as any crew does
--- and when he dies and the next man cannot shoot alone, the regiment is played whole from there, its shot kept
-T.the_next_man_who_cannot_shoot_alone_hands_over_to_the_regiment = function()
-	local u = crossbowmen({type = "wh3_main_cth_inf_iron_hail_gunners_0"})
-	local man = H.E.F.model
-	check(man and H.E.F.solo, "one man shooting alone")
-	for _, m in ipairs(u._models) do if m ~= man then m.slots = {[454] = true} end end -- no FIRE_LEVEL
-	man.alive = false
-	H.step(0.1)
-	check(H.E.F.model == nil and H.E.F.ranged, "played whole, still in ranged mode")
-end
-
 T.an_artillery_crew_swings_on_a_click = function()
 	playing({type = "wh_test_mortar", men = 6, arty = true, x = 40})
 	H.tap("Left mouse") H.step(1 / 60)
@@ -2657,7 +3098,8 @@ T.an_artillery_crew_swings_on_a_click = function()
 end
 
 -- the author, 2026-10-15: "q for charge animation when running", "the animation being triggered with q is not the
--- attack", then "charging running should be triggered with q as a continuious press". Q held on the run is the charge:
+-- attack", then "charging running should be triggered with q as a continuious press"; 2026-10-16: "shift button as the
+-- charge or sprint button". Shift held on the move is the charge:
 -- CHARGE (135) at mask 6, sent again inside its sub-second cycle (measured: he keeps his speed under it); a left click
 -- in the charge throws the charge attack, MOVING_ATTACK_1-2 (484-485, the only two any unit has, measured)
 local function runs() local n = 0 for _, c in ipairs(H.all("play")) do if c[3] >= 484 and c[3] <= 488 then n = n + 1 end end return n end
@@ -2665,17 +3107,16 @@ local function plays_of(slot) local n = 0 for _, c in ipairs(H.all("play")) do i
 local CHARGE = 135
 local function charges() local n = 0 for _, c in ipairs(H.all("play")) do if c[3] == CHARGE and c[4] == 6 then n = n + 1 end end return n end
 
-T.q_held_on_the_run_charges_for_as_long_as_it_is_held = function()
+T.shift_held_on_the_move_charges_for_as_long_as_it_is_held = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("Shift") H.step(1) H.up("Shift")
+	check(charges() == 0, "standing: no charge")
 	H.down("W") H.step(0.3)
-	H.down("Q") H.step(1) H.up("Q")
-	check(charges() == 0, "walking: no charge")
-	H.tap("Shift") H.step(0.3)
 	local walks = plays_of(42)
-	H.down("Q") H.step(8)
-	check(charges() >= 10, "8 s held: still charging: " .. charges())
+	H.down("Shift") H.step(5)
+	check(charges() >= 6, "5 s held: still charging: " .. charges())
 	check(plays_of(42) == walks, "the walk does not cut the charge clip")
-	H.up("Q") H.step(0.1)
+	H.up("Shift") H.step(0.1)
 	local p = H.last("play")
 	check(p and p[3] == 42 and p[4] == 0, "let go: the clip ends")
 	H.up("W")
@@ -2683,35 +3124,37 @@ end
 
 T.a_click_in_the_charge_throws_the_charge_attack = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	H.tap("Shift") H.down("W") H.step(0.3)
-	H.down("Q") H.step(0.5)
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(0.5)
 	H.tap("Left mouse") H.step(1 / 60)
 	local p = H.last("play")
-	check(p and p[3] == 484 and (p[4] or 0) == 0, "MOVING_ATTACK_1: " .. tostring(p and p[3]))
+	check(p and p[3] == 484, "MOVING_ATTACK_1: " .. tostring(p and p[3]))
+	check(p[4] == 1, "over his torso and arms (the exe's mask 1, TORSO_AND_ARMS), his legs left to the run: " .. tostring(p[4]))
 	check(plays_of(454) == 0, "not a standing swing")
 	local n, walks = charges(), plays_of(42)
 	H.step(1)
 	check(charges() == n, "the attack plays out: no charge clip over it")
 	check(plays_of(42) == walks, "nor the walk that ends the charge")
-	H.up("Q") H.up("W")
+	H.up("Shift") H.up("W")
 end
 
 T.the_charge_attack_cools_down = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	H.tap("Shift") H.down("W") H.down("Q") H.step(0.3)
+	H.down("W") H.down("Shift") H.step(0.3)
 	H.tap("Left mouse") H.step(4)
 	H.tap("Left mouse") H.step(0.1)
 	check(runs() == 1, "cooling down: the click is a plain swing, " .. runs())
-	H.step(7)
+	H.up("Shift") H.step(7)
+	H.down("Shift") H.step(0.3)
 	H.tap("Left mouse") H.step(0.1)
 	check(runs() == 2, "cooled: the next charge attack, " .. runs())
-	H.up("Q") H.up("W")
+	H.up("Shift") H.up("W")
 end
 
 T.no_charge_for_a_unit_without_the_clips = function()
 	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [42] = true}}, {{x = 40, z = 20}})
-	H.tap("Shift") H.down("W") H.step(0.3)
-	H.down("Q") H.step(1) H.tap("Left mouse") H.step(0.1) H.up("Q") H.up("W")
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(1) H.tap("Left mouse") H.step(0.1) H.up("Shift") H.up("W")
 	check(charges() == 0 and runs() == 0, "no clips: no charge and no charge attack")
 	check(plays_of(454) == 1, "the click is a plain swing")
 end
@@ -2719,9 +3162,9 @@ end
 -- a single entity has no steered man and no walk to end the clip: the charge ends it
 T.a_lord_charges_too_and_the_charge_ends_on_release = function()
 	general_on() H.step(0.1)
-	H.tap("Shift") H.down("W") H.down("Q") H.step(1)
+	H.down("W") H.down("Shift") H.step(1)
 	check(charges() > 0, "the general charges")
-	H.up("Q") H.step(1 / 60)
+	H.up("Shift") H.step(1 / 60)
 	local p = H.last("play")
 	check(p and p[3] == 42 and p[4] == 0, "let go: the clip ends")
 	H.up("W")
@@ -2732,9 +3175,9 @@ end
 -- while a jump or charge attack runs nothing is: it ends when the clip does (or after LOCK_MAX)
 T.a_jump_plays_out_whatever_is_pressed = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	H.tap("Shift") H.tap("E") H.step(0.1) -- running: Q would charge, were he free
+	H.tap("E") H.step(0.1) -- Shift on the move would charge, were he free
 	local steers, walks = H.count("steer"), plays_of(42)
-	H.down("W") H.step(0.5) H.tap("Left mouse") H.step(0.5) H.down("Q") H.step(0.5) H.up("Q")
+	H.down("W") H.step(0.5) H.tap("Left mouse") H.step(0.5) H.down("Shift") H.step(0.5) H.up("Shift")
 	check(plays_of(454) == 0 and charges() == 0, "no swing and no charge over it")
 	check(H.count("steer") == steers and plays_of(42) == walks, "no step and no walking clip over it")
 	H.step(3)
@@ -2742,14 +3185,158 @@ T.a_jump_plays_out_whatever_is_pressed = function()
 	H.up("W")
 end
 
+-- the author, 2026-10-15: "spamming left button while walking does nothing, melee should be prioritized". A swing held no
+-- lock: the walk went on under it, and its unlatch played WALK_1 over the clip. A click while walking swings, and the
+-- walk waits for the clip, as it does for the jump
+T.a_swing_while_walking_plays_out = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.step(0.5)
+	H.tap("Left mouse") H.step(0.1)
+	local steers, walks = H.count("steer"), plays_of(42)
+	H.step(0.5)
+	check(plays_of(454) == 1, "the swing plays")
+	check(H.count("steer") == steers and plays_of(42) == walks, "no step and no walking clip over it: steers "
+		.. H.count("steer") - steers .. ", walking clips " .. plays_of(42) - walks)
+	H.step(1.6) -- 2.7 s: the 4 s clip and LOCK_MAX (3 s) not over, the swing cooldown (1.5 s) is
+	check(H.count("steer") > steers, "held to the swing cooldown at most: he walks again")
+	H.up("W")
+end
+
+-- with no clip to swing, nothing waits on a clip that never plays; and his regiment gets no attack order in its place
+-- (the author, 2026-10-15 21:46: one man gives his regiment no orders)
+T.a_swing_with_no_clip_does_not_hold_the_walk = function()
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[42] = true}}, {{x = 40, z = 30, men = 10}}) -- no ATTACK clip
+	H.step(0.5)
+	H.tap("Left mouse") H.step(0.1)
+	check(H.count("uc:attack_unit") == 0, "no attack order to his regiment")
+	local steers = H.count("steer")
+	H.down("W") H.step(0.3)
+	check(H.count("steer") > steers, "W walks him at once, no lock left behind")
+	H.up("W")
+end
+
 T.the_charge_attack_plays_out_too = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	H.tap("Shift") H.down("W") H.down("Q") H.step(0.3)
+	H.down("W") H.down("Shift") H.step(0.3)
 	H.tap("Left mouse") H.step(0.1)
+	local n, walks = #H.all("play"), plays_of(42)
+	H.step(1)
+	check(#H.all("play") == n and plays_of(42) == walks, "no clip sent over the attack: " .. (#H.all("play") - n))
+	H.up("Shift") H.up("W")
+end
+
+-- the author, 2026-10-16: "charge attack while sprinting comepletely stops the player and stops its legs". He threw it
+-- standing: the lock steered nothing, and the walk ran out 3 m on. He runs on through it, at the sprint
+T.the_charge_attack_is_thrown_on_the_run = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.down("Shift") H.step(0.3)
+	H.tap("Left mouse") H.step(0.1)
+	check(H.last("play")[3] == 484, "the charge attack is under way")
 	local steers = H.count("steer")
 	H.step(1)
-	check(H.count("steer") == steers, "running on: nothing sent over the attack")
-	H.up("Q") H.up("W")
+	check(H.count("steer") >= steers + 50, "he is steered on through it, every frame: " .. (H.count("steer") - steers))
+	check(near(H.last("steer")[7], 1.2), "at the sprint: " .. tostring(H.last("steer")[7]))
+	check(near(H.last("steer")[6], H.E.F.face_yaw), "along his own facing")
+	H.up("Shift") H.up("W")
+end
+
+-- the jump stands him: no sprint through it, and no stamina spent on it
+T.a_jump_on_the_sprint_ends_it = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.down("Shift") H.step(0.3)
+	check(H.E.F.sprinting, "sprinting")
+	H.tap("E") H.step(0.1)
+	local st = H.E.F.stamina
+	H.step(1)
+	check(not H.E.F.sprinting and not hud_part("act_sprint_active_l"):Visible(), "in the jump: not sprinting")
+	check(H.E.F.stamina > st, "the stamina comes back in it: " .. st .. " then " .. H.E.F.stamina)
+	H.up("Shift") H.up("W")
+end
+
+-- measured 2026-10-16 (probes/zz_tp_charge_run.lua, Akshina's Ambushers): steered under it, MOVING_ATTACK at any mask
+-- but 0 stays latched until WALK_1, past its 1.6 s, and his arms held its last pose to the 3 s cap. The lock ends with
+-- the clip, data.lua's runs (its .anim's length) and the engine's late start, and frees it: WALK_1, or CHARGE sprinting
+T.the_charge_attack_frees_his_arms_when_its_clip_ends = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.D.runs = {wh_test_melee = 1.6}
+	H.down("W") H.down("Shift") H.step(0.3)
+	H.tap("Left mouse") H.step(1 / 60)
+	H.up("Shift")
+	local walks = plays_of(42)
+	H.step(1.6)
+	check(plays_of(42) == walks, "not before the clip's 1.6 s and its late start")
+	H.step(0.4)
+	check(plays_of(42) == walks + 1, "then WALK_1 frees it: " .. (plays_of(42) - walks))
+	H.up("W")
+end
+
+-- stopped in it: standing never unlatches (move.lua does that on the move), so the lock's end does
+T.a_charge_attack_he_stops_in_frees_his_arms_too = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.D.runs = {wh_test_melee = 1.6}
+	H.down("W") H.down("Shift") H.step(0.3)
+	H.tap("Left mouse") H.step(0.1)
+	H.up("Shift") H.up("W")
+	local walks = plays_of(42)
+	H.step(2)
+	check(plays_of(42) == walks + 1, "standing, WALK_1 frees it: " .. (plays_of(42) - walks))
+end
+
+T.sprinting_on_past_the_charge_attack_the_charge_frees_it = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.D.runs = {wh_test_melee = 1.6}
+	H.down("W") H.down("Shift") H.step(0.3)
+	H.tap("Left mouse") H.step(1 / 60)
+	local n = charges()
+	H.step(1.6)
+	check(charges() == n, "no charge clip over it")
+	H.step(0.4)
+	check(charges() == n + 1 and H.last("play")[3] == CHARGE, "then the charge: " .. (charges() - n))
+	check(plays_of(42) == 0, "and no WALK_1 to cut between")
+	H.up("Shift") H.up("W")
+end
+
+-- a modded unit data.lua has no length for: the cap
+T.a_charge_attack_with_no_length_holds_to_the_cap = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.D.runs = {}
+	H.down("W") H.down("Shift") H.step(0.3)
+	H.tap("Left mouse") H.step(1 / 60)
+	H.up("Shift")
+	local walks = plays_of(42)
+	H.step(2.8)
+	check(plays_of(42) == walks, "held to the 3 s cap")
+	H.step(0.4)
+	check(plays_of(42) == walks + 1, "then freed")
+	H.up("W")
+end
+
+-- Shift let go in the attack: the sprint ends but not the clip (WALK_1 would cut it), and he runs on at his own pace
+T.letting_go_of_shift_in_the_charge_attack_does_not_cut_it = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.down("Shift") H.step(0.3)
+	H.tap("Left mouse") H.step(0.1)
+	local walks = plays_of(42)
+	H.up("Shift") H.step(0.5)
+	check(plays_of(42) == walks, "no WALK_1 over the attack")
+	check(H.count("steer") > 0 and (H.last("steer")[7] or 1) == 1, "running on at his own speed")
+	H.step(3)
+	check(H.last("play")[3] == 42, "the clip over, the walk takes him again")
+	H.up("W")
+end
+
+-- a regiment steered whole: the attack is no reason to stop its run either
+T.a_regiment_throws_the_charge_attack_on_the_run = function()
+	general_on() H.step(0.5)
+	H.down("W") H.down("Shift") H.step(0.6)
+	local halts = H.count("uc:halt")
+	H.tap("Left mouse") H.step(0.1)
+	check(runs() > 0, "the charge attack")
+	local orders = H.count("uc:goto_location")
+	H.down("D") H.step(0.6)
+	check(H.count("uc:goto_location") > orders, "turned in it: a new order")
+	check(H.count("uc:halt") == halts, "never halted: " .. (H.count("uc:halt") - halts))
+	H.up("D") H.up("Shift") H.up("W")
 end
 
 T.the_lock_ends_with_the_clip = function()
@@ -2795,17 +3382,26 @@ end
 -- the author, 2026-10-15: "should show in the HUD the cooldown of each including melee and ranged"
 T.the_action_bar_shows_what_the_unit_can_do = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	check(hud_part("act_attack_frame"):Visible() and hud_part("act_charge_frame"):Visible()
-		and hud_part("act_jump_frame"):Visible(), "attack, charge and jump")
+	check(hud_part("act_walk_frame"):Visible() and hud_part("act_sprint_frame"):Visible()
+		and hud_part("act_attack_frame"):Visible() and hud_part("act_jump_frame"):Visible(), "walk, sprint, attack and jump")
 	check(not hud_part("act_fire_frame"):Visible(), "no fire for a unit that does not shoot")
-	check(hud_part("act_charge_key").text == "Q" and hud_part("act_jump_key").text == "E", "each with its key")
+	check(hud_part("act_walk_key").text == "Z" and hud_part("act_sprint_key").text == "Shift"
+		and hud_part("act_jump_key").text == "E", "each with its key")
 	crossbowmen()
 	check(hud_part("act_fire_frame"):Visible(), "a shooter has fire")
 end
 
+-- a man who cannot shoot alone has no fire button: he has no ranged mode
+T.the_action_bar_shows_no_fire_for_a_man_who_cannot_shoot_alone = function()
+	H.fresh({units = {{general = true, type = "wh_test_mod_grenadiers", men = 20, range = 60, ammo = 10}}})
+	H.tap("F2") H.step(0.1)
+	check(H.E.F.model ~= nil and not hud_part("act_fire_frame"):Visible(), "no fire button")
+end
+
 T.the_action_bar_counts_each_cooldown_down = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	H.tap("Left mouse") H.tap("E") H.step(0.1)
+	-- a swing holds him like an action: its clip over, E jumps
+	H.tap("Left mouse") H.E.F.model.anim_end = H.game_ms + 100 H.step(0.2) H.tap("E") H.step(0.1)
 	check(hud_part("act_attack_dim"):Visible() and hud_part("act_attack_cool").text == "2", "the swing's 1.5 s: "
 		.. tostring(hud_part("act_attack_cool").text))
 	check(hud_part("act_jump_cool").text == "6", "the jump's 6 s: " .. tostring(hud_part("act_jump_cool").text))
@@ -2817,36 +3413,156 @@ end
 
 T.the_action_bar_shows_the_charge_then_its_cooldown = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	H.tap("Shift") H.down("W") H.down("Q") H.step(0.3)
-	check(hud_part("act_charge_active_l"):Visible() and not hud_part("act_charge_dim"):Visible(), "charging: the green ring")
+	H.down("W") H.down("Shift") H.step(0.3)
+	check(hud_part("act_sprint_active_l"):Visible() and not hud_part("act_sprint_dim"):Visible(), "charging: the green ring")
 	H.tap("Left mouse") H.step(0.1)
-	check(not hud_part("act_charge_active_l"):Visible() and hud_part("act_charge_dim"):Visible()
-		and hud_part("act_charge_cool").text == "10", "the attack thrown: 10 s to the next, "
-		.. tostring(hud_part("act_charge_cool").text))
-	H.up("Q") H.up("W")
+	-- thrown on the run (2026-10-16), the sprint goes on: its ring stays lit
+	check(hud_part("act_sprint_active_l"):Visible() and hud_part("act_sprint_cool").text == "10", "the attack thrown, still "
+		.. "sprinting: 10 s to the next, " .. tostring(hud_part("act_sprint_cool").text))
+	-- the seconds are its charge attack's; the sprint itself is still there, and dims only for want of stamina (lit and
+	-- dimmed at once, CA's dim washed the ring out: seen in the preview, 2026-10-16)
+	check(not hud_part("act_sprint_dim"):Visible(), "not dimmed: he can still sprint")
+	H.up("Shift") H.up("W")
 end
 
 -- the author, 2026-10-15: "make shift be a long press or a toggable in the mct, default toggable and should be shown in
--- HUD"
-T.run_toggles_by_default_and_shows_on_the_hud = function()
+-- HUD"; 2026-10-16: "change, shift button as the charge or sprint button, add stamina bar, make z as the toggable walk,
+-- all should be visible in the UI, pressing M should show mini map". He runs unless Z has him walk
+T.z_toggles_walking_and_running_is_the_default = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	check(hud_part("act_run_frame"):Visible() and hud_part("act_run_key").text == "Shift", "a Run button, its key")
-	check(not hud_part("act_run_active_l"):Visible(), "walking: unlit")
-	H.tap("Shift") H.step(0.1)
-	check(H.E.F.running and hud_part("act_run_active_l"):Visible(), "a tap: running, lit")
-	H.tap("Shift") H.step(0.1)
-	check(not H.E.F.running and not hud_part("act_run_active_l"):Visible(), "a second tap: walking")
+	check(hud_part("act_walk_frame"):Visible() and hud_part("act_walk_key").text == "Z", "a Walk button, its key")
+	check(not H.E.F.walking and not hud_part("act_walk_active_l"):Visible(), "running: unlit")
+	H.down("W") H.step(0.6)
+	check(H.last("steer")[5] == true, "he runs")
+	H.tap("Z") H.step(0.1)
+	check(H.E.F.walking and hud_part("act_walk_active_l"):Visible() and H.last("steer")[5] == false, "a tap: walking, lit")
+	H.tap("Z") H.step(0.1)
+	check(not H.E.F.walking and not hud_part("act_walk_active_l"):Visible() and H.last("steer")[5] == true,
+		"a second tap: running")
+	H.up("W")
 end
 
-T.run_can_be_held_instead = function()
-	H.fresh({mct = {combat_run_hold = true}, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+T.walk_can_be_held_instead = function()
+	H.fresh({mct = {combat_walk_hold = true}, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
 	H.select(H.units[2]) H.tap("F2") H.step(0.1)
-	H.tap("Shift") H.step(0.1)
-	check(not H.E.F.running, "a tap does not latch it")
-	H.down("Shift") H.step(0.2)
-	check(H.E.F.running and hud_part("act_run_active_l"):Visible(), "held: running, lit")
+	H.tap("Z") H.step(0.1)
+	check(not H.E.F.walking, "a tap does not latch it")
+	H.down("Z") H.step(0.2)
+	check(H.E.F.walking and hud_part("act_walk_active_l"):Visible(), "held: walking, lit")
+	H.up("Z") H.step(0.1)
+	check(not H.E.F.walking, "let go: running")
+end
+
+-- Shift held on the move sprints: at the run whatever Z says, the charge clip, the charge attack on a click
+T.shift_sprints_at_the_run_even_from_a_walk = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("Z") H.down("W") H.step(0.6)
+	check(H.last("steer")[5] == false, "walking")
+	H.down("Shift") H.step(0.3)
+	check(H.E.F.sprinting and H.last("steer")[5] == true and hud_part("act_sprint_active_l"):Visible(),
+		"Shift held: at the run, lit")
 	H.up("Shift") H.step(0.1)
-	check(not H.E.F.running, "let go: walking")
+	check(not H.E.F.sprinting and H.last("steer")[5] == false and not hud_part("act_sprint_active_l"):Visible(),
+		"let go: walking again")
+	H.up("W")
+end
+
+-- a regiment played whole sprints too: its move order at the run
+T.a_unit_played_whole_sprints_at_the_run = function()
+	general_on() H.step(0.5)
+	H.tap("Z") H.down("W") H.step(0.6)
+	check(H.last("uc:goto_location")[4] == false, "walking")
+	H.down("Shift") H.step(0.6)
+	check(H.last("uc:goto_location")[4] == true, "Shift held: at the run")
+	H.up("Shift") H.up("W")
+end
+
+-- stamina: a sprint empties it in 8 s; empty, the sprint stops until a quarter is back; it fills again in 12 s off it
+T.a_sprint_spends_stamina_and_it_comes_back = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	check(H.E.F.stamina == 1 and hud_part("stamina_fill"):Visible() and hud_part("stamina_fill").w == L.fill.stamina_fill,
+		"full at the start")
+	H.down("W") H.down("Shift") H.step(4)
+	local s = H.E.F.stamina
+	check(s > 0.45 and s < 0.55, "4 s of sprint: half gone: " .. s)
+	check(math.abs(hud_part("stamina_fill").w - L.fill.stamina_fill * s) <= 1, "the bar follows: "
+		.. hud_part("stamina_fill").w)
+	H.step(4.2)
+	check(H.E.F.stamina < 0.05 and not H.E.F.sprinting and H.last("steer")[5] == true, "empty at 8 s: no sprint, still at the "
+		.. "run: " .. H.E.F.stamina)
+	local n = charges()
+	H.step(1)
+	check(charges() == n, "no charge clip on empty")
+	check(hud_part("act_sprint_dim"):Visible(), "the sprint button dims")
+	H.step(2.4)
+	check(H.E.F.sprinting, "a quarter back: Shift still held sprints again")
+	H.up("Shift") H.step(12)
+	check(H.E.F.stamina == 1, "12 s off it: full again: " .. H.E.F.stamina)
+	H.up("W")
+end
+
+-- M: CA's minimap. The cinematic UI hides CA's whole HUD, its radar with it, and not this panel: the radar moves into
+-- the panel under the corner buttons while shown, and back into its holder, where it was, on M again or at the end
+local function radar()
+	local holder = H.comp("radar_holder", find_uicomponent(H.root, "hud_battle"))
+	local r = H.comp("radar_group", holder)
+	H.comp("speed_controls", holder)
+	r.x, r.y, r.w, r.h = 1600, 40, 184, 184
+	return holder, r
+end
+T.m_shows_the_minimap_and_puts_it_back = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	local holder, r = radar()
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	check(hud_part("map_frame"):Visible() and hud_part("map_key").text == "M" and not hud_part("map_active_l"):Visible(),
+		"a Minimap button, on M, unlit")
+	H.tap("M") H.step(0.1)
+	check(r.parent == find_uicomponent(H.root, "derpy_tp_hud"), "shown: the radar is in the panel")
+	local k = hud_part("hide_keyplate")
+	check(math.abs(r.x + r.w - (1920 - 24)) <= 1 and r.y > k.y + k.h, "under the buttons, on the right margin: "
+		.. r.x .. "," .. r.y)
+	check(hud_part("map_active_l"):Visible(), "lit")
+	H.tap("M") H.step(0.1)
+	check(r.parent == holder and holder.kids[1] == r and r.x == 1600 and r.y == 40,
+		"M again: back in its holder, first, where it was")
+	check(not hud_part("map_active_l"):Visible(), "unlit")
+	H.tap("M") H.step(0.1)
+	H.tap("F2") H.step(0.1)
+	check(r.parent == holder and holder.kids[1] == r and r.x == 1600 and r.y == 40, "third person off: back too")
+end
+
+-- three HUD errors switch the panel off: CA's radar goes back to its holder first, and M shows nothing after
+T.the_hud_going_off_puts_the_minimap_back = function()
+	H.fresh()
+	local holder, r = radar()
+	H.tap("F2") H.step(0.1)
+	H.tap("M") H.step(0.1)
+	check(r.parent ~= holder, "shown")
+	H.units[1].unary_hitpoints = function() error("test: 1") end
+	H.units[1].initial_number_of_men = function() error("test: 2") end
+	H.cco.HealthValue = function() error("test: 3") end
+	H.step(0.3)
+	check(not find_uicomponent(H.root, "derpy_tp_hud"):Visible() and H.E.F.on, "the HUD is off, third person on")
+	check(r.parent == holder and holder.kids[1] == r and r.x == 1600, "the radar back in its holder")
+	H.tap("M") H.tap("M") H.step(0.1)
+	check(r.parent == holder, "M shows nothing on a panel that is off")
+end
+
+-- the window lost mid-sprint: the sprint ends, and the stamina fills again rather than standing still
+T.losing_the_window_ends_the_sprint = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.down("Shift") H.step(2)
+	check(H.E.F.sprinting, "sprinting")
+	H.focus = false H.step(2)
+	check(not H.E.F.sprinting and H.E.F.stamina > 0.8, "unfocused: no sprint, filling again: " .. H.E.F.stamina)
+	H.up("Shift") H.up("W")
+end
+
+T.with_no_minimap_m_does_nothing = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("M") H.step(0.1)
+	check(H.E.F.on and not H.E.F.map and not hud_part("map_active_l"):Visible(), "nothing to show: off, and on we go")
 end
 
 -- the author, 2026-10-15: "smoother animation or turning rate when pressing side buttons and back". He turns at
@@ -2922,17 +3638,6 @@ T.a_thrown_bomb_leaves_late_in_the_throw = function()
 	local fired
 	for _ = 1, 300 do H.step(1 / 60) if H.count("launch") > 0 then fired = H.game_ms - at break end end
 	check(fired and fired >= 2200 and fired < 2400, "thrown at 2.2 s: " .. tostring(fired))
-	-- an ironbreaker's shot is in data.lua; its kind still comes from his card
-	H.fresh({units = {{general = true}, {type = "wh_main_dwf_inf_ironbreakers", men = 20, x = 40, range = 60, ammo = 10,
-		slots = {[454] = true, [1557] = true, [1564] = true, [42] = true}}}})
-	t = H.default_cco()
-	t["ActiveProjectileContext.ShotTypeKey"] = "explosives"
-	H.cco_ids = {cco_2 = t}
-	H.select(H.units[2]) H.tap("F2") H.step(0.1)
-	at, fired = H.game_ms, nil
-	H.tap("Left mouse")
-	for _ = 1, 300 do H.step(1 / 60) if H.count("launch") > 0 then fired = H.game_ms - at break end end
-	check(fired and fired >= 2200 and fired < 2400, "a known unit too: " .. tostring(fired))
 end
 
 
@@ -2945,18 +3650,19 @@ T.the_action_bar_counts_the_reload_down = function()
 	check(not hud_part("act_fire_dim"):Visible(), "loaded")
 end
 
-T.the_action_bar_hides_charge_and_jump_without_their_clips = function()
+T.the_action_bar_hides_jump_without_its_clips = function()
 	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [42] = true}})
-	check(hud_part("act_attack_frame"):Visible(), "attack shows")
-	check(not hud_part("act_charge_frame"):Visible() and not hud_part("act_jump_frame"):Visible(), "no clips: no charge, no jump")
+	check(hud_part("act_attack_frame"):Visible() and hud_part("act_sprint_frame"):Visible(), "attack and sprint show")
+	check(not hud_part("act_jump_frame"):Visible(), "no clips: no jump")
 end
 
 -- the shown buttons sit side by side against the right edge: no hole where a hidden one would be
 T.the_action_bar_packs_the_shown_buttons_to_the_right = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
-	local a, c, j = hud_part("act_attack_frame"), hud_part("act_charge_frame"), hud_part("act_jump_frame")
-	check(c.x - a.x == j.x - c.x and c.x > a.x, "one pitch apart, with no gap for fire: " .. a.x .. ", " .. c.x .. ", " .. j.x)
-	check(math.abs(j.x + j.w - (1920 - 24)) <= 1, "the last one on the right margin: " .. (j.x + j.w))
+	local c, a, j = hud_part("act_sprint_frame"), hud_part("act_attack_frame"), hud_part("act_jump_frame")
+	check(a.x - c.x == j.x - a.x and a.x > c.x, "one pitch apart, with no gap for fire: " .. c.x .. ", " .. a.x .. ", " .. j.x)
+	local h = hud_part("act_cheer_frame") -- the last shown
+	check(math.abs(h.x + h.w - (1920 - 24)) <= 1, "the last one on the right margin: " .. (h.x + h.w))
 end
 
 T.out_of_ammo_the_fire_button_dims_without_seconds = function()
@@ -2967,13 +3673,1286 @@ end
 
 T.charge_and_jump_have_keys_and_settings = function()
 	local S = settings_with(nil)
-	check(S.names.charge == "Q" and S.names.jump == "E", "Q and E")
+	check(S.names.walk == "Z" and S.names.sprint == "Shift" and S.names.minimap == "M" and S.names.jump == "E",
+		"Z, Shift, M and E")
 	check(near(S.charge_cooldown, 10) and near(S.jump_cooldown, 6), "10 s and 6 s")
-	check(S.run_hold == false and near(S.turn_rate, math.rad(360)) and near(S.melee_distance, 3.5), "toggle, 360 deg/s, 3.5 m")
-	S = settings_with({combat_charge_cooldown = 300, combat_jump_cooldown = 15, combat_run_hold = true, move_turn_rate = 180,
+	check(S.walk_hold == false and near(S.turn_rate, math.rad(360)) and near(S.melee_distance, 3.5), "toggle, 360 deg/s, 3.5 m")
+	S = settings_with({combat_charge_cooldown = 300, combat_jump_cooldown = 15, combat_walk_hold = true, move_turn_rate = 180,
 		camera_melee_distance = 50})
 	check(near(S.charge_cooldown, 30) and near(S.jump_cooldown, 1.5), "from tenths")
-	check(S.run_hold and near(S.turn_rate, math.rad(180)) and near(S.melee_distance, 5), "hold, 180 deg/s, 5 m")
+	check(S.walk_hold and near(S.turn_rate, math.rad(180)) and near(S.melee_distance, 5), "hold, 180 deg/s, 5 m")
+end
+
+
+-- the author, 2026-10-15: "animation with multiple projectile spawn only spawns one projectile". Measured in the packs:
+-- each FIRE_POS event in the fire clip's .anm.meta spawns one shot - a rocket barrage carries 18, 1.0 to 5.25 s, and
+-- CA's ratling gun the same. data.lua's fires carry each unit's times; one shot of ammo for the whole clip
+T.a_gun_with_many_spawns_fires_each_one = function()
+	H.fresh({units = {{general = true}, {type = "zorn_test_crank", men = 20, x = 40, range = 60, ammo = 10, start_ammo = 10,
+		slots = {[454] = true, [1557] = true, [1564] = true, [42] = true}}}})
+	local t = H.default_cco()
+	t["ActiveProjectileContext.Key"], t["ActiveProjectileContext.BaseReloadTimeContext.Value"] = "rocket", 10
+	t["ActiveProjectileContext.NumProjectiles"] = 1
+	H.cco_ids = {cco_2 = t}
+	H.E.D.fires = H.E.D.fires or {}
+	H.E.D.fires.zorn_test_crank = {{1.0, 0.2, 1.1, 0.8}, {1.25, 0.2, 1.1, 0.8}, {1.5, 0.2, 1.1, 0.8}}
+	H.E.D.shots.zorn_test_crank = {"rocket", 10, 1, "Battle_Rocket_Fire"} -- a known shot, its weapon's bang with it
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	local at, seen = H.game_ms, {}
+	H.tap("Left mouse")
+	for _ = 1, 240 do H.step(1 / 60) if H.count("launch") > #seen then seen[#seen + 1] = H.game_ms - at end end
+	check(#seen == 3, "three spawns, three shots: " .. #seen)
+	check(seen[1] and math.abs(seen[1] - 1000) < 50 and math.abs(seen[3] - 1500) < 50, "on their times: "
+		.. table.concat(seen, " "))
+	check(H.units[2]._ammo == 9, "one shot of ammo: " .. H.units[2]._ammo)
+	-- each spawn is a discharge: the weapon's bang on every one (the author, 2026-10-15: "no sound effect when firing")
+	check(H.count("sound") == 3, "a bang a spawn: " .. H.count("sound"))
+end
+
+-- the author, 2026-10-15: "the projectile spawn is mismatched to the model". FIRE_POS carries where the shot is made, in
+-- metres from his animroot: x right, y up, z ahead (measured: rifles 0.1-0.4 right, 1.0-1.5 up, 0.7-1.6 ahead; a
+-- ratling gun 0.38 up). It turns with him; he faces the camera through the shot
+T.a_shot_leaves_from_the_fire_clips_muzzle = function()
+	H.fresh({units = {{general = true}, {type = "zorn_test_crank", men = 20, x = 40, range = 60, ammo = 10, start_ammo = 10,
+		slots = {[454] = true, [1557] = true, [1564] = true, [42] = true}}}})
+	local t = H.default_cco()
+	t["ActiveProjectileContext.Key"], t["ActiveProjectileContext.BaseReloadTimeContext.Value"] = "rocket", 10
+	t["ActiveProjectileContext.NumProjectiles"] = 1
+	H.cco_ids = {cco_2 = t}
+	H.E.D.fires.zorn_test_crank = {{0.2, 0.3, 0.4, 1.3}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	H.E.rig.look(150, 0) H.step(0.1) -- a facing off the axes, so a swapped or mirrored axis shows
+	local yaw = H.E.rig.yaw
+	H.tap("Left mouse") H.step(1)
+	local l = H.last("launch")
+	local mx, my, mz = H.E.P.model_pos(H.E.F.model)
+	local c, sn = math.cos(yaw), math.sin(yaw)
+	local wx, wy, wz = mx + 0.3 * c + 1.3 * sn, my + 0.4, mz - 0.3 * sn + 1.3 * c
+	check(l and near(l[3].x, wx, 0.01) and near(l[3].y, wy, 0.01) and near(l[3].z, wz, 0.01), "from the muzzle: "
+		.. (l and (l[3].x .. "," .. l[3].y .. "," .. l[3].z) or "no shot") .. " want " .. wx .. "," .. wy .. "," .. wz)
+end
+
+-- the author, 2026-10-15: "it also doesnt attack to the cameras direction, it redirects to the battalions facing
+-- direction when attacking" - the log shows jump and charge attacks. An action turns him to the camera as it starts and
+-- holds that facing until it ends
+T.an_action_faces_the_camera_and_keeps_it = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("D") H.step(0.5) H.up("D") H.step(0.1) -- he faces right, the camera ahead
+	H.E.rig.look(150, 0) H.step(0.1) -- a camera off the battle's axes, so a facing of 0 cannot pass for it
+	local yaw0 = H.E.rig.yaw
+	local function off(y) return math.abs(((y - yaw0) + math.pi) % (2 * math.pi) - math.pi) end
+	local faces = H.count("face")
+	H.tap("E") H.step(1 / 60)
+	check(H.count("face") > faces and off(H.last("face")[3]) < 0.01, "the jump starts facing the camera")
+	faces = H.count("face")
+	H.E.rig.look(400, 0) H.step(1)
+	check(H.count("face") > faces + 30, "held every frame of the jump: " .. (H.count("face") - faces))
+	check(off(H.last("face")[3]) < 0.01, "at the facing it started with, not the camera's new one")
+end
+
+-- a unit data.lua knows keeps data.lua's shot, its weapon's bang included: its card is read only for a unit it lacks
+T.a_known_unit_keeps_its_data_shot = function()
+	local k = "wh3_main_cth_inf_jade_warrior_crossbowmen_1"
+	H.fresh({units = {{general = true}, {type = k, men = 20, x = 40, range = 60, ammo = 10,
+		slots = {[454] = true, [1554] = true, [1557] = true, [42] = true}}}})
+	local t = H.default_cco()
+	t["ActiveProjectileContext.Key"], t["ActiveProjectileContext.BaseReloadTimeContext.Value"] = "card_bolt", 1
+	t["ActiveProjectileContext.NumProjectiles"] = 1
+	H.cco_ids = {cco_2 = t}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	local s = H.E.D.shots[k]
+	check(s[1] == "wh3_cth_crossbow_bolt" and s[4] == "Battle_Individual_Small_Arms_Crossbow_Release", "data.lua's shot: "
+		.. tostring(s[1]) .. " " .. tostring(s[4]))
+end
+
+-- the author, 2026-10-15: "pressing q then melee attacking doesnt trigger the attack charge animation at all". Measured
+-- (probes/zz_tp_charge_attack.lua): the charge attack plays after CHARGE, but the engine reported it 0.19-0.31 s after it
+-- was sent; the lock gave up at 0.25 s, Q still held restarted the charge, and CHARGE replaced the attack
+T.a_charge_attack_reported_late_still_plays_out = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.report_ms = 310
+	H.down("W") H.down("Shift") H.step(0.5)
+	H.tap("Left mouse") H.step(1 / 60)
+	local n = charges()
+	H.step(1.5)
+	check(charges() == n, "no charge over the attack: " .. (charges() - n))
+	check(H.last("play")[3] == 484, "the charge attack is the last clip sent: " .. H.last("play")[3])
+	H.up("Shift") H.up("W")
+end
+
+-- the author, 2026-10-15: "should be also health and winds of magic(if wizard) on the unit panel". CcoBattleUnit's
+-- HealthValue and HealthMax; a caster is a unit with an ability that spends winds (CcoBattleAbility.ManaUsed > 0), and
+-- the winds are his army's pool, ArmyContext.WindsOfMagicPoolContext's CurrentWind of MaxWind (CA's cco docs)
+T.the_panel_shows_health_and_a_casters_winds = function()
+	local t = hud_cco({"wh_main_spell_fire_fireball"})
+	t.HealthValue, t.HealthMax = 1240, 1500
+	t["BattleAbilityList.At(0).ManaUsed"] = 0 -- an ability that costs no winds
+	hud_on({abilities = {"wh_main_spell_fire_fireball"}, cco = t})
+	H.step(1 / 60)
+	check(hud_part("hp"):Visible() and hud_part("hp").text == "1240 / 1500" and hud_part("hp_icon"):Visible(), "health: "
+		.. tostring(hud_part("hp").text))
+	check(not hud_part("winds"):Visible() and not hud_part("winds_fill"):Visible(), "no ability that costs winds: no winds")
+	check(not H.logged("HUD part winds"), "and no pool read for him to fail")
+	check(hud_part("plate_left_short"):Visible() and not hud_part("plate_left"):Visible(), "the short plate")
+	local _, short_y = hud_part("name"):Position()
+	t["BattleAbilityList.At(0).ManaUsed"] = 8
+	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"], t["ArmyContext.WindsOfMagicPoolContext.MaxWind"] = 34.6, 60
+	hud_on({abilities = {"wh_main_spell_fire_fireball"}, cco = t})
+	H.step(1 / 60)
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	check(hud_part("winds"):Visible() and hud_part("winds").text == "34 / 60" and hud_part("winds_icon"):Visible(),
+		"the winds: " .. tostring(hud_part("winds").text))
+	check(hud_part("winds_fill").w == math.floor(L.fill.winds_fill * 34.6 / 60 + 0.5), "the bar at 34.6 of 60")
+	check(hud_part("plate_left"):Visible() and not hud_part("plate_left_short"):Visible(), "the tall plate")
+	local _, tall_y = hud_part("name"):Position()
+	check(tall_y < short_y, "the rows above lift for the winds row: " .. tall_y .. " against " .. short_y)
+	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"] = 12 H.step(0.25) -- the context is read every 0.2 s
+	check(hud_part("winds").text == "12 / 60", "and follows the pool")
+end
+
+-- a health figure the context cannot give costs the figure, never the bar
+T.no_health_figure_keeps_the_bar = function()
+	local t = hud_cco({})
+	t.HealthValue, t.HealthMax = nil, nil
+	hud_on({hp = 0.5, cco = t})
+	H.step(1 / 60)
+	check(not hud_part("hp"):Visible() and hud_part("health_fill"):Visible(), "the bar, without its figure")
+end
+
+-- the author, 2026-10-15: "the projectile is not accurate, and is far off from the crosshair". The shot went 1 m over
+-- the point where the view met a flat plane at his own height: off the crosshair at every range, and on a slope off
+-- the ground too. It goes at the ground the crosshair is on
+T.a_shot_goes_where_the_crosshair_meets_the_ground = function()
+	H.fresh({units = {{general = true}, {type = "zorn_test_crank", men = 20, x = 40, range = 120, ammo = 10, start_ammo = 10,
+		slots = {[454] = true, [1557] = true, [1564] = true, [42] = true}}}})
+	H.ground = function(_, z) return z * 0.1 end -- rising ahead of him
+	local t = H.default_cco()
+	t["ActiveProjectileContext.Key"], t["ActiveProjectileContext.BaseReloadTimeContext.Value"] = "rocket", 10
+	t["ActiveProjectileContext.NumProjectiles"] = 1
+	H.cco_ids = {cco_2 = t}
+	H.E.D.fires.zorn_test_crank = {{0.2, 0.3, 0.4, 0.9}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	H.E.rig.look(150, 0) H.step(1) -- turned off the axes, settled
+	H.tap("Left mouse") H.step(1)
+	local l = H.last("launch")
+	check(l, "a shot")
+	local g = l[4]
+	check(off_crosshair(g) < 0.05, "on the crosshair's line: " .. off_crosshair(g) .. " m off it")
+	check(math.abs(g.y - H.ground(g.x, g.z)) < 0.1, "on the ground there: " .. g.y .. " against " .. H.ground(g.x, g.z))
+end
+
+-- the author, 2026-10-15: "shooting then moving the cameras has the same bullet spawn and placement as the first shot".
+-- A burst took its aim once, at the click: each spawn takes the crosshair as it is when it leaves
+T.a_burst_follows_the_crosshair = function()
+	H.fresh({units = {{general = true}, {type = "zorn_test_crank", men = 20, x = 40, range = 120, ammo = 10, start_ammo = 10,
+		slots = {[454] = true, [1557] = true, [1564] = true, [42] = true}}}})
+	local t = H.default_cco()
+	t["ActiveProjectileContext.Key"], t["ActiveProjectileContext.BaseReloadTimeContext.Value"] = "rocket", 10
+	t["ActiveProjectileContext.NumProjectiles"] = 1
+	H.cco_ids = {cco_2 = t}
+	H.E.D.fires.zorn_test_crank = {{0.2, 0.3, 0.4, 0.9}, {0.8, 0.3, 0.4, 0.9}}
+	H.select(H.units[2]) H.tap("F2") H.step(1)
+	H.tap("Left mouse")
+	for _ = 1, 30 do H.step(1 / 60) if H.count("launch") > 0 then break end end
+	check(H.count("launch") == 1, "the first spawn is off")
+	H.E.rig.look(300, 0) -- the camera swings between the two
+	for _ = 1, 60 do H.step(1 / 60) if H.count("launch") > 1 then break end end
+	local l = H.all("launch")
+	check(#l == 2, "the second spawn is off")
+	local mx, _, mz = H.E.P.model_pos(H.E.F.model)
+	local function bearing(p) return math.deg(math.atan2(p.x - mx, p.z - mz)) end
+	check(math.abs((bearing(l[2][4]) - bearing(l[1][4]) + 540) % 360 - 180) > 20, "the second goes where he now looks: "
+		.. bearing(l[1][4]) .. " then " .. bearing(l[2][4]))
+	check(off_crosshair(l[2][4]) < 0.05, "on the crosshair: " .. off_crosshair(l[2][4]) .. " m off it")
+end
+
+-- the author, 2026-10-15: "should be health of the individual unit not the whole battalion". Measured: each man's model
+-- holds his hit points, int32 at +0xB18 (his maximum) and +0xB1C (now); summed over his men, the current is HealthValue
+-- exactly (16 units, a lord and 200 Plaguebearers among them)
+T.played_as_one_man_the_panel_shows_his_own_health = function()
+	local t = hud_cco({})
+	t.HealthValue, t.HealthMax = 3000, 4800
+	hud_on({men = 40, hp = 0.625, cco = t})
+	local m = H.E.F.model
+	check(m, "one man of the forty")
+	m.hp, m.hp_max = 45, 120
+	H.step(0.25)
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	check(hud_part("hp").text == "45 / 120", "his own figure: " .. tostring(hud_part("hp").text))
+	check(hud_part("health_fill").w == math.floor(L.fill.health_fill * 45 / 120 + 0.5), "his own bar: "
+		.. hud_part("health_fill").w)
+	hud_on({men = 1, hp = 0.625, cco = t})
+	H.step(0.25)
+	check(hud_part("hp").text == "3000 / 4800", "played whole: the unit's figure: " .. tostring(hud_part("hp").text))
+	-- another model class may keep something else there (a lord on a Longma is another class, measured 2026-10-13)
+	hud_on({men = 40, hp = 0.625, cco = t})
+	H.E.F.model.hp, H.E.F.model.hp_max = 5000, 120
+	H.step(0.25)
+	check(hud_part("hp").text == "3000 / 4800", "not a health: the unit's figure: " .. tostring(hud_part("hp").text))
+end
+
+
+-- the author, 2026-10-15: "add button for cheer, and hide all ui, use O and P but can be configured in MCT", then "show
+-- also button huds for flying, cheer and hide UI". O cheers: a CELEBRATE clip his men have (1094-1103), held like an
+-- action. Measured: about half of all land units' men have one, 1.5-7.1 s, median 2.9, each with its own sound
+T.o_cheers_with_his_celebrate_clip = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("O") H.step(0.1)
+	local p = H.last("play")
+	check(p and p[2] == H.E.F.model.id and p[3] == 1094, "CELEBRATE_1 on him: " .. tostring(p and p[3]))
+	local steers = H.count("steer")
+	H.down("W") H.step(0.5)
+	check(H.count("steer") == steers, "held like an action: W waits")
+	H.up("W")
+end
+
+-- measured 2026-10-15: no CELEBRATE or TAUNT clip in the bins of Plaguebearers, Blightkings or Tamurkhan. Such a man has
+-- no cheer, no button and nothing on O (the author, 2026-10-15 21:20: "only show cheer and fly if its applicable")
+T.a_man_with_no_cheer_clip_has_no_cheer = function()
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[42] = true, [454] = true}})
+	check(not hud_part("act_cheer_frame"):Visible(), "no cheer button")
+	H.tap("O") H.step(0.1)
+	check(H.count("taunt") == 0 and H.count("play") == 0, "nothing on O: taunts " .. H.count("taunt") .. ", clips " .. H.count("play"))
+end
+
+-- P hides everything the pack draws, and CA's interface stays hidden with the mouse freed; paused too (a still to take
+-- a picture of); P again brings it back
+T.p_hides_all_the_interface_even_paused = function()
+	crossbowmen()
+	H.step(0.1)
+	local hud = find_uicomponent(H.root, "derpy_tp_hud")
+	check(hud:Visible() and crosshair_up(), "the HUD and the crosshair")
+	H.paused = true
+	H.tap("P") H.step(0.1)
+	check(not hud:Visible() and not crosshair_up(), "P, paused: both hidden")
+	H.down("Middle mouse") H.step(0.1)
+	local c = H.last("cinematic_ui")
+	check(c[2] == true and c[3] == true, "the freed mouse shows the cursor, not CA's interface")
+	H.up("Middle mouse") H.step(0.1)
+	H.tap("P") H.step(0.1)
+	check(find_uicomponent(H.root, "derpy_tp_hud"):Visible() and crosshair_up(), "P again: back")
+	H.paused = false
+end
+
+-- default_keys: P is the game's pause, O its radar, K its own interface toggle, Space its allied outlines. While third
+-- person is on, a game shortcut on one of its keys is off, and back on at the end; a key moved in MCT frees it
+local function shortcuts() local s = {} for _, c in ipairs(H.all("disable_shortcut")) do s[c[2]] = c[3] end return s end
+T.the_games_shortcuts_on_its_keys_are_off_while_on = function()
+	general_on()
+	local s = shortcuts()
+	check(s.toggle_pause == true and s.visibility_toggle_radar == true, "pause and radar off")
+	check(s.toggle_ui == nil, "K is none of its keys: CA's interface toggle is left alone")
+	check(s.cam_down == true, "Z walks: the camera's down key off")
+	H.tap("F2")
+	s = shortcuts()
+	check(s.toggle_pause == false and s.visibility_toggle_radar == false, "back at the end")
+	H.fresh({mct = {key_hide_ui = "K"}})
+	H.tap("F2")
+	s = shortcuts()
+	check(s.toggle_ui == true and s.toggle_pause == nil, "hide on K: K's game shortcut off, pause left alone")
+end
+
+-- the author, 2026-10-15: "fix two modes for ranged units (should walk and idle with melee weapons if melee mode, and
+-- vice versa for ranged)". The game's melee mode (unitcontroller:melee) is the whole unit's: a unit played whole takes
+-- his mode, off again at the end
+T.a_unit_played_whole_takes_his_melee_mode = function()
+	H.fresh({units = {{general = true, men = 1, range = 100, ammo = 10}}})
+	H.tap("F2") H.step(0.1)
+	check(H.count("uc:melee") == 0, "ranged: melee mode left off")
+	H.tap("Right mouse") H.step(0.1)
+	local c = H.last("uc:melee")
+	check(c and c[3] == true, "melee: melee mode on")
+	H.tap("Right mouse") H.step(0.1)
+	check(H.last("uc:melee")[3] == false, "ranged again: off")
+	H.tap("Right mouse") H.step(0.1)
+	H.tap("F2")
+	check(H.last("uc:melee")[3] == false, "third person off: off again")
+end
+
+-- the author, 2026-10-15 21:46: "why does switching melee and range of one units affects the entire battalion, I thought
+-- we established that the controlled unit will be dependent". The design (section 3): one man of a regiment walks, swings
+-- and shoots alone, and the regiment gets no orders - its melee mode is one
+T.a_regiment_played_as_one_man_keeps_its_own_mode = function()
+	crossbowmen()
+	H.tap("Right mouse") H.step(0.1)
+	check(not H.E.F.ranged, "he is in melee")
+	H.tap("Right mouse") H.step(0.1) H.tap("Right mouse") H.step(0.1)
+	H.tap("F2")
+	check(H.count("uc:melee") == 0, "no melee mode order to his regiment: " .. H.count("uc:melee"))
+end
+
+T.a_unit_with_no_missile_weapon_is_never_put_in_melee_mode = function()
+	H.fresh({units = {{general = true, men = 1}}}) -- played whole: the one kind melee mode is ever given to
+	H.tap("F2") H.step(0.1)
+	H.tap("Right mouse") H.step(0.1) H.tap("F2")
+	check(H.count("uc:melee") == 0, "no melee mode calls")
+end
+
+-- a man who cannot shoot alone is in melee; his regiment is not put in melee mode for it
+T.a_man_who_cannot_shoot_alone_leaves_his_regiments_mode = function()
+	H.fresh({units = {{general = true, type = "wh_test_mod_grenadiers", men = 20, range = 60, ammo = 10}}})
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.ranged and H.count("uc:melee") == 0, "in melee, no order: " .. H.count("uc:melee"))
+end
+
+-- the bar: cheer for a man with a cheer clip, fly for a unit that can fly, lit while it flies; each with its key
+T.the_action_bar_shows_fly_and_cheer = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	check(hud_part("act_cheer_frame"):Visible() and hud_part("act_cheer_key").text == "O", "cheer, on O")
+	check(not hud_part("act_fly_frame"):Visible(), "no fly for a unit that cannot fly")
+	playing({type = "wh_test_gyro", men = 5, can_fly = true, flying = true, x = 40})
+	H.step(0.3)
+	check(hud_part("act_fly_frame"):Visible() and hud_part("act_fly_key").text == "Space", "fly, on Space")
+	check(hud_part("act_fly_active_l"):Visible(), "lit while it flies")
+end
+
+
+-- all seven buttons (a flyer that shoots, with charge, jump and cheer clips) beside ten abilities on a 1280 screen: the
+-- bar does not run into the ability bar, it goes up a row (seen in the preview, 2026-10-15: eight left 22 px at 1600)
+T.a_full_action_bar_clears_the_ability_bar = function()
+	local ab = {} for i = 1, 10 do ab[i] = "a" .. i end
+	H.fresh({units = {{general = true, abilities = ab, men = 1, range = 100, ammo = 10, can_fly = true, flying = true}},
+		screen = {1280, 720}})
+	H.cco = hud_cco(ab)
+	H.tap("F2") H.step(0.3)
+	local ACTS = {"walk", "sprint", "attack", "fire", "jump", "fly", "cheer"}
+	local shown = 0
+	for _, a in ipairs(ACTS) do if hud_part("act_" .. a .. "_frame"):Visible() then shown = shown + 1 end end
+	check(shown == 7, "all seven: " .. shown)
+	local function box(id) local c = hud_part(id) return c.x, c.y, c.x + c.w, c.y + c.h end
+	local hit
+	for _, a in ipairs(ACTS) do
+		for _, pa in ipairs({"_frame", "_keyplate"}) do
+			local ax0, ay0, ax1, ay1 = box("act_" .. a .. pa)
+			for k = 1, 10 do
+				for _, pb in ipairs({"_frame", "_keyplate"}) do
+					local bx0, by0, bx1, by1 = box("slot_" .. k .. pb)
+					if not (ax1 <= bx0 or bx1 <= ax0 or ay1 <= by0 or by1 <= ay0) then hit = hit or (a .. pa .. " on slot " .. k .. pb) end
+				end
+			end
+		end
+	end
+	check(hit == nil, "no button on an ability: " .. tostring(hit))
+end
+
+
+-- third person ended with the interface hidden: CA's comes back all the same
+T.stopping_with_the_interface_hidden_brings_it_back = function()
+	general_on()
+	H.step(0.1)
+	H.tap("P") H.step(0.1)
+	H.tap("F2")
+	local c = H.last("cinematic_ui")
+	check(c[2] == false and c[3] == true, "CA's interface and the cursor back")
+end
+
+-- a man with a TAUNT clip and no CELEBRATE one taunts
+T.a_man_with_only_a_taunt_clip_taunts = function()
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[42] = true, [454] = true, [1104] = true}})
+	check(hud_part("act_cheer_frame"):Visible(), "a cheer button")
+	H.tap("O") H.step(0.1)
+	local p = H.last("play")
+	check(p and p[3] == 1104 and H.count("taunt") == 0, "TAUNT_1: " .. tostring(p and p[3]))
+end
+
+
+-- the author, 2026-10-15 21:16: "WHY IS IT SWINGING TO THE RIGHT". Measured (probes/tp_cmd_trace.py, Chosen, ATTACK_2): the
+-- engine turns him through the clip - 21 deg right on the wind-up, 28-46 deg left through the blow, back by the end - and
+-- the lock's facing, written every frame, undid each turn, so the blow landed 30-45 deg right of the crosshair. A swing
+-- starts facing the camera; once the engine plays its clip, the clip turns him
+T.a_swing_lets_its_clip_turn_him = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.rig.look(150, 0) H.step(0.1)
+	local yaw0 = H.E.rig.yaw
+	local faces = H.count("face")
+	H.tap("Left mouse") H.step(1 / 60)
+	local f = H.all("face")[faces + 1]
+	check(f and f[2] == H.E.F.model.id and math.abs(f[3] - yaw0) < 0.01, "the swing starts facing the camera")
+	faces = H.count("face")
+	H.step(1)
+	check(plays_of(454) == 1 and H.count("face") == faces, "nothing written over the clip's turn: " .. H.count("face") - faces)
+end
+
+
+-- the author, 2026-10-15 21:20: "move the hide ui buttons elsewhere to not crowd the actions bar". Hide sits alone in the
+-- top-right corner, on its key, and is no action button
+T.the_hide_button_sits_alone_in_the_top_right_corner = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local h = hud_part("hide_frame")
+	check(h and h:Visible() and hud_part("hide_key").text == "P", "hide, on P")
+	check(math.abs(h.x + h.w - (1920 - 24)) <= 1 and math.abs(h.y - 24) <= 1, "on the top and right margins: " .. h.x .. "," .. h.y)
+	check(hud_part("act_hide_frame") == nil, "not in the action bar")
+	local k = hud_part("hide_keyplate")
+	check(k.y >= h.y + h.h - 20 and k.x < h.x + h.w and k.x + k.w > h.x, "its key under it")
+end
+
+
+-- the author, 2026-10-15: "the camera issue is still happening when near buildings" - a head-cam. Measured
+-- (probes/zz_tp_recorder.lua): the engine reports the eye two frames late (got 99.7 against asked 97.9, the y asked two
+-- frames before), on open ground; read as a roof's lift, every quick drop of the eye pulled the boom in. Only a lift
+-- above all three of the last asked eyes is a roof's
+T.a_camera_that_reports_late_is_no_roof = function()
+	H.fresh({units = {{general = true, men = 1}}, cam_lag = 2})
+	H.tap("F2") H.step(0.5)
+	H.E.rig.pitch = 0.6 H.step(0.5)
+	-- about 0.5 m a frame, as a quick zoom drops it (measured: 1.8 m over the two frames)
+	for _ = 1, 10 do H.E.rig.pitch = H.E.rig.pitch - 0.08 H.step(1 / 60) end
+	check(H.E.rig.boom == 1, "the boom stays out: " .. H.E.rig.boom)
+	local z = H.units[1]:position():get_z()
+	H.roof = function(_, ez) if ez < z - 1.5 then return 6 end end -- a building behind him: still a roof, late or not
+	H.step(3)
+	check(H.E.rig.boom < 1 and H.eye.z > z - 1.5, "it comes in out of the building: boom " .. H.E.rig.boom)
+end
+
+
+-- the author, 2026-10-15 21:54: "the issue of unit while melee still looking at the right is still happening at the last
+-- part of the animation". The swing's hold ends at the swing cooldown (1.5 s) while its clip runs on (2.6-3.5 s
+-- measured): standing still, the idle hold wrote the camera's facing every frame over the clip's last turn. Nothing writes
+-- his facing until the clip ends
+T.a_swing_clip_turns_him_to_its_end = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.rig.look(150, 0) H.step(0.1)
+	H.tap("Left mouse") H.step(1 / 60)
+	local function facings()
+		local n = H.count("face")
+		for _, h in ipairs(H.all("hold")) do if h[5] ~= nil then n = n + 1 end end
+		return n
+	end
+	local n = facings()
+	H.step(3) -- past the 1.5 s hold, inside the 4 s clip
+	check(facings() == n, "nothing written over the clip after its hold: " .. facings() - n)
+	H.step(1.5) -- the clip over
+	check(facings() > n, "then he holds the camera's facing again")
+end
+
+
+-- the author, 2026-10-15 21:54: "fire level high, level, low not fitting to the precursor fire of aim high, level and
+-- low". The game has three pairs, SHOOT_READY_TO_AIM_ and FIRE_ LOW/LEVEL/HIGH (1553/1556, 1554/1557, 1555/1558); the shot
+-- played LEVEL whatever it was. Now one pair per shot, by the angle it leaves at: the low arc of its projectile's speed
+-- (data.lua speeds) to the aim point; past 22.5 deg up the high pair, past 22.5 down the low, with that clip's muzzle
+-- (data.lua fires_high, fires_low). Empire crossbowmen: bolt 45 m/s, muzzles 0.36, 1.54 and 2.11 m up
+local EMPX = "wh_main_emp_inf_crossbowmen"
+local function shot_plays() local p = {} for _, c in ipairs(H.all("play")) do p[#p + 1] = c[3] end return table.concat(p, " ") end
+
+T.a_long_shot_raises_and_fires_high = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100}) -- looking level: the aim at his 160 m reach, ~25 deg
+	H.tap("Left mouse") H.step(4.5)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1555 and p[2][3] == 1558, "aim high, then fire high: " .. shot_plays())
+	local l = H.all("launch")
+	local _, my = H.E.P.model_pos(H.E.F.model)
+	check(#l == 1 and math.abs(l[1][3].y - (my + 2.111)) < 0.05, "from the high clip's muzzle (moved out along the shot): "
+		.. (l[1] and l[1][3].y - my or "none"))
+end
+
+-- the author, 2026-10-16: "aiming up the projectile hits the controlled unit". Measured (log): Akshina's Ambushers' high
+-- muzzle is 0.45 m ahead and 2 m up, his head, and his hit points fell 77 to 48 0.2 s after the shot: a scripted launch
+-- has no owner. A spawn nearer than 1.1 m ahead of him moves out along its own line to the aim (no level or low muzzle,
+-- 1.12 m and out, ever hit him). The crossbowmen's high muzzle is 0.58 m ahead
+T.a_muzzle_inside_him_moves_out_along_the_shot = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	H.E.rig.pitch = -0.25 H.step(0.1) -- looking up, as when it hit him: the line to the aim climbs
+	local m = H.E.F.model
+	H.tap("Left mouse") H.step(4.5)
+	local l = H.all("launch")
+	check(#l == 1, "one shot: " .. #l)
+	local x, y, z = H.E.P.model_pos(m)
+	local f, t = l[1][3], l[1][4]
+	local h = math.sqrt((f.x - x) ^ 2 + (f.z - z) ^ 2)
+	check(math.abs(h - 1.1) < 1e-3, "1.1 m from him: " .. h)
+	-- on the line from the muzzle (0.211 right, 2.111 up, 0.583 ahead) to the aim
+	local c, sn = math.cos(H.E.rig.yaw), math.sin(H.E.rig.yaw)
+	local mx, my, mz = x + 0.211 * c + 0.583 * sn, y + 2.111, z - 0.211 * sn + 0.583 * c
+	local ax, ay, az, bx, by, bz = f.x - mx, f.y - my, f.z - mz, t.x - mx, t.y - my, t.z - mz
+	local cx, cy, cz = ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx
+	local nb = math.sqrt(bx * bx + by * by + bz * bz)
+	check(math.sqrt(cx * cx + cy * cy + cz * cz) / nb < 0.01, "on the shot's line")
+	check((f.x - mx) * bx + (f.z - mz) * bz > 0, "toward the aim, not back through him")
+end
+
+-- the author, 2026-10-16: "twitching when aiming high", "aiming high still not fixed". Measured (log): a first high shot
+-- went raise 1555, no clip for 0.1 s, fire 1558 - between them he stood in his idle, the gun level: a raise's length was
+-- learned on its first whole one, so the first fire went only once it had ended. data.lua raises holds each raise's length
+-- off its .anim (the Streltsi's 1.1 s and Akshina's 0.8 s, as the game played them): fire goes AIM_LEAD before the end
+-- on the first shot too
+T.the_first_high_shot_goes_from_the_raise_into_the_fire = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100, clip_ms = {[1555] = 1100}})
+	H.E.D.raises = H.E.D.raises or {}
+	H.E.D.raises[EMPX] = {0.5, 0.6, 1.1} -- each raise its own: the level one's would cut the high one short
+	H.report_ms = 100 -- the engine reports a new clip a model tick after it is sent (the log: 0.1 s)
+	local m = H.E.F.model
+	H.tap("Left mouse")
+	local raised, gap, fired = nil, false, nil
+	for _ = 1, 150 do
+		H.step(1 / 60)
+		local slot = H.E.P.anim_slot(m)
+		if slot == 1555 then raised = raised or H.game_ms elseif slot == 1558 then fired = H.game_ms break elseif raised then gap = true end
+	end
+	check(raised and fired and not gap, "raise, then fire, with no idle between: raised " .. tostring(raised) .. ", gap "
+		.. tostring(gap) .. ", fired " .. tostring(fired))
+	check(fired - raised >= 950, "the whole 1.1 s raise, less the lead: " .. (fired - raised) .. " ms")
+end
+
+-- measured live 2026-10-16 (script log, the Hochland Long Rifles, three shots alike): raise 1554 sent at 91.8 s and
+-- reported at 92.0, no clip at 92.8, its hold 1548 at 93.0 - the idle the author saw ("animation when shooting still
+-- reverts to idle for 1 frame, then shooting animation"). The lead was timed from the raise's report, which comes up to
+-- 0.31 s after it starts in a busy battle; timed from its send, the hold goes before the raise ends
+T.a_raise_reported_late_still_goes_straight_into_its_hold = function()
+	local RIFLES = "wh3_dlc25_emp_inf_hochland_long_rifles_ror"
+	local slots = {[42] = true, [1548] = true, [1554] = true, [1557] = true, [1564] = true} -- level raise, hold, fire, reload
+	playing({type = RIFLES, men = 21, x = 40, range = 260, ammo = 100, slots = slots, clip_ms = {[1554] = 800}})
+	H.E.D.raises = H.E.D.raises or {}
+	H.E.D.raises[RIFLES] = {0.8, 0.8, 0.8}
+	H.report_ms = 250
+	local m = H.E.F.model
+	H.tap("Left mouse")
+	local raised, gap, held = nil, false, nil
+	for _ = 1, 150 do
+		H.step(1 / 60)
+		local slot = H.E.P.anim_slot(m)
+		if slot == 1554 then raised = raised or H.game_ms elseif slot == 1548 then held = H.game_ms break elseif raised then gap = true end
+	end
+	local sent = {}
+	for _, p in ipairs(H.all("play")) do sent[#sent + 1] = p[3] end
+	check(raised and held and not gap, "raise, then hold, no idle between: raised " .. tostring(raised) .. ", gap "
+		.. tostring(gap) .. ", held " .. tostring(held) .. "; sent " .. table.concat(sent, " "))
+end
+
+-- seen 2026-10-16 (probes/zz_tp_shot_side2.lua, the Streltsi from the side; the author: "strteltzi sitll suffering from
+-- the same ranged animation issue, aim high -> shoot level"): his level raise ends ~20 deg up and the fire snapped it
+-- level. The pair's AIM clip holds the gun level (probes/zz_tp_aim_seq.lua): raise, aim, then the fire, AIM_HOLD after
+-- the aim is reported
+local STRELTSI = "wh3_main_ksl_inf_streltsi_0"
+local function shot_sequence(o)
+	playing(o)
+	if o.before then o.before() end
+	H.report_ms = 100 -- the engine reports a new clip a model tick after it is sent
+	H.tap("Left mouse")
+	local seq, at = {}, {}
+	for _ = 1, 240 do
+		H.step(1 / 60)
+		local p = H.last("play")
+		if p and p[3] ~= seq[#seq] then seq[#seq + 1], at[#at + 1] = p[3], H.game_ms end
+	end
+	return seq, at
+end
+
+local AIMS = {[42] = true, [1547] = true, [1548] = true, [1549] = true, [1553] = true, [1554] = true, [1555] = true,
+	[1556] = true, [1557] = true, [1558] = true, [1564] = true}
+
+T.the_raise_goes_into_its_aim_before_the_fire = function()
+	local seq, at = shot_sequence({type = STRELTSI, men = 21, x = 40, range = 160, ammo = 100, slots = AIMS,
+		clip_ms = {[1554] = 1100}}) -- the Streltsi's own raise, which data.lua's length times
+	check(seq[1] == 1554 and seq[2] == 1548 and seq[3] == 1557, "raise, aim, fire: " .. table.concat(seq, " "))
+	check(at[2] - at[1] >= 900, "the whole raise first, less the lead: " .. tostring(at[2] - at[1]) .. " ms")
+	check(at[3] - at[2] >= 290, "the fire once the aim is reported and held: " .. tostring(at[3] - at[2]) .. " ms")
+end
+
+-- the aim clip replaced before its hold is over (the engine's own, a hit): the fire all the same
+T.an_aim_cut_short_still_fires = function()
+	playing({type = STRELTSI, men = 21, x = 40, range = 160, ammo = 100, slots = AIMS})
+	local m = H.E.F.model
+	H.tap("Left mouse")
+	for _ = 1, 120 do H.step(1 / 60) if H.E.F.shot and H.E.F.shot.phase == "hold" and H.E.F.shot.started then break end end
+	check(H.E.F.shot and H.E.F.shot.phase == "hold", "holding the aim")
+	m.anim_slot, m.anim_end = 1439, nil
+	H.step(1 / 60) H.step(1 / 60)
+	check(H.last("play")[3] == 1557, "the fire: " .. tostring(H.last("play")[3]))
+end
+
+-- nor does a step cut it, as it cuts neither the raise nor the fire
+T.a_step_does_not_cut_the_aim_hold = function()
+	playing({type = STRELTSI, men = 21, x = 40, range = 160, ammo = 100, slots = AIMS})
+	H.tap("Left mouse")
+	for _ = 1, 120 do H.step(1 / 60) if H.E.F.shot and H.E.F.shot.phase == "hold" then break end end
+	check(H.E.F.shot and H.E.F.shot.phase == "hold", "holding the aim")
+	H.down("W") H.step(0.6) H.up("W")
+	check(plays_of(1557) == 1, "the fire still plays: " .. plays_of(1557))
+end
+
+-- a raise data.lua has no length for, learned on its end: into the aim as well
+T.a_raise_of_no_known_length_goes_into_its_aim_too = function()
+	local seq = shot_sequence({type = STRELTSI, men = 21, x = 40, range = 160, ammo = 100, slots = AIMS,
+		clip_ms = {[1554] = 1100}, before = function() H.E.D.raises = H.E.D.raises or {} H.E.D.raises[STRELTSI] = {0, 0, 0} end})
+	check(seq[1] == 1554 and seq[2] == 1548 and seq[3] == 1557, "raise, aim, fire: " .. table.concat(seq, " "))
+end
+
+T.a_man_with_no_aim_clip_goes_from_the_raise_into_the_fire = function()
+	local seq = shot_sequence({type = STRELTSI, men = 21, x = 40, range = 160, ammo = 100,
+		slots = {[42] = true, [1554] = true, [1557] = true, [1564] = true}})
+	check(seq[1] == 1554 and seq[2] == 1557, "raise, fire: " .. table.concat(seq, " "))
+end
+
+-- a unit data.lua has no raise for still learns it on the first whole one
+T.a_raise_data_lua_lacks_is_learned_on_the_first_shot = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100, clip_ms = {[1555] = 1100}})
+	H.E.D.raises = H.E.D.raises or {}
+	H.E.D.raises[EMPX] = {1.1, 1.1, 0} -- no high raise in his bin's data: 0
+	H.report_ms = 100
+	local m = H.E.F.model
+	local function gap_on_a_shot()
+		H.tap("Left mouse")
+		local raised, gap = false, false
+		for _ = 1, 150 do
+			H.step(1 / 60)
+			local slot = H.E.P.anim_slot(m)
+			if slot == 1555 then raised = true elseif slot == 1558 then break elseif raised then gap = true end
+		end
+		H.step(16)
+		return gap
+	end
+	check(gap_on_a_shot(), "the first: fire once the raise has ended")
+	check(not gap_on_a_shot(), "the second: from the raise into the fire")
+end
+
+-- the author, 2026-10-16: "UNRESPONSIVE UNITS WHEN IN COMBAT INCL BATTALION STILL NOT FIXED", not reproduced off the
+-- game, and no log line marks it. With the debug log on, a second of movement keys held with him standing logs what held
+-- him, once a stall; and a clip the engine never plays logs too
+local function logged_n(text) local n = 0 for _, l in ipairs(H.log) do if l:find(text, 1, true) then n = n + 1 end end return n end
+T.a_stall_with_the_keys_held_is_logged = function()
+	H.fresh({mct = {debug_log = true}, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	H.down("W") H.step(0.6) -- the harness's steer moves nobody: he stands
+	check(logged_n("stalled") == 0, "not yet")
+	H.step(0.6)
+	check(logged_n("stalled 1 s with a move key held") == 1, "a second still: logged")
+	H.step(3)
+	check(logged_n("stalled") == 1, "once a stall")
+	H.up("W") H.step(0.1) H.down("W") H.step(1.2)
+	check(logged_n("stalled") == 2, "the next stall logs again")
+	H.up("W")
+end
+
+T.a_swing_the_engine_never_plays_is_logged = function()
+	H.fresh({mct = {debug_log = true}, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	H.report_ms = 1e9 -- the engine never reports it
+	H.tap("Left mouse") H.step(1.2)
+	check(logged_n("never played") == 1, "logged: " .. table.concat(H.log, " | "):sub(-300))
+end
+
+-- the author, 2026-10-16: "if no charge animation, add a 20% boost to speed", then "20% boost even with charge
+-- animation": a sprint is 1.2 times his run
+T.a_sprint_is_a_fifth_faster = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.step(0.6)
+	check((H.last("steer")[7] or 1) == 1, "running: his own speed")
+	H.down("Shift") H.step(0.3)
+	check(near(H.last("steer")[7], 1.2), "sprinting: 1.2 times: " .. tostring(H.last("steer")[7]))
+	H.up("Shift") H.step(0.1)
+	check((H.last("steer")[7] or 1) == 1, "let go: his own again")
+	H.up("W")
+end
+
+-- a regiment played whole: CA's walk speed scalar, after each order at the sprint (it resets with every order)
+T.a_unit_played_whole_sprints_a_fifth_faster = function()
+	general_on() H.step(0.5)
+	H.down("W") H.step(0.6)
+	check(H.count("uc:change_current_walk_speed") == 0, "running: no scalar")
+	H.down("Shift") H.step(0.6)
+	local s = H.last("uc:change_current_walk_speed")
+	check(s and near(s[3], 1.2), "sprinting: 1.2")
+	local last_order, last_speed = 0, 0
+	for i, c in ipairs(H.calls) do
+		if c[1] == "uc:goto_location" then last_order = i elseif c[1] == "uc:change_current_walk_speed" then last_speed = i end
+	end
+	check(last_speed > last_order, "after its order")
+	local orders = H.count("uc:goto_location")
+	H.step(2)
+	check(H.count("uc:goto_location") == orders, "one order for a steady sprint, not one a step")
+	H.up("Shift") H.up("W")
+end
+
+-- the author, 2026-10-16: "when aiming here, it shoots above, so its aiming at the terrain not the cursor target". The
+-- view ran through the Ogre under the crosshair to the ground behind him, and the arc to that far point passed over him.
+-- The aim stops at the first enemy man the view passes through: a standing cylinder of his entity's radius and height
+local function aim_through(o, enemies, ly)
+	playing(o, enemies)
+	local R = H.E.rig
+	R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = 40, 3, -5, 40, ly, 30
+	return H.E.combat.aim_point(160)
+end
+
+T.the_aim_stops_at_the_enemy_under_the_crosshair = function()
+	local _, _, az = aim_through({type = XBOW, men = 21, x = 40, range = 160, ammo = 100}, {{x = 40, z = 30, men = 1}}, 1.2)
+	check(az and math.abs(az - 30) < 1, "at the man 30 m out, not the ground behind him: " .. tostring(az))
+end
+
+T.a_view_over_his_head_goes_on_to_the_ground = function()
+	local _, _, az = aim_through({type = XBOW, men = 21, x = 40, range = 160, ammo = 100}, {{x = 40, z = 30, men = 1}}, 2.4)
+	check(az and az > 40, "past the man: " .. tostring(az))
+end
+
+T.a_tall_enemy_stops_a_view_a_man_would_not = function()
+	local _, _, az = aim_through({type = XBOW, men = 21, x = 40, range = 160, ammo = 100},
+		{{type = "wh_test_ogres", x = 40, z = 30, men = 1}}, 2.4)
+	check(az and az > 40, "his height unknown, a man's: past him: " .. tostring(az))
+	H.E.D.bodies = {wh_test_ogres = {1.2, 3.1}}
+	local _, _, az2 = H.E.combat.aim_point(160)
+	check(az2 and math.abs(az2 - 30) < 1.5, "3.1 m tall (data.lua bodies): at him: " .. tostring(az2))
+end
+
+T.an_enemy_beside_the_view_does_not_stop_it = function()
+	local _, _, az = aim_through({type = XBOW, men = 21, x = 40, range = 160, ammo = 100}, {{x = 43, z = 30, men = 1}}, 1.2)
+	check(az and az > 40, "3 m off the line: past him: " .. tostring(az))
+end
+
+-- looking up, the view's line runs down behind the camera: an enemy there is not under the crosshair
+T.an_enemy_behind_the_camera_does_not_stop_the_aim = function()
+	playing({type = XBOW, men = 21, x = 40, range = 160, ammo = 100}, {{x = 40, z = -15, men = 1}})
+	local R = H.E.rig
+	R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = 40, 1.5, -5, 40, 3, 30
+	local _, _, az = H.E.combat.aim_point(160)
+	check(az and az > 0, "ahead of the camera: " .. tostring(az))
+end
+
+T.a_friend_in_the_way_does_not_stop_the_aim = function()
+	local u = playing({type = XBOW, men = 21, x = 40, range = 160, ammo = 100})
+	H.unit({type = "wh_test_melee", x = 40, z = 30, men = 1})
+	local R = H.E.rig
+	R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = 40, 3, -5, 40, 1.2, 30
+	local _, _, az = H.E.combat.aim_point(160)
+	check(u and az and az > 40, "through his own side: " .. tostring(az))
+end
+
+T.a_near_shot_raises_and_fires_level = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	H.E.rig.pitch = 0.08 H.step(0.1) -- looking down a little: the aim on the ground some 40 m out
+	H.tap("Left mouse") H.step(1.5)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1554 and p[2][3] == 1557, "aim level, then fire level: " .. shot_plays())
+	local l = H.all("launch")
+	local _, my = H.E.P.model_pos(H.E.F.model)
+	check(#l == 1 and near(l[1][3].y, my + 1.535), "from the level clip's muzzle")
+end
+
+T.a_shot_steeply_down_raises_and_fires_low = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	H.E.rig.pitch = 1.1 H.step(0.1) -- looking down at his feet
+	H.tap("Left mouse") H.step(4.5)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1553 and p[2][3] == 1556, "aim low, then fire low: " .. shot_plays())
+end
+
+-- a pair is played whole: a man with FIRE_HIGH and no SHOOT_READY_TO_AIM_HIGH raises level and fires level
+T.a_man_without_the_whole_high_pair_keeps_the_level_one = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100,
+		slots = {[42] = true, [454] = true, [1554] = true, [1557] = true, [1558] = true, [1564] = true}})
+	H.tap("Left mouse") H.step(1.5)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1554 and p[2][3] == 1557, "aim level, then fire level: " .. shot_plays())
+end
+
+
+-- past the low arc's reach (the bolt's 45 m/s carries ~206 m) the shot leaves at its steepest: high
+T.a_shot_past_its_arc_still_goes_high = function()
+	playing({type = EMPX, men = 21, x = 40, range = 250, ammo = 100})
+	H.tap("Left mouse") H.step(4.5)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1555 and p[2][3] == 1558, "aim high, then fire high: " .. shot_plays())
+end
+
+-- a man with FIRE_HIGH's muzzle in data.lua but no FIRE_HIGH clip keeps the level pair
+T.a_man_without_the_high_fire_clip_keeps_the_level_pair = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100,
+		slots = {[42] = true, [454] = true, [1554] = true, [1555] = true, [1557] = true, [1564] = true}})
+	H.tap("Left mouse") H.step(1.5)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1554 and p[2][3] == 1557, "aim level, then fire level: " .. shot_plays())
+end
+
+-- a unit whose projectile speed data.lua does not know: the straight line to the aim, level for a far one
+T.a_shot_with_no_known_speed_goes_by_the_straight_line = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	local v = H.E.D.speeds[EMPX]
+	H.E.D.speeds[EMPX] = nil
+	local ok, err = pcall(function() H.tap("Left mouse") H.step(1.5) end)
+	H.E.D.speeds[EMPX] = v
+	assert(ok, err)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1554 and p[2][3] == 1557, "aim level, then fire level: " .. shot_plays())
+end
+
+
+-- Round 25: a fresh read of the code for logic slips (2026-10-15, the author: "can you yourself double check logic
+-- issues and do a full sweep so that i dont have to multiple test ingame"). One test per confirmed finding
+
+local function facings()
+	local n = H.count("face")
+	for _, h in ipairs(H.all("hold")) do if h[5] ~= nil then n = n + 1 end end
+	return n
+end
+
+-- the engine reports a new clip 0.19-0.31 s late, and until it starts a clip under way (the last swing's) still turns
+-- him: the camera's facing is written each frame until the clip is reported, then never
+T.a_swing_faces_the_camera_until_its_clip_is_reported = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.report_ms = 250
+	H.E.rig.look(150, 0) H.step(0.1)
+	local n = H.count("face")
+	H.tap("Left mouse") H.step(0.2)
+	check(H.count("face") >= n + 10, "the camera's facing each frame until it is reported: " .. H.count("face") - n)
+	H.step(0.1) -- past the report, 0.25 s after the click
+	n = H.count("face")
+	H.step(0.5)
+	check(H.count("face") == n, "then the clip turns him: " .. H.count("face") - n)
+end
+
+-- a cheer's clip turns him too, to its end (CELEBRATE runs up to 7.1 s, past its 3 s lock)
+T.a_cheer_clip_turns_him_to_its_end = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.rig.look(150, 0) H.step(0.1)
+	H.tap("O") H.step(1 / 60)
+	local n = facings()
+	H.step(3.5) -- past the 3 s lock, inside the 4 s clip
+	check(facings() == n, "nothing written over the cheer: " .. facings() - n)
+	H.step(1)
+	check(facings() > n, "then he holds the camera's facing again")
+end
+
+-- a shot whose clip the engine never starts (replaced before it played) gives up after LOCK_WAIT: he is not rooted
+T.a_shot_whose_clip_never_plays_gives_up = function()
+	crossbowmen()
+	H.report_ms = 5000
+	H.tap("Left mouse") H.step(1.2)
+	check(H.E.F.shot == nil, "given up")
+	local steers = H.count("steer")
+	H.down("W") H.step(0.6) H.up("W")
+	check(H.count("steer") > steers, "and he walks again")
+end
+
+-- an action drops a shot under way: a jump in the raise does not fire the old shot after it lands
+T.a_jump_drops_a_shot_under_way = function()
+	crossbowmen()
+	H.tap("Left mouse") H.step(0.3)
+	check(H.E.F.shot and H.E.F.shot.phase == "aim", "raising to aim")
+	H.tap("E") H.step(0.1)
+	check(H.E.F.shot == nil, "the jump drops the shot")
+	H.step(4)
+	check(plays_of(1557) == 0 and H.count("launch") == 0, "no shot after the jump")
+end
+
+-- one man's right-click swing with none of ATTACK_5-7 sends his regiment no attack order
+T.one_man_with_no_clip_for_a_swing_gives_no_attack_order = function()
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[42] = true, [454] = true}}, {{x = 40, z = 30, men = 10}})
+	H.step(0.5)
+	H.tap("Right mouse") H.step(0.6)
+	check(H.count("uc:attack_unit") == 0, "no attack order to his regiment: " .. H.count("uc:attack_unit"))
+end
+
+-- E in a charge: the charge's run ends with the jump, and its stop (WALK_1 at mask 0) does not cut the jump's clip
+T.a_jump_in_the_charge_plays_out = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.down("Shift") H.step(0.6)
+	check(H.E.F.charging, "charging")
+	local walks = plays_of(42)
+	H.tap("E") H.step(0.3)
+	check(plays_of(489) == 1 and plays_of(42) == walks, "the jump, not cut: walking clips " .. plays_of(42) - walks)
+	H.up("Shift") H.up("W")
+end
+
+-- the mode key's swing waits for an action under way, as a click does
+T.a_right_click_waits_for_a_jump = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("E") H.step(0.1)
+	H.tap("Right mouse") H.step(0.1)
+	check(plays_of(458) + plays_of(459) + plays_of(460) == 0, "no swing over the jump")
+end
+
+-- a unit played whole fires on the ground; a turn it never completes does not keep it firing past its commit
+T.ground_fire_that_cannot_turn_gives_up_after_its_commit = function()
+	H.fresh({units = {{general = true, men = 1, range = 100, ammo = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.E.rig.yaw = H.E.rig.yaw + 2 H.step(0.1) -- the aim far outside its arc: a turn first, which never ends here
+	H.tap("Left mouse") H.step(5)
+	check(not H.E.F.firing, "given up after the 4 s commit")
+end
+
+-- the walk's halt is an order: a click just after it waits the half second instead of being dropped
+T.a_ground_fire_click_just_after_stopping_is_not_dropped = function()
+	H.fresh({units = {{general = true, men = 1, range = 100, ammo = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.down("W") H.step(0.6) H.up("W") H.step(1 / 60)
+	H.tap("Left mouse") H.step(1)
+	check(H.count("dropped_order") == 0 and H.count("uc:attack_location") >= 1, "the fire order, not dropped: dropped "
+		.. H.count("dropped_order"))
+end
+
+-- a unit played whole turned before its swing: with no clip to play, its attack order comes 0.5 s after the turn's
+T.a_whole_unit_turned_to_swing_keeps_its_attack_order = function()
+	H.fresh({units = {{general = true, men = 1, slots = {[42] = true}}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.E.rig.yaw = H.E.rig.yaw + 2 H.step(0.1)
+	H.tap("Left mouse") H.step(1)
+	check(H.count("dropped_order") == 0 and H.count("uc:attack_unit") == 1, "turned, then the attack order: dropped "
+		.. H.count("dropped_order") .. ", attacks " .. H.count("uc:attack_unit"))
+end
+
+-- on the game's 100 ms clock he turns at the set rate, not in clipped steps: 72 deg in 0.2 s at 360 deg/s
+T.turning_keeps_its_rate_on_the_games_clock = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, tick_ms = 100})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	local yaw0 = H.E.rig.yaw
+	H.down("D") H.step(0.2) H.up("D")
+	local turned = ((H.E.F.face_yaw - yaw0) + math.pi) % (2 * math.pi) - math.pi
+	check(math.abs(turned - math.rad(72)) < math.rad(8), "72 deg: " .. math.deg(turned))
+end
+
+-- at 10 fps (a big battle) he turns at the same rate: 72 deg in 0.2 s, not half
+T.turning_keeps_its_rate_at_a_low_frame_rate = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	local yaw0 = H.E.rig.yaw
+	H.down("D")
+	for _ = 1, 2 do H.T = H.T + 0.1 - 1 / 60 H.step(1 / 60) end -- two frames of 0.1 s
+	H.up("D")
+	local turned = ((H.E.F.face_yaw - yaw0) + math.pi) % (2 * math.pi) - math.pi
+	check(math.abs(turned - math.rad(72)) < math.rad(8), "72 deg: " .. math.deg(turned))
+end
+
+-- the next man is not held up by the lock of the man who died
+T.the_next_man_is_not_held_by_the_dead_mans_lock = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("E") H.step(0.1)
+	H.E.F.model.alive = false
+	H.step(1 / 60)
+	check(H.E.F.lock == nil, "the lock went with him")
+end
+
+-- a new F2 starts him facing the camera, not the last session's walk
+T.a_new_session_starts_facing_the_camera = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("D") H.step(0.5) H.up("D") H.step(0.1)
+	H.tap("F2") H.step(0.1) H.tap("F2") H.step(0.1)
+	local h = H.last("hold")
+	check(h and math.abs(((h[5] - H.E.rig.yaw) + math.pi) % (2 * math.pi) - math.pi) < 0.01, "the camera's facing")
+end
+
+-- a spawn due in the fire clip's last model tick still leaves (the rocket barrage's 5.25 s spawn)
+T.a_spawn_due_as_the_fire_clip_ends_still_leaves = function()
+	H.fresh({units = {{general = true}, {type = XBOW, men = 21, x = 40, range = 160, ammo = 3960}}, tick_ms = 100})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	local f = H.E.D.fires[XBOW]
+	H.E.D.fires[XBOW] = {{0, 0.15, 1.06, 0.68}, {3.95, 0.15, 1.06, 0.68}}
+	local ok, err = pcall(function() H.tap("Left mouse") H.step(7) end)
+	H.E.D.fires[XBOW] = f
+	assert(ok, err)
+	check(H.count("launch") == 2, "both spawns: " .. H.count("launch"))
+end
+
+-- each raise learns its own length: the level raise's 1 s does not cut the high one short (the harness's 4 s), or the
+-- fire clip starts from the middle of the high raise
+T.a_high_raise_does_not_take_the_level_ones_length = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
+	H.E.rig.pitch = 0.08 H.step(0.1)
+	H.tap("Left mouse") H.step(15) -- a level shot and its reload: the level raise's length learned
+	H.E.rig.pitch = 0 H.step(0.1)
+	local raise, fire
+	H.tap("Left mouse")
+	for _ = 1, 300 do
+		H.step(1 / 60)
+		raise = raise or plays_of(1555) > 0 and H.game_ms
+		fire = fire or plays_of(1558) > 0 and H.game_ms
+	end
+	check(raise and fire, "a high shot: " .. shot_plays())
+	check(fire - raise >= 3900, "fire after the whole 4 s raise: " .. (fire - raise) .. " ms")
+end
+
+-- the pair's muzzle comes from data.lua: a man with the high clips whose unit data.lua has no high muzzle for keeps level
+T.a_unit_with_no_high_muzzle_keeps_the_level_pair = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	local f = H.E.D.fires_high[EMPX]
+	H.E.D.fires_high[EMPX] = nil
+	local ok, err = pcall(function() H.tap("Left mouse") H.step(1.5) end)
+	H.E.D.fires_high[EMPX] = f
+	assert(ok, err)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1554 and p[2][3] == 1557, "aim level, then fire level: " .. shot_plays())
+end
+
+-- with no known speed the straight line still picks the pair: steeply down is low
+T.a_shot_with_no_known_speed_steeply_down_goes_low = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	H.E.rig.pitch = 1.1 H.step(0.1)
+	local v = H.E.D.speeds[EMPX]
+	H.E.D.speeds[EMPX] = nil
+	local ok, err = pcall(function() H.tap("Left mouse") H.step(4.5) end)
+	H.E.D.speeds[EMPX] = v
+	assert(ok, err)
+	local p = H.all("play")
+	check(#p == 2 and p[1][3] == 1553 and p[2][3] == 1556, "aim low, then fire low: " .. shot_plays())
+end
+
+-- every order waits STEER_GAP from the last, whichever sent it: the engine drops one inside 0.5 s of another
+local function none_dropped(what, n)
+	check(H.count("dropped_order") == 0 and H.count(what) == n, what .. " " .. H.count(what) .. ", dropped "
+		.. H.count("dropped_order"))
+end
+
+T.a_ground_fire_click_just_after_f2_is_not_dropped = function()
+	H.fresh({units = {{general = true, men = 1, range = 100, ammo = 10}}})
+	H.tap("F2") H.step(0.1) -- F2's own halt
+	H.tap("Left mouse") H.step(1)
+	none_dropped("uc:attack_location", 1)
+end
+
+T.a_ground_fire_just_after_the_last_one_ended_is_not_dropped = function()
+	H.fresh({units = {{general = true, men = 1, range = 100, ammo = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.tap("Left mouse")
+	for _ = 1, 600 do H.step(1 / 60) if not H.E.F.firing then break end end
+	check(not H.E.F.firing, "the first fire over")
+	H.tap("Left mouse") H.step(1) -- its halt just before
+	none_dropped("uc:attack_location", 2)
+end
+
+T.a_whole_unit_click_just_after_stopping_attacks = function()
+	H.fresh({units = {{general = true, men = 1, slots = {[42] = true}}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.down("W") H.step(0.6) H.up("W") H.step(1 / 60)
+	H.tap("Left mouse") H.step(1)
+	none_dropped("uc:attack_unit", 1)
+end
+
+T.a_whole_unit_turn_just_after_stopping_is_not_dropped = function()
+	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.down("W") H.step(0.6) H.up("W")
+	H.E.rig.yaw = H.E.rig.yaw + 2 H.step(1 / 60)
+	H.tap("Left mouse") H.step(1.5)
+	none_dropped("uc:goto_location_angle_width", 1)
+	check(H.count("play") >= 1, "then the swing")
+end
+
+-- an order waiting for its gap when third person ends is not sent in the next session
+T.an_order_waiting_at_f2_is_not_sent_later = function()
+	H.fresh({units = {{general = true, men = 1, slots = {[42] = true}}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.down("W") H.step(0.6) H.up("W") H.step(1 / 60)
+	H.tap("Left mouse") H.tap("F2") H.step(0.1)
+	H.tap("F2") H.step(1)
+	check(H.count("uc:attack_unit") == 0, "no attack order: " .. H.count("uc:attack_unit"))
+end
+
+-- a phase starts on its own clip only: the engine reports the fire clip 0.19-0.31 s late and his shooting idle until
+-- then; the shot leaves with the fire clip, never on the idle before it
+T.a_shot_waits_for_its_fire_clip_not_the_idle_before_it = function()
+	crossbowmen()
+	H.report_ms = 300
+	H.tap("Left mouse")
+	local sent, left
+	for _ = 1, 360 do
+		H.step(1 / 60)
+		local s = H.E.F.shot
+		if not sent and s and s.phase == "fire" then sent = H.game_ms H.E.F.model.reported = 1439 end
+		if not left and H.count("launch") > 0 then left = H.game_ms end
+	end
+	check(sent and left and left - sent >= 290, "the shot leaves with the fire clip, 300 ms on: "
+		.. tostring(sent and left and left - sent))
+end
+
+-- a shooter's click waits for his jump, as a swing does (C.attack's lock: C.melee has its own)
+T.a_shot_waits_for_a_jump = function()
+	crossbowmen()
+	H.tap("E") H.step(0.1)
+	check(plays_of(489) + plays_of(490) + plays_of(491) + plays_of(492) + plays_of(493) >= 1, "jumping")
+	H.tap("Left mouse") H.step(0.5)
+	check(plays_of(1554) + plays_of(1557) == 0, "no shot over the jump")
+end
+
+-- a unit played whole without the jump clips: E gives no attack order in its place
+T.e_does_nothing_for_a_whole_unit_without_the_clip = function()
+	H.fresh({units = {{general = true, men = 1, slots = {[42] = true}}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	H.tap("E") H.step(1)
+	check(H.count("uc:attack_unit") == 0, "no attack order: " .. H.count("uc:attack_unit"))
+end
+
+T.a_mount_does_not_require_the_riders_first_attack = function()
+	local P, mr, put, BASE = real_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x2e0, horse, 8)
+	put(m.addr + 0x308, BASE + 0x6500000, 8)
+	put(BASE + 0x6500000 + 0x50 + 1901 * 2, 0xffff, 2)
+	check(P.mount(m) and P.mount(m).addr == horse, "Tyrion has a horse without RIDER_ATTACK_1")
+end
+
+T.tyrion_swings_through_his_mount_without_rider_attack_one = function()
+	local u = playing({type = "wh_test_tyrion", men = 1, slots = {[1902] = true, [1903] = true, [1904] = true}})
+	u._models[1].mount = {id = 999, slots = {[454] = true, [455] = true, [456] = true, [457] = true, [458] = true}}
+	H.tap("Left mouse") H.step(0.3)
+	local p = H.last("play")
+	check(p and p[2] == 999 and p[3] >= 454 and p[3] <= 457, "the click plays a horse attack")
+	check(H.count("uc:attack_unit") == 0, "no fallback order in place of his swing")
+end
+
+T.a_cavalry_move_steers_and_stops_the_horse = function()
+	local P, mr, put, BASE = real_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x2e0, horse, 8)
+	put(horse + 0x2e8, BASE + 0x6500000, 8)
+	put(horse + 0x330, BASE + 0x3add278, 8)
+	P.steer(m, 4, 5, true, math.pi / 2)
+	check(mr.wrote[horse + 0x368] == 4 and mr.wrote[horse + 0x370] == 5, "the horse follows the steering point")
+	check(mr.wrote[horse + 0xb0] == 16384, "the horse faces the move")
+	local stopped
+	function mr.call(f, sig, a) if f.addr == BASE + 0x3069d7c then stopped = a end end
+	P.hold(m, 4, 5, math.pi / 2)
+	check(stopped and stopped.addr == horse, "releasing the key stops the horse")
+end
+
+-- measured live 2026-10-16 (probes/zz_tp_run_speed.lua, the Knights of the White Wolf, W held): his own walk carried the
+-- engine's run speed, 7.8 m/s, and the horse moved 1.25 m/s, sprinting 1.31 - never faster than it could stop in the 3 m
+-- to its steering point (the author: "horse speed mismatch; running but still staying at walking speed"). The point 15 m
+-- ahead: 7.35 m/s, sprinting 8.89 of 9.36. A man on foot keeps 3 m
+T.a_horses_steering_point_is_far_enough_to_run = function()
+	local u = playing({type = "wh_test_mount", men = 2})
+	for i, m in ipairs(u._models) do m.mount = {id = 990 + i, x = m.x, y = m.y, z = m.z, hp = 100, hp_max = 100} end
+	H.down("W") H.step(0.5)
+	local s, horse = H.last("steer"), H.E.F.model.mount
+	check(s and s[2] == horse.id, "the horse is steered")
+	local d = math.sqrt((s[3] - horse.x) ^ 2 + (s[4] - horse.z) ^ 2)
+	check(near(d, 15), "its point 15 m ahead: " .. d)
+end
+
+T.the_regiments_melee_is_stopped_on_the_horse = function()
+	local P, mr, put, BASE = patched_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x2e0, horse, 8)
+	put(m.addr + 0xb1c, 8, 4)
+	put(horse + 0xb1c, 114, 4)
+	put(horse + 0x330, BASE + 0x3ad24b8, 8)
+	local stopped
+	function mr.call(f, sig, a) if f.addr == BASE + 0x306edd4 then stopped = a end end
+	check(P.guard(m) and stopped and stopped.addr == horse, "stop the horse's auto attack, not its rider")
+end
+
+T.a_riders_health_is_the_mounts_health = function()
+	local P, mr, put, BASE = real_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x2e0, horse, 8)
+	put(m.addr + 0xb1c, 16, 4) put(m.addr + 0xb18, 16, 4)
+	put(horse + 0xb1c, 9800, 4) put(horse + 0xb18, 9800, 4)
+	local hp, max = P.model_hp(m)
+	check(hp == 9800 and max == 9800, "Tyrion's health belongs to his mount, not the 16 hp rider")
+end
+
+T.a_dead_model_still_in_the_list_is_not_alive = function()
+	local P, mr, put, BASE = real_platform()
+	local u = fake_unit(mr, put, BASE, {{x = 0, z = 0, marker = BASE + 0x390d4f8, steer = {{0, 0}, {0, 0}, {0, 0}}}})
+	local m = P.models(u)[1]
+	put(m.addr + 0xb1c, 0, 4)
+	check(not P.alive(u, m), "list membership does not make a dying man alive")
+end
+
+T.the_front_man_skips_a_dead_model_still_in_the_list = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40})
+	local dead = H.E.F.model
+	dead.hp = 0
+	check(H.E.move.front_man(u) ~= dead, "the dead front man cannot be picked again")
+end
+
+T.a_mount_can_sprint_without_a_moving_attack = function()
+	local u = playing({type = "wh_test_cavalry", men = 21, slots = {[1902] = true}})
+	local horse = {id = 999, x = 40, y = 0, z = 0, hp = 114, hp_max = 114, slots = {[42] = true, [135] = true, [454] = true}}
+	u._models[11].mount = horse
+	H.down("W") H.down("Shift") H.step(0.3)
+	local p = H.last("play")
+	check(p and p[2] == 999 and p[3] == 135, "the horse's CHARGE does not need MOVING_ATTACK")
+	H.up("Shift") H.step(0.1)
+	check(H.last("play")[2] == 999 and H.last("play")[3] == 42, "release ends the horse's charge")
+end
+
+T.a_riders_jump_plays_the_mounts_jump = function()
+	H.fresh({units = {{general = true, men = 21, slots = {[1902] = true}}}})
+	local horse = {id = 999, x = 0, y = 0, z = 0, hp = 114, hp_max = 114,
+		slots = {[42] = true, [454] = true, [489] = true}}
+	H.units[1]._models[11].mount = horse
+	H.tap("F2") H.tap("E")
+	local p = H.last("play")
+	check(p and p[2] == 999 and p[3] == 489, "jump must not become an ordinary mount attack")
+end
+
+T.a_riders_cheer_plays_the_mounts_celebration = function()
+	H.fresh({units = {{general = true, men = 21, slots = {[1902] = true}}}})
+	local horse = {id = 999, x = 0, y = 0, z = 0, hp = 114, hp_max = 114, slots = {[42] = true, [1094] = true}}
+	H.units[1]._models[11].mount = horse
+	H.tap("F2")
+	check(H.E.F.can_cheer, "the action bar offers the mount's celebration")
+	H.E.combat.cheer(H.model_ms() / 1000)
+	local p = H.last("play")
+	check(p and p[2] == 999 and p[3] == 1094, "the offered celebration plays on its carrier")
+end
+
+T.a_new_front_man_gets_his_own_action_buttons = function()
+	local u = playing({type = "wh_test_melee", men = 21, slots = {[42] = true, [454] = true}})
+	local dead = H.E.F.model
+	for _, m in ipairs(u._models) do
+		if m ~= dead then m.slots = {[42] = true, [454] = true, [489] = true, [484] = true, [1094] = true} end
+	end
+	dead.hp = 0
+	H.step(0.1)
+	check(H.E.F.model ~= dead and H.E.F.can_jump and H.E.F.can_charge and H.E.F.can_cheer,
+		"the new body determines its jump, charge and cheer buttons")
+end
+
+T.a_single_entity_at_zero_hp_releases_control = function()
+	H.fresh() H.tap("F2")
+	H.units[1]._models[1].hp = 0
+	H.step(0.1)
+	check(not H.E.F.on, "HP zero ends control while the dead entity is still listed")
+end
+
+T.an_idle_single_entity_is_guarded = function()
+	H.fresh() H.tap("F2") H.step(0.1)
+	check(H.count("guard") > 0, "a single entity must not accept engine attacks without a click")
+end
+
+T.the_next_shooter_does_not_inherit_a_nonshooters_restriction = function()
+	local u = playing({type = XBOW, men = 21, range = 160, ammo = 3960, slots = {[42] = true, [454] = true}})
+	local dead = H.E.F.model
+	check(H.E.F.cannot_shoot, "the first man has no fire clip")
+	for _, m in ipairs(u._models) do
+		if m ~= dead then m.slots = {[42] = true, [454] = true, [1554] = true, [1557] = true, [1564] = true} end
+	end
+	dead.hp = 0 H.step(0.1)
+	H.tap("Right mouse")
+	check(H.E.F.solo and not H.E.F.cannot_shoot and H.E.F.ranged, "the next man can enter his own ranged mode")
+end
+
+T.a_flying_mount_chooses_an_available_air_attack = function()
+	local u = playing({type = "wh_test_fly_mount", men = 1, flying = true, slots = {[1902] = true, [1942] = true}})
+	u._models[1].mount = {id = 999, slots = {[454] = true, [455] = true, [495] = true}}
+	H.tap("Left mouse")
+	local p = H.last("play")
+	check(p and p[2] == 999 and p[3] == 495, "the only available airborne attack plays")
+end
+
+T.switching_to_ranged_cancels_a_native_melee_attack = function()
+	playing({type = "wh_test_ranged_lord", men = 1, range = 90, ammo = 20, slots = {[42] = true}}, {{z = 3, men = 10}})
+	H.step(0.6) H.tap("Right mouse") H.tap("Left mouse") H.step(0.6)
+	check(H.E.F.native_attack, "the clipless melee click uses a native attack")
+	H.tap("Right mouse")
+	check(H.E.F.ranged and not H.E.F.native_attack, "ranged mode restores the guard against the old melee order")
+end
+
+T.artillery_crew_keep_their_own_melee_clip = function()
+	local u = playing({type = "wh_test_artillery", men = 4, arty = true, slots = {[42] = true, [454] = true}})
+	for _, m in ipairs(u._models) do m.mount = {id = 999, slots = {[42] = true}} end
+	H.tap("Left mouse")
+	check(H.count("play") == 4 and H.last("play")[3] == 454 and H.last("play")[2] ~= 999,
+		"a crewman's gun parent does not take his melee attack")
+end
+
+T.men_check_reads_the_mounts_steering_copies = function()
+	local P, mr, put, BASE = real_platform()
+	local u = fake_unit(mr, put, BASE, {{x = 0, z = 0, marker = BASE + 0x390d4f8,
+		steer = {{5000, 5000}, {5000, 5000}, {0, 0}}}})
+	local m, horse = P.models(u)[1], BASE + 0x6600000
+	put(m.addr + 0x2e0, horse, 8)
+	for _, off in ipairs({0x1e0, 0x1e8, 0x194, 0x198}) do mr.fl[horse + off] = 0 end
+	check(P.check_men(u), "validate steering on the horse that receives the movement")
 end
 
 return T

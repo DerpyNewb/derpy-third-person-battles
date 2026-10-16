@@ -17,10 +17,10 @@ MUTANTS += [
     (M, "bm.battle:suppress_unit_voices(true)", "do end", "third_person_silences_unit_voices_and_back"),
     (M, "try(function() bm.battle:suppress_unit_voices(false) end)", "", "third_person_silences_unit_voices_and_back"),
 ]
-CIN = "if show then bm:enable_cinematic_ui(false, true, false) else bm:enable_cinematic_ui(true, false, false) end"
+CIN = "if show and not F.ui_off then bm:enable_cinematic_ui(false, true, false) else bm:enable_cinematic_ui(true, show, false) end"
 MUTANTS += [
-    (M, CIN, "if show then bm:enable_cinematic_ui(false, true, false) end", "looking_hides_the_battle_interface"),
-    (M, CIN, "if show then bm:enable_cinematic_ui(false, true, false) else bm:enable_cinematic_ui(true, true, false) end", "looking_hides_the_battle_interface"),
+    (M, CIN, "if show and not F.ui_off then bm:enable_cinematic_ui(false, true, false) end", "looking_hides_the_battle_interface"),
+    (M, CIN, "if show and not F.ui_off then bm:enable_cinematic_ui(false, true, false) else bm:enable_cinematic_ui(true, true, false) end", "looking_hides_the_battle_interface"),
     (M, CIN, "if not show then bm:enable_cinematic_ui(true, false, false) end", "looking_hides_the_battle_interface"),
     (M, "if F.cursor_shown == show then return end", "", "looking_hides_the_battle_interface"),
 ]

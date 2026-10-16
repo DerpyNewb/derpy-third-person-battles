@@ -103,6 +103,11 @@ def render(width):
     texts = []
     for pid, x, y, w, h, vis, image, text in rows:
         comp = named.get(pid)
+        if pid == "radar_group" and vis:  # CA's radar, which the engine draws: its box, as a stand-in
+            box = (x * scale, y * scale, (x + w) * scale, (y + h) * scale)
+            draw.ellipse(box, fill=(28, 32, 26, 255), outline=(150, 118, 70, 255), width=max(2, int(4 * scale)))
+            draw.text((box[0] + 40 * scale, box[1] + h * scale / 2 - 8), "CA minimap", fill=TEXT, font=_font(int(14 * scale)))
+            continue
         if not vis or comp is None:
             continue
         X, Y = x * scale, y * scale

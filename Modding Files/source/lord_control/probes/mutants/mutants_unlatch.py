@@ -3,14 +3,14 @@ SLIDE, REST, SPACED = "a_step_after_the_mode_key_mid_aim_does_not_slide", "walki
 CUT, KEEP, DELAY = "a_step_cuts_the_reload_short", "a_step_does_not_cut_the_aim_or_the_firing_clip", "a_cut_reload_still_delays_the_next_shot"
 MODE, MID_AIM, XBOW = "the_mode_key_does_not_skip_the_reload", "the_mode_key_mid_aim_adds_no_wait", "a_crossbow_switching_modes_after_its_bolt_adds_no_wait"
 PLAY = "\t\t\t\tP.play(m, WALK_1, 0)\n"
-STEER = "\t\t\tP.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw)\n"
+STEER = "\t\t\tP.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw, speed)\n"
 GATE = "if shot.launched and F.reload_slot ~= SLOT_AIM then F.ready_at = (shot.reload_at or now) + E.D.shots[F.utype][2] * E.S.reload_factor end"
 MUTANTS = [
     # the walking clip that ends a latched one (measured 2026-10-14, probes/zz_tp_unclip.lua)
     (MV, PLAY, "", SLIDE),
     (MV, PLAY, "", CUT),
     (MV, "P.play(m, WALK_1, 0)", "P.play(m, WALK_1, 6)", SLIDE),
-    (MV, "if P.anim_slot(m) and now", "if true and now", REST),
+    (MV, "if P.anim_slot(m) and not F.charging and not F.lock and now", "if true and not F.charging and not F.lock and now", REST),
     (MV, "\t\t\t\tF.unlatch_at = now + UNLATCH_GAP\n", "", SPACED),
     (MV, "local WALK_1, UNLATCH_GAP = 42, 0.3", "local WALK_1, UNLATCH_GAP = 43, 0.3", SLIDE),
     (MV, "\t\t\tend\n" + STEER, "\t\t\tend\n", SLIDE),
@@ -23,7 +23,7 @@ MUTANTS = [
     # the reload still counts after a cut
     (C, "\t\tif now < F.ready_at then return end\n", "", DELAY),
     (C, "\t\tif now < F.ready_at then return end\n", "", MODE),
-    (C, GATE, "", DELAY),
+    (C, GATE, "", MODE),
     (C, "shot.launched and F.reload_slot", "F.reload_slot", MID_AIM),
     (C, "and F.reload_slot ~= SLOT_AIM then F.ready_at", "then F.ready_at", XBOW),
     (C, "(shot.reload_at or now)", "now", MODE),

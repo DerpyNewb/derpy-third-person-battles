@@ -13,7 +13,8 @@ Then commit and push from inside the repo folder.
 
 The mod's source (Modding Files/source/third_person - the pack is built from it, so it is the truth,
 unlike the lords pack's staged Lua), every tool that builds, tests, previews or checks it plus
-their import closure, the live-game probes and the mutation sets, and the design record. The
+their import closure, the live-game probes and the mutation sets, the design record, and the exe
+reverse-engineering tools with their write-up (docs/BATTLE_ENGINE_RE.md). The
 rejected first attempt (lord_control) comes along because the probes live under it.
 
 NOTHING OF CA'S OR GW'S IS PUBLISHED, and no file naming a Windows user profile. data.lua is
@@ -37,7 +38,7 @@ PROBES = "Modding Files/source/lord_control/probes"
 TOOLS = [
     # build, generate, preview
     "build_third_person.py", "gen_third_person_hud.py", "gen_tp_emitter.py", "preview_third_person_hud.py",
-    "third_person_patterns.py",
+    "third_person_patterns.py", "third_person_fires.py", "read_animpack.py",
     # the harness that runs the shipped modules, its tests and the preview's scene
     "third_person_harness.lua", "third_person_tests.lua", "third_person_hud_dump.lua",
     # audits
@@ -45,6 +46,8 @@ TOOLS = [
     # the import closure of the above
     "preview_guilds_panel.py", "gen_great_guilds.py", "check_skill_trees.py", "read_pack_index.py",
     "read_vanilla_cache.py", "read_vanilla_db.py", "read_vanilla_loc.py",
+    # reverse engineering the exe (docs/BATTLE_ENGINE_RE.md): static scans, and Ghidra headless with its script
+    "exe_re.py", "ghidra_decompile.py", "ghidra/DecompileAt.java",
     # the rejected first attempt
     "build_lord_control.py",
     # this file and its copier
@@ -55,7 +58,10 @@ SPECS = ["2026-10-13-third-person-pack-design.md", "2026-10-14-third-person-hud-
 PLANS = ["2026-10-13-third-person-pack-core.md"]
 HISTORY = ["HANDOFF_20261008_THIRD_PERSON_LORD_CONTROL.md", "HANDOFF_20261013_THIRD_PERSON_HELD_FIRE_MOUNTED_IDLE.md",
            "HANDOFF_20261013_THIRD_PERSON_PACK_LIVE.md", "HANDOFF_20261013_THIRD_PERSON_STEERING_COMMANDS.md",
-           "HANDOFF_20261014_THIRD_PERSON_F2_STOP.md"]
+           "HANDOFF_20261014_THIRD_PERSON_F2_STOP.md", "HANDOFF_20261016_THIRD_PERSON_FIXES.md",
+           "HANDOFF_20261016_THIRD_PERSON_MOUNTS_AND_DEATH.md"]
+# reference docs, at the same path in the repo
+REFERENCE = ["BATTLE_ENGINE_RE.md"]
 LEDGER = ".superpowers/sdd/2026-10-14-third-person-hud/progress.md"
 
 REFUSED_EXT = (".png", ".dds", ".jpg", ".jpeg", ".webp", ".tga", ".pack", ".bin",
@@ -82,6 +88,7 @@ def manifest():
     out += [("docs/superpowers/specs/" + n, "docs/design/" + n) for n in SPECS]
     out += [("docs/superpowers/plans/" + n, "docs/plans/" + n) for n in PLANS]
     out += [("docs/sessions/" + n, "docs/history/" + n) for n in HISTORY]
+    out += [("docs/" + n, "docs/" + n) for n in REFERENCE]
     out += [(LEDGER, "docs/history/LEDGER_HUD_AND_COMBAT.md")]
     return out
 

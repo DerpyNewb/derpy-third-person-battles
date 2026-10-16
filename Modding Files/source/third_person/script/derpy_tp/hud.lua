@@ -12,6 +12,8 @@ return function(E)
 	local ui, last, dead, errors, off = nil, {}, {}, 0, false
 	local cco_id, cco_at, keys, slot_of, reload_cco = nil, 0, {}, {}, nil
 	local acts, act_at = {}, {} -- the action buttons this unit shows, in order, and each one's place in that order
+	local caster = false -- an ability of his spends winds: his army's pool and its bar show
+	local home -- CA's radar's holder and place while the radar is in this panel (H.map): {holder, x, y}
 	local ACT_PARTS = {"frame", "icon", "active_l", "active_r", "dim", "coolplate", "cool", "keyplate", "key"}
 
 	local function part(id) return ui and find_uicomponent(ui, id) end
@@ -28,7 +30,9 @@ return function(E)
 
 	-- the parts a failure hides together
 	local GROUPS = {portrait = {"portrait", "name"}, health = {"health_back", "health_fill", "health_frame"},
-		men = {"men"}, ammo = {"ammo", "ammo_back", "ammo_fill", "ammo_frame"}, mode = {"mode"}, slots = {}, reload = {},
+		hp = {"hp", "hp_icon"}, winds = {"winds", "winds_icon", "winds_back", "winds_fill", "winds_frame"},
+		stamina = {"stamina", "stamina_icon", "stamina_back", "stamina_fill", "stamina_frame"},
+		men = {"men", "men_icon"}, ammo = {"ammo", "ammo_back", "ammo_fill", "ammo_frame"}, mode = {"mode"}, slots = {}, reload = {},
 		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}}
 	for _, a in ipairs(L.actions) do
 		for _, s in ipairs(ACT_PARTS) do GROUPS.actions[#GROUPS.actions + 1] = "act_" .. a .. "_" .. s end
@@ -47,6 +51,7 @@ return function(E)
 		errors = errors + 1
 		if errors >= MAX_ERRORS then
 			off = true
+			H.map(false) -- CA's radar back in its holder: this panel is going
 			if ui then ui:SetVisible(false) end
 			E.once("hud_off", "the HUD is off until this battle ends")
 		end
@@ -76,15 +81,27 @@ return function(E)
 		local bar_w = g.bar[1] - (L.slots - shown) * (L.at.slot_2_frame[2] - L.at.slot_1_frame[2])
 		local o = {left = {m, sh - m - g.left[2] * s}, bar = {(sw - bar_w * s) / 2, sh - m - g.bar[2] * s},
 			right = {sw - m - g.right[1] * s, sh - m - g.right[2] * s},
-			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}}
+			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}, toggle = {sw - m - g.toggle[1] * s, m}}
 		-- the shown action buttons packed against the right edge, over the right plate
 		local aw = math.max(0, #acts * L.action_pitch - (L.action_pitch - L.size.act_attack_frame[1]))
 		o.actions = {sw - m - aw * s, sh - m - (g.right[2] + L.stack + g.actions[2]) * s}
+		-- reaching over the ability bar (all eight beside ten abilities; seven left 22 px at 1600 in the preview,
+		-- 2026-10-15), the buttons go up a row, clear of it
+		if #keys > 0 and o.actions[1] < o.bar[1] + bar_w * s and o.actions[2] + g.actions[2] * s > o.bar[2] then
+			o.actions[2] = o.bar[2] - (L.stack + g.actions[2]) * s
+		end
+		-- CA's radar while shown (H.map): under the corner buttons, on the right margin, at its own drawn size
+		local r = home and find_uicomponent(ui, "radar_group")
+		if r then
+			local w = r:Dimensions()
+			r:MoveTo(math.floor(sw - m - w), math.floor(o.toggle[2] + (g.toggle[2] + L.stack) * s))
+		end
 		for id, at in pairs(L.at) do
 			local c = part(id)
-			local dx = at[2]
+			local dx, dy = at[2], at[3]
+			if not caster and L.lifted[id] then dy = dy + L.lift end -- no winds row: the rows above it drop into its place
 			if at[1] == "actions" then dx = dx + ((act_at[id:match("^act_(%a+)_")] or 1) - 1) * L.action_pitch end
-			if c then c:MoveTo(math.floor(o[at[1]][1] + dx * s), math.floor(o[at[1]][2] + at[3] * s)) end
+			if c then c:MoveTo(math.floor(o[at[1]][1] + dx * s), math.floor(o[at[1]][2] + dy * s)) end
 		end
 		H.s = s
 	end
@@ -95,15 +112,20 @@ return function(E)
 		local card = find_uicomponent(core:get_ui_root(), "cards_panel", tostring(F.unit:unique_ui_id()))
 		cco_id = card and card:GetContextObjectId("CcoBattleUnit") or nil
 		keys = F.unit:owned_non_passive_special_abilities() or {}
-		slot_of = {}
+		slot_of, caster = {}, false
 		local indexed, why = pcall(function()
 			local index = {}
 			for i = 0, cco("BattleAbilityList.Size") - 1 do
 				index[cco("BattleAbilityList.At(" .. i .. ").SetupAbilityContext.RecordKey")] = i
+				-- a spell is an ability that costs winds (CcoBattleAbility.ManaUsed); an ability without the field costs none
+				local ok, mana = pcall(cco, "BattleAbilityList.At(" .. i .. ").ManaUsed")
+				caster = caster or ok and mana > 0
 			end
 			for n = 1, math.min(#keys, L.slots) do slot_of[n] = index[keys[n]] end
 		end)
 		if off then return end
+		vis("plate_left", caster) vis("plate_left_short", not caster)
+		if not dead.winds then for _, id in ipairs(GROUPS.winds) do vis(id, caster) end end
 		guard("portrait", function()
 			img("portrait", cco("IconPath"))
 			text("name", cco("Name"))
@@ -117,11 +139,12 @@ return function(E)
 			end
 			if on then text("slot_" .. n .. "_key", E.S.names["ability_" .. n] or "") end
 		end
-		-- the action buttons: attack always, fire for a shooter (artillery aims in Manual fire), charge and jump when his
-		-- men have the clips; each with its key
-		local can = {run = true, attack = true, fire = F.unit:missile_range() > 0 and not F.arty, charge = F.can_charge,
-			jump = F.can_jump}
-		local key_of = {run = "run", attack = "attack", fire = "attack", charge = "charge", jump = "jump"}
+		-- the action buttons: walk, sprint and attack always, fire for a shooter (artillery aims in Manual fire), jump when
+		-- his men have the clips; each with its key
+		local can = {walk = true, sprint = true, attack = true, fire = F.unit:missile_range() > 0 and not F.arty
+			and not F.cannot_shoot, jump = F.can_jump, fly = F.unit:can_fly(), cheer = F.can_cheer}
+		local key_of = {walk = "walk", sprint = "sprint", attack = "attack", fire = "attack", jump = "jump", fly = "fly",
+			cheer = "cheer"}
 		acts, act_at = {}, {}
 		for _, a in ipairs(L.actions) do
 			if can[a] then acts[#acts + 1] = a act_at[a] = #acts end
@@ -129,6 +152,10 @@ return function(E)
 			for _, s in ipairs({"dim", "coolplate", "cool", "active_l", "active_r"}) do vis("act_" .. a .. "_" .. s, false) end
 			if can[a] then text("act_" .. a .. "_key", E.S.names[key_of[a]] or "") end
 		end
+		-- hide and the minimap in their own corner
+		for _, s in ipairs({"frame", "icon", "keyplate", "key"}) do vis("hide_" .. s, true) vis("map_" .. s, true) end
+		text("hide_key", E.S.names.hide_ui or "")
+		text("map_key", E.S.names.minimap or "")
 		guard("slots", function()
 			if not indexed then error(why, 0) end
 			for n, i in pairs(slot_of) do
@@ -188,6 +215,36 @@ return function(E)
 		return ok and name or u:type()
 	end
 
+	-- CA's minimap (the author, 2026-10-16: "pressing M should show mini map"). The cinematic UI hides CA's whole HUD, its
+	-- radar with it, and not this panel (measured 2026-10-14): the radar moves into the panel while shown, and back into
+	-- its holder, first, where it was. Answers whether it shows. ponytail: whether the radar draws in its new parent is
+	-- unmeasured in game; the log says what was done
+	local function map(on)
+		if on == (home ~= nil) then return on end
+		if not on then
+			local r = ui and find_uicomponent(ui, "radar_group")
+			if r then home[1]:Adopt(r:Address(), 0) r:MoveTo(home[2], home[3]) end
+			home = nil
+			return false
+		end
+		if off or not ui then return false end
+		local holder = find_uicomponent(core:get_ui_root(), "hud_battle", "radar_holder")
+		local r = holder and find_uicomponent(holder, "radar_group")
+		if not r then E.once("map", "no minimap in this battle's interface") return false end
+		local x, y = r:Position()
+		home = {holder, x, y}
+		ui:Adopt(r:Address())
+		H.place()
+		E.log("minimap at " .. table.concat({r:Position()}, ",") .. ", " .. table.concat({r:Dimensions()}, "x"))
+		return true
+	end
+	function H.map(on)
+		local ok, res = pcall(map, on)
+		if ok then return res end
+		E.once("map_failed", "the minimap is off: " .. tostring(res))
+		return false
+	end
+
 	function H.show(on)
 		if on and off then H.unit() return end -- no panel, but this unit's abilities still need its context
 		if off then return end
@@ -203,7 +260,7 @@ return function(E)
 				return
 			end
 			ui = UIComponent(made)
-			for _, id in ipairs({"health_fill", "ammo_fill"}) do
+			for id in pairs(L.fill) do
 				local c = part(id)
 				if c then c:SetCanResizeWidth(true) c:SetCanResizeHeight(true) end
 			end
@@ -213,6 +270,14 @@ return function(E)
 		H.target(nil) H.mark(nil)
 		H.unit() -- first: the bar centres on how many abilities he has
 		H.place()
+	end
+
+	-- one man played: his own hit points (the author, 2026-10-15: "should be health of the individual unit not the whole
+	-- battalion"); nil when played whole, or when what the model holds is not a health
+	local function own_hp()
+		if not F.model then return nil end
+		local cur, max = E.P.model_hp(F.model)
+		if max > 0 and cur >= 0 and cur <= max then return cur, max end
 	end
 
 	local function width(id, frac)
@@ -259,11 +324,18 @@ return function(E)
 	function H.update(now)
 		if off or not ui then return end
 		local u = F.unit
-		guard("health", function() width("health_fill", u:unary_hitpoints()) end)
+		guard("health", function()
+			local cur, max = own_hp()
+			width("health_fill", cur and cur / max or u:unary_hitpoints())
+		end)
 		guard("men", function()
 			local n0 = u:initial_number_of_men()
-			vis("men", n0 > 1)
+			vis("men", n0 > 1) vis("men_icon", n0 > 1)
 			if n0 > 1 then text("men", u:number_of_men_alive() .. " / " .. n0) end
+		end)
+		guard("stamina", function()
+			width("stamina_fill", F.stamina)
+			text("stamina", math.floor(F.stamina * 100 + 0.5) .. "%")
 		end)
 		guard("ammo", function()
 			local has = u:missile_range() > 0
@@ -297,27 +369,45 @@ return function(E)
 					vis("slot_" .. n .. "_windup_l", winding) vis("slot_" .. n .. "_windup_r", winding)
 				end
 			end)
+			-- the figures: his hit points, and a caster's army's winds (CcoBattleWindsOfMagicPool) with their bar
+			guard("hp", function()
+				local cur, max = own_hp()
+				if not cur then cur, max = cco("HealthValue"), cco("HealthMax") end
+				text("hp", math.floor(cur) .. " / " .. math.floor(max))
+				vis("hp", true) vis("hp_icon", true)
+			end)
+			if caster then
+				guard("winds", function()
+					local p = "ArmyContext.WindsOfMagicPoolContext."
+					local cur, max = cco(p .. "CurrentWind"), cco(p .. "MaxWind")
+					text("winds", math.floor(cur) .. " / " .. math.floor(max))
+					width("winds_fill", max > 0 and cur / max or 0)
+				end)
+			end
 			if F.ranged and not F.solo then
 				guard("reload", function() reload_cco = cco("ReloadPercentMax") / RELOAD_SCALE end)
 			end
 		end
 		guard("reload", function() ring(reload_frac(now)) end)
 		guard("actions", function()
-			-- each action's cooldown seconds, dimmed as CA dims a button that cannot be used yet
-			local function show(a, secs, empty)
+			-- each action's cooldown seconds, dimmed as CA dims a button that cannot be used yet; still: it can, the
+			-- seconds are another thing's
+			local function show(a, secs, empty, still)
 				if not act_at[a] then return end
 				local p = "act_" .. a .. "_"
 				local wait = secs ~= nil and secs > 0
 				text(p .. "cool", wait and tostring(math.ceil(secs)) or "")
 				vis(p .. "cool", wait) vis(p .. "coolplate", wait)
-				vis(p .. "dim", empty or wait)
+				vis(p .. "dim", empty or wait and not still)
 			end
 			show("attack", F.next_swing - now)
 			show("jump", F.next_jump - now)
-			show("charge", F.next_charge - now)
-			-- lit while on: the run, and the charge (CA's green ring, as an ability's active time)
+			-- the sprint: its charge attack's seconds; dim only with too little stamina to start one
+			show("sprint", F.next_charge - now, not E.combat.can_sprint(), true)
+			-- lit while on: the walk, the sprint, flight, the minimap (CA's green ring, as an ability's active time)
 			local function lit(a, on) if act_at[a] then vis("act_" .. a .. "_active_l", on) vis("act_" .. a .. "_active_r", on) end end
-			lit("run", F.running) lit("charge", F.charging)
+			lit("walk", F.walking) lit("sprint", F.sprinting) lit("fly", u:is_currently_flying())
+			vis("map_active_l", home ~= nil) vis("map_active_r", home ~= nil)
 			local frac = reload_frac(now)
 			local base = E.D.shots[F.utype] and E.D.shots[F.utype][2] * E.S.reload_factor
 			local secs = frac and frac < 1 and (base and (1 - frac) * base or 0.5) or nil
