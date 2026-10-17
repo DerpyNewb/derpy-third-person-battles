@@ -2,7 +2,7 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/keys"] = (S["/script/derpy_tp/keys"] or "") .. [==[
--- The keys the MCT page offers, their Windows virtual-key codes, and the 27 actions with their
+-- The keys the MCT page offers, their Windows virtual-key codes, and the 28 actions with their
 -- defaults and labels. The MCT page and the battle script both loadfile this, so they cannot
 -- disagree. A name can stand for two keys: "+" is the main-row plus and the numpad plus.
 local K = {names = {}, vk = {}}
@@ -23,12 +23,12 @@ add("Page Up", 0x21) add("Page Down", 0x22) add("Up", 0x26) add("Down", 0x28) ad
 add("+", {0xBB, 0x6B}) add("-", {0xBD, 0x6D})
 
 K.order = {"toggle", "forward", "back", "left", "right", "walk", "sprint", "look_free", "attack", "mode", "jump", "fly", "zoom_in",
-	"zoom_out", "cheer", "hide_ui", "minimap", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
+	"zoom_out", "cheer", "hide_ui", "minimap", "view", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
 	"ability_10"}
 
 K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D", walk = "Z", sprint = "Shift",
 	look_free = "Middle mouse", attack = "Left mouse", mode = "Right mouse", jump = "E", fly = "Space", zoom_in = "+", zoom_out = "-",
-	cheer = "O", hide_ui = "P", minimap = "M",
+	cheer = "O", hide_ui = "P", minimap = "M", view = "V",
 	ability_1 = "1", ability_2 = "2", ability_3 = "3", ability_4 = "4", ability_5 = "5", ability_6 = "6",
 	ability_7 = "7", ability_8 = "8", ability_9 = "9", ability_10 = "0"}
 
@@ -38,6 +38,7 @@ K.labels = {toggle = "Third person on and off", forward = "Walk forward", back =
 	sprint = "Sprint and charge (hold while moving; click to attack)", jump = "Jump attack",
 	fly = "Fly or land (flying units)", zoom_in = "Zoom in", zoom_out = "Zoom out", cheer = "Cheer",
 	hide_ui = "Hide or show the interface (works paused)", minimap = "Show or hide the minimap",
+	view = "First or third person view",
 	ability_1 = "Ability 1", ability_2 = "Ability 2", ability_3 = "Ability 3", ability_4 = "Ability 4",
 	ability_5 = "Ability 5", ability_6 = "Ability 6", ability_7 = "Ability 7", ability_8 = "Ability 8",
 	ability_9 = "Ability 9", ability_10 = "Ability 10"}

@@ -18,40 +18,30 @@ S["/script/derpy_tp/data"] = (S["/script/derpy_tp/data"] or "") .. [==[
 --   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)
 return {
 	shots = {
-		["emp_gottzorn_knellgun"] = {"emp_gottzorn_cannon_ball", 21, 1},
-		["emp_pyretitans_autodragon"] = {"emp_pyretitans_gun_cannon", 8, 1, "Battle_Individual_Artillery_Cannon_Fire"},
-		["emp_pyretitans_mortar"] = {"emp_pyretitans_gun_mortar", 14, 1, "Battle_Individual_Artillery_Magma_Cannon_Launch"},
+		["emp_hessmarines_bayonets"] = {"emp_hessmarines_hessenriegel_bullet", 10, 1, "Battle_Individual_Small_Arms_Blunderbuss_Fire"},
 	},
 	abilities = {
 	},
 	fires = {
-		["emp_pyretitans_mortar"] = {{1.627, 0.114, 2.469, 2.438}},
+		["emp_hessmarines_bayonets"] = {{0.45, 0.114, 1.533, 1.598}},
 	},
 	fires_low = {
+		["emp_hessmarines_bayonets"] = {{0.442, 0.063, 0.025, 1.285}},
 	},
 	fires_high = {
+		["emp_hessmarines_bayonets"] = {{0.45, 0.11, 2.317, 1.039}},
 	},
 	raises = {
+		["emp_hessmarines_bayonets"] = {0.8, 0.8, 0.8},
 	},
 	runs = {
-		["emp_autodragon"] = 1.9,
-		["emp_autofalcon_armored"] = 1.9,
-		["emp_cofferglare"] = 1.9,
-		["emp_culverin"] = 1.9,
+		["emp_hessmarines_bayonets"] = 2.1,
 	},
 	speeds = {
-		["emp_gottzorn_knellgun"] = 175,
-		["emp_pyretitans_autodragon"] = 200,
-		["emp_pyretitans_mortar"] = 75,
+		["emp_hessmarines_bayonets"] = 215,
 	},
 	bodies = {
-		["emp_autodragon"] = {0.65, 1.8},
-		["emp_autofalcon_armored"] = {0.65, 1.8},
-		["emp_cofferglare"] = {0.65, 1.8},
-		["emp_culverin"] = {0.65, 1.8},
-		["emp_gottzorn_knellgun"] = {5, 3},
-		["emp_pyretitans_autodragon"] = {1.7, 7},
-		["emp_pyretitans_mortar"] = {1.7, 7},
+		["emp_hessmarines_bayonets"] = {0.6, 1.8},
 	},
 }
 ]==]

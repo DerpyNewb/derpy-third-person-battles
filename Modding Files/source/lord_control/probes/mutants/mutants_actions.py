@@ -28,7 +28,7 @@ MUTANTS = [
      "e_does_nothing_for_a_whole_unit_without_the_clip"),
     (C, "F.next_jump = now + E.S.jump_cooldown", "F.next_jump = now", JUMP),
     (M, "if P.pressed(S.keys.jump) and F.dragging and not F.armed then E.combat.jump(gnow) end", "", JUMP),
-    (S, 'S.jump_cooldown = get("combat_jump_cooldown", 60) / 10', "S.jump_cooldown = 6", "charge_and_jump_have_keys_and_settings"),
+    (S, 'S.jump_cooldown = get("combat_jump_cooldown", 100) / 10', "S.jump_cooldown = 10", "charge_and_jump_have_keys_and_settings"),
     # the lock
     (C, "\t\tif now then F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = E.rig.yaw, turns = hold ~= nil} end\n", "", LOCK),
     (C, "		if C.locked(now) then return end\n		if clicked and F.charging", "		if clicked and F.charging", "a_shot_waits_for_a_jump"),

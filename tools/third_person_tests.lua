@@ -15,7 +15,8 @@ T.settings_defaults_without_mct = function()
 	check(S.keys.ability_10 == 0x30, "ability 10 is 0")
 	check(#S.conflicts == 0, "no conflicts by default")
 	check(near(S.sensitivity, 0.004) and S.one_man == true, "numbers")
-	check(S.shoulder == 1 and S.distance == 6 and near(S.swing_cooldown, 1.5), "camera and swing")
+	-- the author, 2026-10-17: "make default cooldonw of melee attack to 4, jumpattack to 10"
+	check(S.shoulder == 1 and S.distance == 6 and near(S.swing_cooldown, 4), "camera and swing: 4 s")
 end
 
 T.settings_reads_mct = function()
@@ -29,6 +30,7 @@ end
 T.settings_camera_and_combat_tuning = function()
 	local S = settings_with(nil)
 	check(near(S.height, 2.5) and near(S.lag, 0.45) and near(S.aim_back, 3.2), "camera defaults: the old constants")
+	check(near(S.smooth, 0.05), "turn smoothing 0.05 s")
 	check(near(S.reload_factor, 1) and near(S.spread, 1.5), "combat defaults: the old constants")
 	S = settings_with({camera_height = 40, camera_lag = 0, camera_aim_back = 60, combat_reload = 50, combat_spread = 0})
 	check(near(S.height, 4) and S.lag == 0 and near(S.aim_back, 6), "camera from tenths and hundredths")
@@ -255,9 +257,9 @@ T.rig_pitch_is_clamped = function()
 	local R = a_rig()
 	R.start(0, 0, 0, 0, 0, 1, false)
 	R.look(0, 100000)
-	check(near(R.pitch, 1.1), "pitch stops at 1.1")
+	check(near(R.want_pitch, 1.1), "pitch stops at 1.1")
 	R.look(0, -1000000)
-	check(near(R.pitch, -0.25), "pitch stops at -0.25")
+	check(near(R.want_pitch, -0.25), "pitch stops at -0.25")
 end
 
 T.rig_invert_y = function()
@@ -265,7 +267,7 @@ T.rig_invert_y = function()
 	local R = a_rig(settings(H.mct_stub({camera_invert_y = true}), H.K))
 	R.start(0, 0, 0, 0, 0, 1, false)
 	R.look(0, 10)
-	check(R.pitch < 0, "mouse down looks up when inverted")
+	check(R.want_pitch < 0, "mouse down looks up when inverted")
 end
 
 T.rig_shoulder_side = function()
@@ -288,6 +290,13 @@ T.rig_zoom_is_clamped = function()
 end
 
 local function general_on() H.fresh() H.tap("F2") end
+
+-- the view put somewhere at once, as if the mouse had settled there: written alone, R.yaw and R.pitch ease back
+local function set_view(yaw, pitch)
+	local R = H.E.rig
+	if yaw then R.yaw, R.want_yaw = yaw, yaw end
+	if pitch then R.pitch, R.want_pitch = pitch, pitch end
+end
 
 T.toggle_starts_and_restores = function()
 	general_on()
@@ -364,7 +373,7 @@ end
 -- rig never asks for less, and comes in along its boom instead
 T.looking_up_the_camera_comes_in_rather_than_being_lifted = function()
 	general_on()
-	H.E.rig.pitch = -0.25
+	set_view(nil, -0.25)
 	H.step(1)
 	check(H.eye.y >= 1.6 - 0.01, "the eye keeps the engine's floor: " .. H.eye.y)
 	check(H.eye.z > -6, "by coming in toward him: z " .. H.eye.z)
@@ -430,15 +439,31 @@ T.focus_return_does_not_jump_the_camera = function()
 	check(near(H.E.rig.yaw, 0), "and the camera does not jump, yaw " .. H.E.rig.yaw)
 end
 
+-- the author, 2026-10-17: "smoothness of the camera turning". A frame's mouse step is whole pixels and comes in the
+-- bursts the mouse's own rate sets: applied raw, the view turned in steps. It eases to where the mouse put it
 T.mouse_turns_the_camera = function()
 	general_on()
 	H.step(0.1)
-	H.mouse = {393, 0}
+	H.mouse = {393, 50}
 	H.step(1 / 60)
-	check(near(H.E.rig.yaw, 393 * 0.004, 1e-6), "393 px at 0.004 rad/px")
+	local yaw, pitch = 393 * 0.004, 50 * 0.004
+	check(H.E.rig.yaw > 0 and H.E.rig.yaw < yaw * 0.6, "eased: part of the turn in the first frame, " .. H.E.rig.yaw)
+	check(H.E.rig.pitch > 0 and H.E.rig.pitch < pitch * 0.6, "and of the pitch, " .. H.E.rig.pitch)
+	H.step(0.5)
+	check(near(H.E.rig.yaw, yaw, 1e-3) and near(H.E.rig.pitch, pitch, 1e-3), "all of it soon after: 0.004 rad/px, "
+		.. H.E.rig.yaw .. ", " .. H.E.rig.pitch)
 	H.down("Middle mouse")
 	H.step(0.1)
 	check(not H.E.F.dragging, "the middle button frees the mouse")
+end
+
+T.turn_smoothing_off_turns_at_once = function()
+	H.fresh({mct = {camera_smoothing = 0}})
+	H.tap("F2")
+	H.step(0.1)
+	H.mouse = {393, 0}
+	H.step(1 / 60)
+	check(near(H.E.rig.yaw, 393 * 0.004, 1e-6), "0: the whole turn in one frame, " .. H.E.rig.yaw)
 end
 
 T.errors_switch_it_off_after_three = function()
@@ -547,6 +572,72 @@ local function playing(o, enemies)
 	return H.units[2]
 end
 
+-- past the gap between two swings, whatever the setting (4 s by default)
+local function past_swing_gap() H.step(H.E.S.swing_cooldown + 0.1) end
+
+-- the author, 2026-10-17: "first person camera". V puts the eye at his head, a little ahead of his face, looking where the
+-- mouse looks; V again goes back behind him
+T.v_switches_to_first_person_and_back = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.step(1)
+	local mx, my, mz = H.E.P.model_pos(H.E.F.model)
+	check(H.eye.z < mz - 3, "behind him to begin with: " .. H.eye.z)
+	H.tap("V") H.step(0.5)
+	check(near(H.eye.x, mx, 0.01) and near(H.eye.y, my + 1.8 * 0.92, 0.01) and near(H.eye.z, mz + 0.35, 0.01),
+		"at his head, ahead of his face: " .. H.eye.x .. "," .. H.eye.y .. "," .. H.eye.z)
+	check(H.look.z > H.eye.z + 1 and near(H.look.x, H.eye.x, 0.01) and near(H.look.y, H.eye.y, 0.01), "looking level, ahead")
+	set_view(math.rad(90))
+	H.step(0.1)
+	check(H.look.x > H.eye.x + 1 and near(H.eye.x, mx + 0.35, 0.01), "turning with the mouse, from his head")
+	set_view(nil, 0.5) H.step(0.1)
+	check(H.look.y < H.eye.y - 1, "the mouse down looks down: " .. H.look.y .. " from " .. H.eye.y)
+	set_view(nil, 0)
+	H.tap("V") H.step(2)
+	check(H.eye.x < mx - 3, "V again: behind him once more, " .. H.eye.x)
+end
+
+T.first_person_keeps_up_with_his_head = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("V") H.step(1)
+	local m = H.E.F.model
+	m.z = m.z + 1
+	H.step(0.15)
+	check(H.eye.z < m.z + 0.35 - 0.05, "between two of his position's steps (0.2 s apart, measured) it is still on the way: "
+		.. H.eye.z)
+	H.step(0.15) -- one step of his position behind, and no follow spring on top
+	check(near(H.eye.z, m.z + 0.35, 0.01), "the eye is at his head 0.3 s after he moved: " .. H.eye.z .. " for " .. m.z + 0.35)
+end
+
+T.first_person_is_kept_and_looks_up_further = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("V") H.step(0.2)
+	H.E.rig.look(0, -100000)
+	check(near(H.E.rig.want_pitch, -1.2), "first person looks up to -1.2: " .. H.E.rig.want_pitch)
+	H.tap("F2") H.step(0.2) H.tap("F2") H.step(0.5)
+	local _, my = H.E.P.model_pos(H.E.F.model)
+	check(near(H.eye.y, my + 1.8 * 0.92, 0.01), "F2 off and on keeps first person")
+	H.E.rig.look(0, -100000)
+	H.tap("V") H.step(0.2)
+	check(H.E.rig.want_pitch >= -0.25, "third person clamps it back: " .. H.E.rig.want_pitch)
+end
+
+T.a_regiment_played_whole_stays_behind = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, mct = {combat_one_man = false}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	H.tap("V") H.step(1)
+	local q = H.units[2]:position()
+	check(H.eye.z < q:get_z() - 3, "no man to look out of: the camera stays behind, " .. H.eye.z)
+end
+
+T.a_unit_of_one_sees_from_its_head = function()
+	H.fresh({units = {{general = true, type = "wh_test_lord", men = 1}}})
+	H.tap("F2") H.step(0.1)
+	H.tap("V") H.step(0.5)
+	local m = H.E.P.models(H.E.F.unit)[1]
+	local _, my, mz = H.E.P.model_pos(m)
+	check(near(H.eye.y, my + 1.8 * 0.92, 0.01) and near(H.eye.z, mz + 0.35, 0.01), "the lord's head: " .. H.eye.y .. ", " .. H.eye.z)
+end
+
 -- the author, 2026-10-14: "cursor is also clicking other units which should be prevented". Orders are off,
 -- selection is not: a click on another unit selected it, and the portrait swapped to it.
 T.clicking_another_unit_keeps_the_controlled_one_selected = function()
@@ -598,8 +689,8 @@ T.swing_plays_on_one_man_with_cooldown = function()
 	check(#p == 1 and p[1][2] == 2011 and p[1][3] == 454, "ATTACK_1 on the front man only")
 	H.E.F.model.anim_end = H.game_ms + 100 H.step(0.3) -- a short clip: its hold is over, the cooldown is not
 	H.tap("Left mouse")
-	check(H.count("play") == 1, "no second swing inside 1.5 s")
-	H.step(1.5)
+	check(H.count("play") == 1, "no second swing inside the gap")
+	past_swing_gap()
 	H.tap("Left mouse")
 	check(H.count("play") == 2 and H.last("play")[3] == 455, "then ATTACK_2")
 end
@@ -616,11 +707,11 @@ end
 T.mounted_swings_use_rider_slots = function()
 	local u = playing({type = "wh_test_mount", men = 1, slots = {[454] = true, [455] = true, [1901] = true, [1902] = true}})
 	u._models[1].mount = {id = 999, slots = {[454] = true, [455] = true}}
-	H.tap("Left mouse") H.step(2) H.tap("Left mouse")
+	H.tap("Left mouse") past_swing_gap() H.tap("Left mouse")
 	local p = H.all("play")
 	check(#p == 2 and p[1][2] == 999 and p[2][2] == 999, "mounted swings play through the mount, which drives its rider")
 	check(p[1][3] == 454 and p[2][3] == 455 and p[1][4] == nil, "mount ground attack events stay active without a second rider command")
-	H.step(2) H.tap("Right mouse")
+	past_swing_gap() H.tap("Right mouse")
 	check(H.last("play")[2] == 999 and H.last("play")[3] == 454, "missing rider variants fall back to a supported rider/mount pair")
 end
 
@@ -631,7 +722,7 @@ T.flying_mount_swings_use_airborne_rider_slots = function()
 	H.tap("Left mouse")
 	local p = H.all("play")
 	check(#p == 2 and p[1][2] == 991 and p[2][2] == 992 and p[1][3] == 494 and p[2][3] == 494, "each rider is driven by its mount's airborne attack")
-	H.units[2]._flying = false H.step(2) H.tap("Left mouse")
+	H.units[2]._flying = false past_swing_gap() H.tap("Left mouse")
 	check(H.last("play")[3] == 454, "landing switches back to a ground mount attack")
 end
 
@@ -3309,6 +3400,7 @@ end
 -- walk waits for the clip, as it does for the jump
 T.a_swing_while_walking_plays_out = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.S.swing_cooldown = 1.5 -- a gap shorter than the clip and LOCK_MAX: the hold ends with the gap
 	H.down("W") H.step(0.5)
 	H.tap("Left mouse") H.step(0.1)
 	local steers, walks = H.count("steer"), plays_of(42)
@@ -3521,12 +3613,12 @@ T.the_action_bar_counts_each_cooldown_down = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	-- a swing holds him like an action: its clip over, E jumps
 	H.tap("Left mouse") H.E.F.model.anim_end = H.game_ms + 100 H.step(0.2) H.tap("E") H.step(0.1)
-	check(hud_part("act_attack_dim"):Visible() and hud_part("act_attack_cool").text == "2", "the swing's 1.5 s: "
+	check(hud_part("act_attack_dim"):Visible() and hud_part("act_attack_cool").text == "4", "the swing's 4 s: "
 		.. tostring(hud_part("act_attack_cool").text))
-	check(hud_part("act_jump_cool").text == "6", "the jump's 6 s: " .. tostring(hud_part("act_jump_cool").text))
-	H.step(2)
+	check(hud_part("act_jump_cool").text == "10", "the jump's 10 s: " .. tostring(hud_part("act_jump_cool").text))
+	H.step(4)
 	check(not hud_part("act_attack_dim"):Visible() and not hud_part("act_attack_coolplate"):Visible(), "swing ready again")
-	H.step(5)
+	H.step(6)
 	check(not hud_part("act_jump_dim"):Visible(), "jump ready again")
 end
 
@@ -3733,7 +3825,7 @@ end
 T.a_swing_rotates_only_through_the_clips_he_has = function()
 	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [455] = true, [490] = true, [42] = true}})
 	local got = {}
-	for k = 1, 4 do H.tap("Left mouse") H.step(2) got[k] = H.last("play")[3] end
+	for k = 1, 4 do H.tap("Left mouse") past_swing_gap() got[k] = H.last("play")[3] end
 	check(got[1] == 454 and got[2] == 455 and got[3] == 454 and got[4] == 455, "454 455 454 455: " .. table.concat(got, " "))
 	H.tap("E") H.step(1 / 60)
 	check(H.last("play")[3] == 490, "a jump list of one: JUMPING_ATTACK_2 every time")
@@ -3794,7 +3886,7 @@ T.charge_and_jump_have_keys_and_settings = function()
 	local S = settings_with(nil)
 	check(S.names.walk == "Z" and S.names.sprint == "Shift" and S.names.minimap == "M" and S.names.jump == "E",
 		"Z, Shift, M and E")
-	check(near(S.charge_cooldown, 10) and near(S.jump_cooldown, 6), "10 s and 6 s")
+	check(near(S.charge_cooldown, 10) and near(S.jump_cooldown, 10), "10 s and 10 s")
 	check(S.walk_hold == false and near(S.turn_rate, math.rad(360)) and near(S.melee_distance, 3.5), "toggle, 360 deg/s, 3.5 m")
 	S = settings_with({combat_charge_cooldown = 300, combat_jump_cooldown = 15, combat_walk_hold = true, move_turn_rate = 180,
 		camera_melee_distance = 50})
@@ -3840,7 +3932,7 @@ T.a_shot_leaves_from_the_fire_clips_muzzle = function()
 	H.cco_ids = {cco_2 = t}
 	H.E.D.fires.zorn_test_crank = {{0.2, 0.3, 0.4, 1.3}}
 	H.select(H.units[2]) H.tap("F2") H.step(0.1)
-	H.E.rig.look(150, 0) H.step(0.1) -- a facing off the axes, so a swapped or mirrored axis shows
+	H.E.rig.look(150, 0) H.step(0.5) -- a facing off the axes, so a swapped or mirrored axis shows; settled
 	local yaw = H.E.rig.yaw
 	H.tap("Left mouse") H.step(1)
 	local l = H.last("launch")
@@ -4213,9 +4305,9 @@ end
 T.a_camera_that_reports_late_is_no_roof = function()
 	H.fresh({units = {{general = true, men = 1}}, cam_lag = 2})
 	H.tap("F2") H.step(0.5)
-	H.E.rig.pitch = 0.6 H.step(0.5)
+	set_view(nil, 0.6) H.step(0.5)
 	-- about 0.5 m a frame, as a quick zoom drops it (measured: 1.8 m over the two frames)
-	for _ = 1, 10 do H.E.rig.pitch = H.E.rig.pitch - 0.08 H.step(1 / 60) end
+	for _ = 1, 10 do set_view(nil, H.E.rig.pitch - 0.08) H.step(1 / 60) end
 	check(H.E.rig.boom == 1, "the boom stays out: " .. H.E.rig.boom)
 	local z = H.units[1]:position():get_z()
 	H.roof = function(_, ez) if ez < z - 1.5 then return 6 end end -- a building behind him: still a roof, late or not
@@ -4270,7 +4362,7 @@ end
 -- 1.12 m and out, ever hit him). The crossbowmen's high muzzle is 0.58 m ahead
 T.a_muzzle_inside_him_moves_out_along_the_shot = function()
 	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
-	H.E.rig.pitch = -0.25 H.step(0.1) -- looking up, as when it hit him: the line to the aim climbs
+	set_view(nil, -0.25) H.step(0.1) -- looking up, as when it hit him: the line to the aim climbs
 	local m = H.E.F.model
 	H.tap("Left mouse") H.step(4.5)
 	local l = H.all("launch")
@@ -4536,7 +4628,7 @@ end
 
 T.a_near_shot_raises_and_fires_level = function()
 	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
-	H.E.rig.pitch = 0.08 H.step(0.1) -- looking down a little: the aim on the ground some 40 m out
+	set_view(nil, 0.08) H.step(0.1) -- looking down a little: the aim on the ground some 40 m out
 	H.tap("Left mouse") H.step(1.5)
 	local p = H.all("play")
 	check(#p == 2 and p[1][3] == 1554 and p[2][3] == 1557, "aim level, then fire level: " .. shot_plays())
@@ -4547,7 +4639,7 @@ end
 
 T.a_shot_steeply_down_raises_and_fires_low = function()
 	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
-	H.E.rig.pitch = 1.1 H.step(0.1) -- looking down at his feet
+	set_view(nil, 1.1) H.step(0.1) -- looking down at his feet
 	H.tap("Left mouse") H.step(4.5)
 	local p = H.all("play")
 	check(#p == 2 and p[1][3] == 1553 and p[2][3] == 1556, "aim low, then fire low: " .. shot_plays())
@@ -4682,7 +4774,7 @@ end
 T.ground_fire_that_cannot_turn_gives_up_after_its_commit = function()
 	H.fresh({units = {{general = true, men = 1, range = 100, ammo = 10}}})
 	H.tap("F2") H.step(0.6)
-	H.E.rig.yaw = H.E.rig.yaw + 2 H.step(0.1) -- the aim far outside its arc: a turn first, which never ends here
+	set_view(H.E.rig.yaw + 2) H.step(0.1) -- the aim far outside its arc: a turn first, which never ends here
 	H.tap("Left mouse") H.step(5)
 	check(not H.E.F.firing, "given up after the 4 s commit")
 end
@@ -4701,7 +4793,7 @@ end
 T.a_whole_unit_turned_to_swing_keeps_its_attack_order = function()
 	H.fresh({units = {{general = true, men = 1, slots = {[42] = true}}}, enemies = {{x = 3, z = 3, men = 10}}})
 	H.tap("F2") H.step(0.6)
-	H.E.rig.yaw = H.E.rig.yaw + 2 H.step(0.1)
+	set_view(H.E.rig.yaw + 2) H.step(0.1)
 	H.tap("Left mouse") H.step(1)
 	check(H.count("dropped_order") == 0 and H.count("uc:attack_unit") == 1, "turned, then the attack order: dropped "
 		.. H.count("dropped_order") .. ", attacks " .. H.count("uc:attack_unit"))
@@ -4764,9 +4856,9 @@ end
 T.a_high_raise_does_not_take_the_level_ones_length = function()
 	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
 	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
-	H.E.rig.pitch = 0.08 H.step(0.1)
+	set_view(nil, 0.08) H.step(0.1)
 	H.tap("Left mouse") H.step(20) -- a level shot and its reload: the level raise's length learned
-	H.E.rig.pitch = 0 H.step(0.1)
+	set_view(nil, 0) H.step(0.1)
 	local raise, fire
 	H.tap("Left mouse")
 	for _ = 1, 300 do
@@ -4793,7 +4885,7 @@ end
 -- with no known speed the straight line still picks the pair: steeply down is low
 T.a_shot_with_no_known_speed_steeply_down_goes_low = function()
 	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
-	H.E.rig.pitch = 1.1 H.step(0.1)
+	set_view(nil, 1.1) H.step(0.1)
 	local v = H.E.D.speeds[EMPX]
 	H.E.D.speeds[EMPX] = nil
 	local ok, err = pcall(function() H.tap("Left mouse") H.step(4.5) end)
@@ -4838,7 +4930,7 @@ T.a_whole_unit_turn_just_after_stopping_is_not_dropped = function()
 	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 3, z = 3, men = 10}}})
 	H.tap("F2") H.step(0.6)
 	H.down("W") H.step(0.6) H.up("W")
-	H.E.rig.yaw = H.E.rig.yaw + 2 H.step(1 / 60)
+	set_view(H.E.rig.yaw + 2) H.step(1 / 60)
 	H.tap("Left mouse") H.step(1.5)
 	none_dropped("uc:goto_location_angle_width", 1)
 	check(H.count("play") >= 1, "then the swing")

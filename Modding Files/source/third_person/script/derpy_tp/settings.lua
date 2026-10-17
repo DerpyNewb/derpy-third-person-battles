@@ -28,6 +28,7 @@ return function(mct, K)
 		end
 	end
 	S.sensitivity = get("camera_sensitivity", 4) / 1000
+	S.smooth = get("camera_smoothing", 5) / 100
 	S.invert_y = get("camera_invert_y", false) == true
 	S.distance = get("camera_distance", 6)
 	S.shoulder = get("camera_shoulder", "right") == "left" and -1 or 1
@@ -38,10 +39,10 @@ return function(mct, K)
 	S.melee_distance = get("camera_melee_distance", 35) / 10
 	S.turn_rate = math.rad(get("move_turn_rate", 360))
 	S.walk_hold = get("combat_walk_hold", false) == true
-	S.swing_cooldown = get("combat_swing_cooldown", 15) / 10
+	S.swing_cooldown = get("combat_swing_cooldown", 40) / 10
 	S.reload_factor = get("combat_reload", 100) / 100
 	S.charge_cooldown = get("combat_charge_cooldown", 100) / 10
-	S.jump_cooldown = get("combat_jump_cooldown", 60) / 10
+	S.jump_cooldown = get("combat_jump_cooldown", 100) / 10
 	S.spread = get("combat_spread", 15) / 10
 	S.one_man = get("combat_one_man", true) == true
 	S.debug = get("debug_log", false) == true

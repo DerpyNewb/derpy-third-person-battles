@@ -2,6 +2,11 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
+		if not men_ok then E.once("men", "regiments are played whole: " .. tostring(why)) end
+		if S.one_man and not P.features.steer then E.once("steer", "regiments are played whole: walking command types unknown for build " .. tostring(P.build)) end
+		-- one man of a regiment, never of a flying machine (measured 2026-10-15: a gyro gunship's crew steered nothing)
+		F.model = S.one_man and men_ok and P.features.steer and not F.arty and not unit:is_war_machine() and not unit:can_fly()
+			and E.move.front_man(unit) or nil
 		F.reload_slot = F.model and P.reload_slot(F.model)
 		F.thrown = false
 		learn_shot(unit)

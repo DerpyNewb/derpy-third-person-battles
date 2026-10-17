@@ -46,6 +46,8 @@ end
 
 m:add_new_section("camera", "Camera")
 slider("camera", "camera_sensitivity", "Mouse speed", "How far the camera turns for each pixel the mouse moves.", 4, 1, 20)
+slider("camera", "camera_smoothing", "Turn smoothing",
+	"Hundredths of a second the view takes to catch up with the mouse. 0 turns at once; higher is smoother and softer.", 5, 0, 30)
 checkbox("camera", "camera_invert_y", "Invert up and down", "Moving the mouse up looks down.", false)
 slider("camera", "camera_distance", "Distance behind", "Metres from the unit to the camera.", 6, 3, 15)
 local side = m:add_new_option("camera_shoulder", "dropdown")
@@ -70,14 +72,13 @@ checkbox("combat", "combat_walk_hold", "Hold to walk",
 slider("combat", "move_turn_rate", "Turning speed",
 	"Degrees a second one man turns toward a new direction. Higher turns sharper.", 360, 90, 1440)
 slider("combat", "combat_swing_cooldown", "Time between swings",
-	"Tenths of a second between two attacks. Forced swings deal damage, so this keeps them fair.", 15, 5, 50)
+	"Tenths of a second between two attacks. Forced swings deal damage, so this keeps them fair.", 40, 5, 100)
 slider("combat", "combat_charge_cooldown", "Time between charge attacks",
 	"Tenths of a second between two charge attacks.", 100, 0, 600)
 slider("combat", "combat_jump_cooldown", "Time between jump attacks",
-	"Tenths of a second between two jump attacks.", 60, 5, 300)
+	"Tenths of a second between two jump attacks.", 100, 5, 300)
 slider("combat", "combat_reload", "Reload time",
-	"Percent of the unit's own reload when you shoot with one man. 100 is the game's time. Crossbows reload as they "
-	.. "aim, so this does not change them.", 100, 25, 300)
+	"Percent of the unit's own reload when you shoot with one man. 100 is the game's time.", 100, 25, 300)
 slider("combat", "combat_spread", "Volley scatter",
 	"Tenths of a metre each shot of a several-shot volley lands from your aim. 0 sends them all to one point.", 15, 0, 50)
 checkbox("combat", "combat_one_man", "Play one man of a regiment",

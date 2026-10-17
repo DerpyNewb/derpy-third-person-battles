@@ -14,6 +14,11 @@ local CLEAR = 1.6
 -- second, only once he has moved MOVED m or the camera turned TURNED rad since the last lift: trying the roof again
 -- from the same place would pop the view over it every time
 local LIFT_TOL, BOOM_MIN, BOOM_IN, BOOM_OUT, MOVED, TURNED = 0.3, 0.1, 3, 0.5, 1, 0.17
+-- first person (the author, 2026-10-17: "first person camera"): the eye at FP_EYE of his height and FP_AHEAD m ahead of
+-- his face, so it is not inside his head; FP_LAG s behind his position samples, one of their steps (a man's position
+-- changed every 0.14-0.24 s, measured 2026-10-17, probes/zz_tp_fp.lua: any less and the eye stops between steps), where
+-- third person's lag would leave the eye trailing his head; it looks up as far as FP_PITCH_MIN
+local FP_EYE, FP_AHEAD, FP_LAG, FP_PITCH_MIN = 0.92, 0.35, 0.25, -1.2
 
 return function(E)
 	local R = {}
@@ -21,17 +26,19 @@ return function(E)
 	function R.start(now, x, y, z, yaw, zoom, ranged)
 		R.samples, R.sx, R.sy, R.sz = {{now, x, y, z}}, x, y, z
 		R.yaw, R.pitch, R.zoom, R.ots, R.close = yaw, 0, zoom, ranged and 1 or 0, 0
+		R.want_yaw, R.want_pitch = yaw, 0
 		R.ey, R.ey1, R.ey2, R.boom, R.cap = nil, nil, nil, 1, nil
 		-- no eye until this session's first frame: the aim's "no eye yet" reads R.ex, and the last session's x with this
 		-- one's cleared height threw on fire held as F2 went on (2026-10-17)
 		R.ex, R.ez, R.lx, R.ly, R.lz = nil, nil, nil, nil, nil
 	end
 
+	-- the mouse sets where the view goes; R.update eases it there
 	function R.look(dx, dy) -- mouse pixels
 		local S = E.S
-		R.yaw = R.yaw + dx * S.sensitivity
+		R.want_yaw = R.want_yaw + dx * S.sensitivity
 		if S.invert_y then dy = -dy end
-		R.pitch = math.max(PITCH_MIN, math.min(PITCH_MAX, R.pitch + dy * S.sensitivity))
+		R.want_pitch = math.max(R.first and FP_PITCH_MIN or PITCH_MIN, math.min(PITCH_MAX, R.want_pitch + dy * S.sensitivity))
 	end
 
 	function R.zoom_by(steps) -- natural-log steps: positive zooms out
@@ -39,14 +46,22 @@ return function(E)
 	end
 
 	-- melee: his unit fights hand to hand, and the camera comes in to S.melee_distance (the author, 2026-10-15)
-	function R.update(now, dt, x, y, z, ranged, melee, got_y)
+	-- height: first person, out of a man that tall; nil, behind him
+	function R.update(now, dt, x, y, z, ranged, melee, got_y, height)
 		local S, Q = E.S, R.samples
+		R.first = height ~= nil
+		if not R.first and R.want_pitch < PITCH_MIN then R.want_pitch = PITCH_MIN end
+		-- the view eases to where the mouse put it over S.smooth s, in real time (the author, 2026-10-17: "smoothness of the
+		-- camera turning"): a frame's mouse step is whole pixels, in the bursts the mouse's own rate sets, and applied raw
+		-- the view turned in steps
+		local k = S.smooth > 0 and 1 - math.exp(-dt / S.smooth) or 1
+		R.yaw, R.pitch = R.yaw + (R.want_yaw - R.yaw) * k, R.pitch + (R.want_pitch - R.pitch) * k
 		local last = Q[#Q]
 		if x ~= last[2] or z ~= last[4] then
 			Q[#Q + 1] = {now, x, y, z}
 			if #Q > 16 then table.remove(Q, 1) end
 		end
-		local tp = now - S.lag
+		local tp = now - (R.first and FP_LAG or S.lag)
 		local i = #Q
 		while i > 1 and Q[i][1] > tp do i = i - 1 end
 		local tx, ty, tz = Q[i][2], Q[i][3], Q[i][4]
@@ -55,9 +70,18 @@ return function(E)
 			local f = (tp - Q[i][1]) / (b[1] - Q[i][1])
 			tx, ty, tz = tx + (b[2] - tx) * f, ty + (b[3] - ty) * f, tz + (b[4] - tz) * f
 		end
-		local a = 1 - math.exp(-K_POS * dt)
+		local a = R.first and 1 or 1 - math.exp(-K_POS * dt) -- in his head, no spring behind him
 		R.sx, R.sy, R.sz = R.sx + (tx - R.sx) * a, R.sy + (ty - R.sy) * a, R.sz + (tz - R.sz) * a
 		local fx, fz = math.sin(R.yaw), math.cos(R.yaw)
+		if R.first then
+			local ex, ez = R.sx + fx * FP_AHEAD, R.sz + fz * FP_AHEAD
+			local ey = math.max(R.sy + height * FP_EYE, bm:get_terrain_height(ex, ez) + 0.2)
+			local c = math.cos(R.pitch)
+			local lx, ly, lz = ex + fx * c * AHEAD, ey - math.sin(R.pitch) * AHEAD, ez + fz * c * AHEAD
+			R.ey2, R.ey1 = R.ey1, R.ey
+			R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = ex, ey, ez, lx, ly, lz
+			return ex, ey, ez, lx, ly, lz
+		end
 		local zm = R.zoom
 		R.close = R.close + ((melee and 1 or 0) - R.close) * math.min(1, OTS_RATE * dt)
 		local dist = S.distance + (math.min(S.melee_distance, S.distance) - S.distance) * R.close

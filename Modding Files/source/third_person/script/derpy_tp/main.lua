@@ -204,13 +204,20 @@ return function(E)
 			F.uc:melee(melee)
 			F.uc:release_control()
 		end
+		-- first person (the author, 2026-10-17: "first person camera"): out of the man he plays, or a unit of one; a regiment
+		-- played whole has no head to look out of. The rig takes his height
+		local head = E.first_person and (F.model or single) or nil
+		local body = head and E.D.bodies and E.D.bodies[F.utype]
+		local height = head and (body and body[2] or 1.8)
 		local x, y, z
-		if F.model then x, y, z = P.model_pos(F.model) else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
+		if head or F.model then x, y, z = P.model_pos(head or F.model)
+		else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
 		local kf, kr = 0, 0
 		if P.focused() then
 			look()
 			if P.pressed(S.keys.hide_ui) then hide_ui(not F.ui_off) end -- paused too: a still to take a picture of
 			if P.pressed(S.keys.minimap) then F.map = E.hud.map(not F.map) end
+			if P.pressed(S.keys.view) then E.first_person = not E.first_person end -- kept for the battle
 			cursor(not F.dragging)
 			kf = (P.held(S.keys.forward) and 1 or 0) - (P.held(S.keys.back) and 1 or 0)
 			kr = (P.held(S.keys.right) and 1 or 0) - (P.held(S.keys.left) and 1 or 0)
@@ -299,7 +306,7 @@ return function(E)
 		E.combat.crosshair((F.ranged or F.armed ~= nil) and F.dragging and not F.ui_off)
 		E.hud.update(gnow)
 		local ex, ey, ez, lx, ly, lz = E.rig.update(now, dt, x, y, z, F.ranged, unit:is_in_melee(),
-			cam:position():get_y())
+			cam:position():get_y(), height)
 		cam:move_to(v(ex, ey, ez), v(lx, ly, lz), 0, false, -1, false)
 		F.frames = F.frames + 1
 	end

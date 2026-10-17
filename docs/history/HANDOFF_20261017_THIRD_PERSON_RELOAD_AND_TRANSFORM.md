@@ -10,7 +10,7 @@ and round 37's 3 mutants green. Deployed 16:09 with the game shut: `data/derpy_t
 paths. It replaced `70b00eb0` (09:05), now `Modding Files/Backup/derpy_third_person_data_before_manual_fire_wait_20261017.pack`;
 before that `859fd60d` (`..._before_takeover_20261017.pack`) and `4ce7676e` (`..._before_reload_transform_20261017.pack`).
 **Verified live:** the transformation keeps the unit (section 2b); the reload clock on a man with no RELOAD_1 (section
-5, the Zweishot); Manual fire on the deployed pack, 3 runs of 4; the take-over both ways on the deployed pack (section 6).
+5, the Zweishot); Manual fire on the deployed pack, 3 runs of 4; the take-over both ways on the deployed pack (section 6). Then section 7: smoother turning, first person (V), melee 4 s and jump 10 s by default; deployed `d61c3fee` (`Modding Files/Backup/derpy_third_person_data_before_camera_fp_20261017.pack` is `f0f97591`), 386 tests, round 38's 18 mutants.
 
 ## 1. The reload bypass - fixed, root cause measured
 
@@ -180,3 +180,28 @@ scripted click on the battle's menu button opened nothing.
 - 3.0 s: the flame form's own mortar mode cast through ITS card (so the HUD had the new form's context). 3.4 s: back on
   the mortar under its old id 1010.
 - No "HUD part ... is off", no error. Game closed after.
+
+## 7. Turning, first person, cooldowns (17:00-17:45; the author: "smoothness of the camera turning", "first person camera", "make default cooldonw of melee attack to 4, jumpattack to 10")
+
+**Cooldowns.** `settings.lua` and the MCT page: time between swings 15 -> 40 tenths (slider max 50 -> 100), jump attacks
+60 -> 100. `mct_defaults_agree_with_settings` already held the two files together. Six swing tests had stepped 1.5-2 s
+past a swing; they now step `past_swing_gap()` (the setting plus 0.1 s), and the walking-swing test keeps 1.5 s because
+it is about a gap shorter than the clip. The Reload time tooltip no longer says crossbows are exempt (section 1 made
+them reload on the clock).
+
+**Turning.** `rig.lua`: the mouse moves `R.want_yaw`/`R.want_pitch`; `R.update` eases the view to them over `S.smooth` s of
+real time (MCT "Turn smoothing", hundredths, default 5, 0 = at once). Live with a bursty synthetic mouse (8 px one
+frame, 0 the next): smoothing off, the view stood still on 46 of 90 frames; on, on 1-2 of about 100. Tests that pointed
+the view by writing `rig.yaw`/`rig.pitch` now use `set_view()`, which sets both.
+
+**First person.** Key V ("view", the game binds no plain V). `E.first_person` is kept for the battle. From the man
+played alone, or a unit of one; a regiment played whole stays in third person. The eye is at 0.92 of `data.lua`'s body
+height and 0.35 m ahead of his face, looking along the view, with no follow spring, and it can look up to -1.2 rad
+(third person's -0.25 comes back with V). **Measured live:** a man's position (`P.model_pos`) changes every 0.14-0.24 s
+(about 40 in 8 s), so the eye trails one step, `FP_LAG` = 0.25 s; a first try at 0.12 s would have stopped the eye
+between steps. With 0.25 s the eye never stood still while he walked; it sits 1.63-1.66 m above a Hessmarine's feet; no
+error. Screenshot `screenshots/tp_fp_shot.tga`. Not done: no HUD hint for V (the MCT page lists it), zoom does nothing
+in first person, and his weapon can come into view in a swing.
+
+`probes/zz_tp_fp.lua` (`_G.TP_FP_TYPE`, `_G.TP_FP_SMOOTH`) measures both. Round 38: 18 mutants, all killed; three older
+anchors re-aimed (`mutants_actions`, `mutants_round19`, `mutants_tuning`).

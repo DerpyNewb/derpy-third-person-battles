@@ -10,7 +10,7 @@ MUTANTS = [
     (S, 'S.aim_back = get("camera_aim_back", 32) / 10', 'S.aim_back = 3.2', "the_aiming_camera_sits_the_set_distance_back"),
     (S, 'S.reload_factor = get("combat_reload", 100) / 100', 'S.reload_factor = 1', RL),
     (S, 'S.spread = get("combat_spread", 15) / 10', 'S.spread = 1.5', "the_spread_setting_can_close_the_volley"),
-    (R, "local tp = now - S.lag", "local tp = now - 0.45", "the_follow_delay_comes_from_the_settings"),
+    (R, "local tp = now - (R.first and FP_LAG or S.lag)", "local tp = now - (R.first and FP_LAG or 0.45)", "the_follow_delay_comes_from_the_settings"),
     (R, "R.sy + S.height * zm + lift", "R.sy + 2.5 * zm + lift", "camera_height_and_lag_come_from_the_settings"),
     (R, "(rx * OTS_SIDE - fx * S.aim_back) * zm", "(rx * OTS_SIDE - fx * 3.2) * zm", "the_aiming_camera_sits_the_set_distance_back"),
     (R, "(rz * OTS_SIDE - fz * S.aim_back) * zm", "(rz * OTS_SIDE - fz * 3.2) * zm", "the_aiming_camera_sits_the_set_distance_back"),
