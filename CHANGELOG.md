@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-17
+
+- Ranged men without a reload animation (grenadiers, crossbows, gunshields) wait the full reload time.
+- Ammo changes that swap the unit (Deithland's modes) keep third person on the new form.
+- Fire held while pressing F2 no longer switches the mod off.
+- Artillery's Manual fire stays open: the click waits a second for the camera to settle.
+- Decompiled exe code taken out of the repo.
+
 ## 2026-10-16
 
 - Melee clicks swing in a melee: 200-400 ms, where most were lost.

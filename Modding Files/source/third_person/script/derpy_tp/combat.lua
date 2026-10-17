@@ -434,11 +434,11 @@ return function(E)
 
 	-- Ends the shot early: a step does once he reloads (the author, 2026-10-14: the 14 s reload held him in place),
 	-- the mode key at any point. The reload still counts: after a shot has left, the next waits the projectile's
-	-- base_reload_time from the reload's start; a crossbow's reload is its next raise to aim.
+	-- base_reload_time from the reload's start.
 	function C.drop(now, step)
 		local shot = F.shot
 		if not shot or (step and shot.phase ~= "reload") then return end
-		if shot.launched and F.reload_slot ~= SLOT_AIM then F.ready_at = (shot.reload_at or now) + E.D.shots[F.utype][2] * E.S.reload_factor end
+		if shot.launched then F.ready_at = (shot.reload_at or now) + E.D.shots[F.utype][2] * E.S.reload_factor end
 		F.shot = nil
 	end
 
@@ -506,12 +506,12 @@ return function(E)
 				return
 			end
 			if shot.phase == "hold" then play_phase(shot, "fire", shot.fire_slot, now) return end
-			-- no reload clip (a weapon team): the projectile's reload time on the clock from the fire clip's end
+			-- no reload clip (a weapon team, a crossbow): the projectile's reload time on the clock from the fire clip's end
 			if shot.phase == "fire" and not F.reload_slot then
 				F.ready_at, F.shot = now + E.D.shots[F.utype][2] * E.S.reload_factor, nil
 				return
 			end
-			if shot.phase == "fire" and F.reload_slot ~= SLOT_AIM then
+			if shot.phase == "fire" then
 				shot.reload_at = now
 				-- the game's reload time, the setting's share of it, whatever the clip's length: a clip shorter than it
 				-- freed the next shot (the author, 2026-10-16: "reload time not being followed, I can click fire button when
@@ -534,6 +534,10 @@ return function(E)
 	-- first-person UI closes (the game's own way out) or the mode key or F2 asks - those click the button
 	-- again 0.25 s later, only if the mode is still open. The watcher is a repeat registered straight from
 	-- the key, never inside a one-shot: CA frees a one-shot's id before running it.
+	-- The click waits SETTLE s from the key: what the stop puts back (CA's cinematic interface fading out, the camera's floor)
+	-- takes a moment, and a click 0.1-0.3 s after it lost the view again within 1.2 s, or never opened it; 0.5, 1 and 2 s
+	-- after, it held (measured 2026-10-17, probes/zz_tp_manual.lua: a Culverin)
+	local SETTLE = 1
 	local function manual_button() return find_uicomponent(core:get_ui_root(), "hud_battle", "porthole_parent", "button_unit_manual_fire") end
 	local function manual_open() local fp = find_uicomponent(core:get_ui_root(), "first_person_ui") return fp and fp:Visible() or false end
 
@@ -543,6 +547,7 @@ return function(E)
 			if not fp then bm:remove_real_callback("derpy_tp_fp") return end
 			local now, open = os.clock(), manual_open()
 			if not fp.clicked then
+				if now - fp.t < SETTLE then return end
 				local b = manual_button()
 				if b and b:Visible() then b:SimulateLClick() fp.clicked, fp.t = true, now return end
 				if now - fp.t < 2 then return end

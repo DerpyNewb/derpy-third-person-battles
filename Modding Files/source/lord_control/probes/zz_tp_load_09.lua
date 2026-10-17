@@ -2,6 +2,27 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
+		F.reload_slot = F.model and P.reload_slot(F.model)
+		F.thrown = false
+		learn_shot(unit)
+		-- no reload clip is no bar (measured 2026-10-15: a rocket team's men have FIRE_LEVEL only): the reload runs on the clock
+		F.fire_slot = F.model and fire_clip(F.model)
+		F.solo = F.model ~= nil and E.D.shots[F.utype] ~= nil and P.features.anim and F.fire_slot ~= nil
+		-- a man who cannot shoot alone is played all the same (the author, 2026-10-15: "pressing f2 will still move the
+		-- entire battalion"), in melee with no ranged mode - E.can_shoot
+		F.cannot_shoot = F.model ~= nil and not F.solo and unit:missile_range() > 0
+		-- the charge and jump keys need their clips (MOVING_ATTACK_1 484, JUMPING_ATTACK_1 489; measured 2026-10-15)
+		-- any of the five: an engineer's one jump is JUMPING_ATTACK_2 (measured 2026-10-15)
+		-- cheer: any CELEBRATE_1-10 or TAUNT_1-10 (1094-1113, combat.lua C.cheer); none, no cheer (the author, 2026-10-15:
+		-- "only show cheer and fly if its applicable")
+		capabilities(F.model or P.models(unit)[1])
+		F.lock, F.next_charge, F.next_jump, F.charging, F.charge_at = nil, 0, 0, false, nil
+		F.native_attack = nil
+		F.ranged = E.can_shoot() and not F.arty
+		-- a reload under way when he was last let go still counts (ready_by, by unit)
+		F.firing, F.want_shot, F.shot, F.next_swing, F.swings, F.shot_n = false, false, nil, 0, 0, 0
+		F.ready_at = ready_by[unit:unique_ui_id()] or 0
+		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
@@ -117,6 +138,8 @@ S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
 				else M.start() end
 			elseif F.on then
 				tick(now, dt, gnow, paused)
+			elseif swap then
+				follow_swap(gnow)
 			end
 		end, debug.traceback)
 		if not ok then E.fail(err) end

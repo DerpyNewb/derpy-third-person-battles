@@ -2,6 +2,8 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/platform"] = (S["/script/derpy_tp/platform"] or "") .. [==[
+			mr.write(walk, 0x30, mr.uint16(angle or math.floor((math.atan2(x - mx, z - mz) % (2 * math.pi)) * 0x10000 / (2 * math.pi))))
+			mr.write(walk, 0x46, mr.uint8(run and 1 or 0))
 			mr.write(walk, 0x4c, bm:time_elapsed_ms() / 1000)
 			-- Let the engine destroy the old command and construct a walking command; never forge its vtable.
 			mr.call(walk_start, "pointer(pointer, pointer)", m, walk)
@@ -147,6 +149,9 @@ return function(E)
 		R.samples, R.sx, R.sy, R.sz = {{now, x, y, z}}, x, y, z
 		R.yaw, R.pitch, R.zoom, R.ots, R.close = yaw, 0, zoom, ranged and 1 or 0, 0
 		R.ey, R.ey1, R.ey2, R.boom, R.cap = nil, nil, nil, 1, nil
+		-- no eye until this session's first frame: the aim's "no eye yet" reads R.ex, and the last session's x with this
+		-- one's cleared height threw on fire held as F2 went on (2026-10-17)
+		R.ex, R.ez, R.lx, R.ly, R.lz = nil, nil, nil, nil, nil
 	end
 
 	function R.look(dx, dy) -- mouse pixels

@@ -176,6 +176,11 @@ def check_data():
     got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
     if got != ["1.2", "3.1", "0.6", "1.9"]:
         bad.append("data.lua bodies: Golgfag's Maneaters %s, Kossars %s - run --gen" % (got[:2], got[2:]))
+    # a transformation ends third person before it goes off (abilities.lua): Yuan Bo's dragon form, CA's own
+    probe = ('local d = dofile([[%s]]) print(d.abilities["wh3_dlc24_lord_abilities_jade_dragon_dragon_form"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.strip()
+    if got != "transform":
+        bad.append("data.lua abilities: Yuan Bo's dragon form is %s, not a transform - run --gen" % got)
     return bad
 
 def exe_stamp():
@@ -186,6 +191,10 @@ def exe_stamp():
 
 
 def ability_kind(r):
+    # the unit becomes another (docs/BATTLE_UNIT_SWAPS.md 7.1: the flag does it, not unit_abilities.type): abilities.lua
+    # ends third person before it goes off
+    if r["spawn_is_transformation"] and r["spawned_unit"]:
+        return "transform"
     if r["target_ground"] or r["target_ground_under_allies"] or r["target_ground_under_enemies"]:
         return "ground"
     if r["target_enemies"]:

@@ -306,9 +306,10 @@ function M.build(mr)
 		anim = orig_of[mr.tostring(anim)] or anim -- disarmed, he still has his swings
 		return not mr.is_null(anim) and mr.read_uint16(anim, 0x50 + slot * 2) ~= 0xffff
 	end
+	-- RELOAD_1 or nothing: a man without it (a crossbow, a grenadier) reloads on the clock (the author, 2026-10-17: his
+	-- raise to aim, taken for his reload, let some ranged units bypass the reload time)
 	function P.reload_slot(m)
 		if P.has_slot(m, 1564) then return 1564 end
-		if P.has_slot(m, 1554) then return 1554 end
 	end
 	function P.mount(m)
 		if not P.features.steer then return nil end
@@ -352,7 +353,5 @@ function M.build(mr)
 			if (x - mx) ^ 2 + (z - mz) ^ 2 <= 0.01 then return end
 			mr.write(walk, 0, x) mr.write(walk, 4, my) mr.write(walk, 8, z)
 			mr.write(walk, 0x28, mr.uint32(run and 1 or 0)) mr.write(walk, 0x2c, speed)
-			mr.write(walk, 0x30, mr.uint16(angle or math.floor((math.atan2(x - mx, z - mz) % (2 * math.pi)) * 0x10000 / (2 * math.pi))))
-			mr.write(walk, 0x46, mr.uint8(run and 1 or 0))
 ]==]
 return "part 10 of 11"

@@ -1,10 +1,10 @@
 C, MV, MN = "script/derpy_tp/combat.lua", "script/derpy_tp/move.lua", "script/derpy_tp/main.lua"
 SLIDE, REST, SPACED = "a_step_after_the_mode_key_mid_aim_does_not_slide", "walking_from_rest_plays_no_clip", "a_clip_that_keeps_reporting_is_not_queued_every_frame"
 CUT, KEEP, DELAY = "a_step_cuts_the_reload_short", "a_step_does_not_cut_the_aim_or_the_firing_clip", "a_cut_reload_still_delays_the_next_shot"
-MODE, MID_AIM, XBOW = "the_mode_key_does_not_skip_the_reload", "the_mode_key_mid_aim_adds_no_wait", "a_crossbow_switching_modes_after_its_bolt_adds_no_wait"
+MODE, MID_AIM, XBOW = "the_mode_key_does_not_skip_the_reload", "the_mode_key_mid_aim_adds_no_wait", "a_crossbow_switching_modes_after_its_bolt_still_waits"
 PLAY = "\t\t\t\tP.play(m, WALK_1, 0)\n"
 STEER = "\t\t\tP.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw, speed)\n"
-GATE = "if shot.launched and F.reload_slot ~= SLOT_AIM then F.ready_at = (shot.reload_at or now) + E.D.shots[F.utype][2] * E.S.reload_factor end"
+GATE = "if shot.launched then F.ready_at = (shot.reload_at or now) + E.D.shots[F.utype][2] * E.S.reload_factor end"
 MUTANTS = [
     # the walking clip that ends a latched one (measured 2026-10-14, probes/zz_tp_unclip.lua)
     (MV, PLAY, "", SLIDE),
@@ -24,8 +24,9 @@ MUTANTS = [
     (C, "\t\tif now < F.ready_at then return end\n", "", DELAY),
     (C, "\t\tif now < F.ready_at then return end\n", "", MODE),
     (C, GATE, "", MODE),
-    (C, "shot.launched and F.reload_slot", "F.reload_slot", MID_AIM),
-    (C, "and F.reload_slot ~= SLOT_AIM then F.ready_at", "then F.ready_at", XBOW),
+    (C, "if shot.launched then F.ready_at", "if true then F.ready_at", MID_AIM),
+    # 2026-10-17: a crossbow exempted again, as before ("some ranged units bypass the reload time")
+    (C, "if shot.launched then F.ready_at", "if shot.launched and F.reload_slot then F.ready_at", XBOW),
     (C, "(shot.reload_at or now)", "now", MODE),
     (C, "(shot.reload_at or now)", "(shot.reload_at or 0)", MODE),
     (C, "\t\t\t\tshot.reload_at = now\n", "", MODE),

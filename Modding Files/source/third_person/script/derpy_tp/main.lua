@@ -17,6 +17,7 @@ return function(E)
 	local cam = bm:camera()
 	local M = {}
 	local ready_by = {} -- unique_ui_id -> model time he can shoot again, kept across sessions
+	local swap -- a transformation under way (M.follow): the army's ui ids at the cast, and the battle time it is waited for
 
 	-- what the game says is selected (CcoBattleUnit.IsSelected, by unique_ui_id; measured 2026-10-15: true for the one
 	-- selected unit, false for the rest). A set kept from selection callbacks went stale (the author, 2026-10-15: "the
@@ -239,6 +240,7 @@ return function(E)
 					if P.pressed(S.keys["ability_" .. n]) and F.dragging then
 						local why = E.abilities.press(n, gnow)
 						if why then E.log(why) end
+						if not F.on then return end -- a transformation ends this session: nothing more on the old unit
 					end
 				end
 				if P.pressed(S.keys.fly) and F.dragging then toggle_flying() end
@@ -302,8 +304,30 @@ return function(E)
 		F.frames = F.frames + 1
 	end
 
+	-- a transformation replaces the unit (abilities.lua ends third person before it goes off): the unit that was not in
+	-- the army at the cast is its new form, played on as soon as it is there (the author, 2026-10-17: "seems to
+	-- deactivate f2 when changing ammo"; measured: Deithland's mortar was back 0.2 s after the cast, under a ui id of
+	-- its own). Waited for in battle time, a wind-up included (CA's dragon forms wind up 5 s), and for its unit card: it
+	-- came a frame after the unit, and taken over before it the HUD had no context (portrait and slots off for good)
+	local SWAP_WAIT = 10
+	function M.follow()
+		local army, before = bm:get_player_army(), {}
+		for i = 1, army:units():count() do before[army:units():item(i):unique_ui_id()] = true end
+		swap = {before = before, till = bm:time_elapsed_ms() / 1000 + SWAP_WAIT}
+	end
+	local function follow_swap(gnow)
+		if gnow > swap.till then swap = nil return end
+		local army = bm:get_player_army()
+		for i = 1, army:units():count() do
+			local u = army:units():item(i)
+			if not swap.before[u:unique_ui_id()] and u:number_of_men_alive() > 0
+				and find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id())) then M.start(u) return end
+		end
+	end
+
 	function M.start(unit)
 		if E.disabled or F.on then return end
+		swap = nil -- the key, or the new form: either way nothing more is waited for
 		E.S = E.settings(get_mct and get_mct(), E.K) -- loaded once by the entry: no file is read here
 		local S = E.S
 		for _, c in ipairs(S.conflicts) do
@@ -466,6 +490,8 @@ return function(E)
 				else M.start() end
 			elseif F.on then
 				tick(now, dt, gnow, paused)
+			elseif swap then
+				follow_swap(gnow)
 			end
 		end, debug.traceback)
 		if not ok then E.fail(err) end

@@ -44,9 +44,9 @@ behind it, never the whole mod.
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 3,000 lines of Lua), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 374 tests, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 380 tests, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 326 probe scripts run against the live game, and 50 mutation sets (681 mutants) |
+| `Modding Files/source/lord_control/probes/` | 338 probe scripts run against the live game, and 52 mutation sets (699 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs and the core plan |
 | `docs/history/` | the handoffs written as each part was measured in game, and the working ledger |
 
@@ -67,11 +67,11 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 374 tests.
+  frame by frame and asserts on the commands the modules sent: 380 tests.
 - **Every rule is proven to be caught.** `probes/tp_mutate.py` plants one plausible mistake at a
   time in the shipped Lua, runs the suite, and restores the file byte for byte. It might be a
   guard dropped, a constant changed, or a branch inverted. A mutant the tests do not catch is a
-  finding, and so is an anchor that no longer matches the code. 681 mutants in 50 sets; four of
+  finding, and so is an anchor that no longer matches the code. 699 mutants in 52 sets; four of
   the oldest sets still carry stale anchors from code that was rewritten since.
 - **Measured, not assumed.** Animation slot ids, clip lengths, the camera's floor and the
   projectile release point were each read from the running game through the probes, or from

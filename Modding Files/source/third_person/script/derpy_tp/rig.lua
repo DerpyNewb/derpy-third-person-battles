@@ -22,6 +22,9 @@ return function(E)
 		R.samples, R.sx, R.sy, R.sz = {{now, x, y, z}}, x, y, z
 		R.yaw, R.pitch, R.zoom, R.ots, R.close = yaw, 0, zoom, ranged and 1 or 0, 0
 		R.ey, R.ey1, R.ey2, R.boom, R.cap = nil, nil, nil, 1, nil
+		-- no eye until this session's first frame: the aim's "no eye yet" reads R.ex, and the last session's x with this
+		-- one's cleared height threw on fire held as F2 went on (2026-10-17)
+		R.ex, R.ez, R.lx, R.ly, R.lz = nil, nil, nil, nil, nil
 	end
 
 	function R.look(dx, dy) -- mouse pixels

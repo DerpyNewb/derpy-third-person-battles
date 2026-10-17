@@ -18,33 +18,40 @@ S["/script/derpy_tp/data"] = (S["/script/derpy_tp/data"] or "") .. [==[
 --   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)
 return {
 	shots = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = {"wh3_dlc25_emp_inf_rifle_bullet_hochland_ror", 13, 1, "Battle_Individual_Small_Arms_Repeater_Rifle_Fire"},
+		["emp_gottzorn_knellgun"] = {"emp_gottzorn_cannon_ball", 21, 1},
+		["emp_pyretitans_autodragon"] = {"emp_pyretitans_gun_cannon", 8, 1, "Battle_Individual_Artillery_Cannon_Fire"},
+		["emp_pyretitans_mortar"] = {"emp_pyretitans_gun_mortar", 14, 1, "Battle_Individual_Artillery_Magma_Cannon_Launch"},
 	},
 	abilities = {
 	},
 	fires = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = {{0.45, 0.114, 1.533, 1.598}},
+		["emp_pyretitans_mortar"] = {{1.627, 0.114, 2.469, 2.438}},
 	},
 	fires_low = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = {{0.442, 0.063, 0.025, 1.285}},
 	},
 	fires_high = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = {{0.45, 0.11, 2.317, 1.039}},
 	},
 	raises = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = {0.8, 0.8, 0.8},
 	},
 	runs = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = 1.9,
-		["wh3_dlc29_emp_inf_teutogen_guard_ror"] = 2.1,
+		["emp_autodragon"] = 1.9,
+		["emp_autofalcon_armored"] = 1.9,
+		["emp_cofferglare"] = 1.9,
+		["emp_culverin"] = 1.9,
 	},
 	speeds = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = 100,
+		["emp_gottzorn_knellgun"] = 175,
+		["emp_pyretitans_autodragon"] = 200,
+		["emp_pyretitans_mortar"] = 75,
 	},
 	bodies = {
-		["wh3_dlc25_emp_inf_hochland_long_rifles_ror"] = {0.6, 1.8},
-		["wh3_dlc29_emp_cav_knights_of_the_white_wolf_ror"] = {1.4, 2.9},
-		["wh3_dlc29_emp_inf_teutogen_guard_ror"] = {0.68, 1.8},
+		["emp_autodragon"] = {0.65, 1.8},
+		["emp_autofalcon_armored"] = {0.65, 1.8},
+		["emp_cofferglare"] = {0.65, 1.8},
+		["emp_culverin"] = {0.65, 1.8},
+		["emp_gottzorn_knellgun"] = {5, 3},
+		["emp_pyretitans_autodragon"] = {1.7, 7},
+		["emp_pyretitans_mortar"] = {1.7, 7},
 	},
 }
 ]==]

@@ -780,8 +780,32 @@ T.solo_click_during_reload_is_kept = function()
 	H.tap("Left mouse")
 	H.step(1)
 	check(H.count("launch") == 1, "the second click waits for the reload")
-	H.step(10)
+	H.step(18)
 	check(H.count("launch") == 2, "then fires")
+end
+
+-- the author, 2026-10-17: "some ranged units bypass the reload time" - every man with no RELOAD_1 (Hessmarine
+-- Grenadiers, 7 s reload, shot every 2 s): his raise to aim was taken for his reload, so no clock held the next shot
+T.solo_without_a_reload_clip_waits_the_game_reload = function()
+	-- harness clips: aim 1 s, fire 4 s; the game's reload 13 s from the fire clip's end: shots at 1.3 and 19.3 s
+	crossbowmen()
+	H.down("Left mouse")
+	H.step(17)
+	check(H.count("launch") == 1, "his raise is no reload: one shot in 17 s, got " .. H.count("launch"))
+	H.step(3)
+	check(H.count("launch") == 2, "held fire repeats once the reload time is over")
+end
+
+-- fire held as a second session starts (seen 2026-10-17: "attempt to perform arithmetic on field 'ey'" in aim_point and
+-- third person off with an error): the eye was the last session's, its height cleared, so the aim's "no eye yet" let it by
+T.fire_held_as_a_session_starts_waits_for_the_camera = function()
+	crossbowmen()
+	H.tap("F2") H.step(0.2)
+	H.down("Left mouse")
+	H.tap("F2") H.step(0.5)
+	check(H.E.F.on and not H.logged("error"), "on, no error: " .. tostring(H.E.F.on))
+	H.step(2)
+	check(H.count("launch") == 1, "and he shoots once the camera is there")
 end
 
 T.solo_waits_for_the_engine_reload_and_finishes_after_release = function()
@@ -795,8 +819,8 @@ T.solo_waits_for_the_engine_reload_and_finishes_after_release = function()
 end
 
 -- the author, 2026-10-14: "not using the prefire animation first, then fire". 9.0 slot ids (AssetEditor's dlc24
--- list + 2): 1554 SHOOT_READY_TO_AIM_LEVEL, 1557 FIRE_LEVEL, 1564 RELOAD_1. A crossbow has no RELOAD_1: its
--- raise to aim is its reload, as in the game's own crossbow cycle (1554 between shots).
+-- list + 2): 1554 SHOOT_READY_TO_AIM_LEVEL, 1557 FIRE_LEVEL, 1564 RELOAD_1. A crossbow has no RELOAD_1: between
+-- shots he raises to aim again, as in the game's own crossbow cycle, once the reload time is over.
 T.solo_aims_fires_then_reloads = function()
 	for _, case in ipairs({{nil, "1554/6 1557/0 1554/6 1557/0"}, {1564, "1554/6 1557/0 1564/6 1554/6 1557/0"}}) do
 		crossbowmen(case[1] and {reload_slot = case[1]} or nil)
@@ -1032,7 +1056,7 @@ T.artillery_mode_opens_manual_fire = function()
 	H.tap("Right mouse")
 	check(not H.E.F.on, "control steps aside")
 	check(H.last("select_in_ui")[2] == u._id, "the battery is selected, so the HUD carries its button")
-	H.step(0.2)
+	H.step(1.1)
 	check(H.last("click") and H.last("click")[2] == "button_unit_manual_fire", "the button is clicked")
 	local fp = H.comp("first_person_ui", H.root)
 	H.step(0.2)
@@ -1044,13 +1068,24 @@ end
 T.f2_leaves_manual_fire = function()
 	a_battery()
 	H.tap("Right mouse")
-	H.step(0.2)
+	H.step(1.1)
 	H.comp("first_person_ui", H.root)
 	H.step(0.2)
 	H.tap("F2")
 	H.step(0.5)
 	check(H.count("click") == 2, "F2 clicks the button again a beat later")
 	check(H.E.F.on, "and control comes back")
+end
+
+-- measured 2026-10-17 (probes/zz_tp_manual.lua, a Culverin): clicked 0.1-0.3 s after third person's stop, the
+-- first-person view closed again within 1.2 s, or never opened; 0.5, 1 and 2 s after, it held
+T.manual_fire_waits_for_the_game_to_settle = function()
+	a_battery()
+	H.tap("Right mouse")
+	H.step(0.8)
+	check(H.count("click") == 0, "no click while what third person put back is still settling")
+	H.step(0.3)
+	check(H.count("click") == 1, "clicked a second after the key")
 end
 
 T.manual_fire_without_a_button_gives_control_back = function()
@@ -1154,6 +1189,85 @@ T.an_ability_that_targets_nothing_is_activated_through_its_context = function()
 		if call == c then after = true elseif after and call[1] == "uc:release_control" then after = "released" end
 	end
 	check(after == true, "no controller hand-back after the activation")
+end
+
+-- a transformation replaces his unit with another (the Deithland Pyretitans' ammo modes; the author, 2026-10-17: "change
+-- ammunition units will disappear when the ability is pressed"): third person ends, everything put back on the unit
+-- while it is there, and only then does it go off, as CA's button sends it
+T.a_transformation_ends_third_person_before_it_goes_off = function()
+	H.fresh({units = {{general = true, abilities = {MOD}}}})
+	H.cco = ability_record({})
+	local was = H.E.D.abilities[MOD]
+	H.E.D.abilities[MOD] = "transform"
+	H.tap("F2") H.step(0.1)
+	local ok, err = pcall(function()
+		H.tap("1") H.step(0.1)
+		check(not H.E.F.on, "third person is off")
+		local stop, cast
+		for i, call in ipairs(H.calls) do
+			if call[1] == "disable_orders" and call[2] == false then stop = stop or i end
+			if call[1] == "cco_cmd" and call[4] == "BattleAbilityList.At(0).PerformAbilityForOwner" then cast = cast or i end
+		end
+		check(stop and cast and stop < cast, "the stop's put-backs, then the cast: stop at " .. tostring(stop) .. ", cast at " .. tostring(cast))
+		local touched = {}
+		for i = cast or #H.calls + 1, #H.calls do
+			local c = H.calls[i][1]
+			if c == "steer" or c == "guard" or c == "hold" or c == "face" or c == "place" or c == "play" or c == "disarm" then touched[#touched + 1] = c end
+		end
+		check(#touched == 0, "nothing more on the old unit's man that frame or after: " .. table.concat(touched, " "))
+		check(H.count("uc:perform_special_ability") == 0, "no unit order: the context's activation, as CA's button")
+	end)
+	H.E.D.abilities[MOD] = was
+	assert(ok, err)
+end
+
+-- and he plays on as the new form (the author, 2026-10-17: "seems to deactivate f2 when changing ammo"). The harness's
+-- swap comes in the cast; measured in game, Deithland's mortar was back 0.2 s after it under a ui id of its own
+local function swapping(after)
+	-- another regiment, its card there from the start: a unit in the army at the cast is no new form
+	H.fresh({units = {{general = true, abilities = {MOD}}, {type = "wh_test_unit", men = 10, x = 30}}})
+	H.cco = ability_record({})
+	local was, cmd, new = H.E.D.abilities[MOD], common.call_context_command, nil
+	H.E.D.abilities[MOD] = "transform"
+	common.call_context_command = function(...)
+		cmd(...)
+		if after then table.remove(H.units, 1) new = H.unit({general = true, type = "wh_test_new_form"}) end
+	end
+	H.tap("F2") H.step(0.1)
+	H.tap("1")
+	return function() H.E.D.abilities[MOD], common.call_context_command = was, cmd end, function() return new end
+end
+
+-- in game the new form came a frame before its unit card (2026-10-17: taken over at once, "HUD part portrait is off: no
+-- unit context for this unit", and the slots with it, for the rest of the battle): he waits for the card
+T.a_transformation_plays_on_as_its_new_form = function()
+	local undo, new = swapping(true)
+	local ok, err = pcall(function()
+		H.step(0.2)
+		check(new() and not H.E.F.on, "the new form has no card yet: not taken over")
+		local u = new()
+		H.comp(tostring(u._id), find_uicomponent(H.root, "cards_panel")).cco = "cco_" .. u._id
+		H.step(0.1)
+		check(H.E.F.on and H.E.F.unit == u, "its card is there: on again, as the new form: " .. tostring(H.E.F.unit and H.E.F.unit:type()))
+		check(not H.logged("is off"), "no HUD part switched off")
+		H.tap("F2") H.step(0.2)
+		check(not H.E.F.on, "F2 leaves it as ever: nothing more is waited for")
+	end)
+	undo()
+	assert(ok, err)
+end
+
+T.a_transformation_that_never_comes_leaves_third_person_off = function()
+	local undo = swapping(false)
+	local ok, err = pcall(function()
+		H.step(11)
+		local late = H.unit({general = true, type = "wh_test_late_unit"}) -- a reinforcement past the wait is no new form
+		H.comp(tostring(late._id), find_uicomponent(H.root, "cards_panel")).cco = "cco_" .. late._id
+		H.step(0.2)
+		check(not H.E.F.on, "off: nothing came in the wait, and a later unit is not taken for it")
+	end)
+	undo()
+	assert(ok, err)
 end
 
 T.an_untargeted_ability_without_a_context_falls_back_to_the_unit_order = function()
@@ -1638,7 +1752,7 @@ T.platform_reload_uses_the_active_fragment = function()
 	put(m.addr + 0x308, a, 8)
 	put(a + 0x50 + 1564 * 2, 0xffff, 2)
 	put(a + 0x50 + 1554 * 2, 236, 2)
-	check(P.reload_slot(m) == 1554, "crossbow uses ready-to-aim reload")
+	check(P.reload_slot(m) == nil, "a crossbow's raise to aim is no reload: he reloads on the clock")
 	put(a + 0x50 + 1564 * 2, 248, 2)
 	check(P.reload_slot(m) == 1564, "firearm has a separate reload")
 	put(a + 0x50 + 1564 * 2, 0xffff, 2)
@@ -2229,13 +2343,18 @@ T.the_mode_key_mid_aim_adds_no_wait = function()
 	check(aims() == 2 and H.count("launch") == 0, "no shot left, nothing to reload: he raises to aim again at once")
 end
 
--- a crossbow has no reload clip: its raise to aim is its reload, so leaving ranged after its bolt adds no wait
-T.a_crossbow_switching_modes_after_its_bolt_adds_no_wait = function()
+-- a crossbow has no reload clip, and leaving ranged after its bolt skips nothing either (the author, 2026-10-17:
+-- "some ranged units bypass the reload time"): the wait counts from the switch
+T.a_crossbow_switching_modes_after_its_bolt_still_waits = function()
 	crossbowmen()
+	local t0 = H.game_ms
 	H.tap("Left mouse") H.step(2) -- the bolt at 1.3 s, the firing clip until 5 s
 	H.tap("Right mouse") H.tap("Right mouse")
-	H.tap("Left mouse") H.step(0.1)
-	check(aims() == 2, "he raises to aim at once: " .. aims() .. " aims")
+	H.tap("Left mouse")
+	H.step(14.5 - (H.game_ms - t0) / 1000)
+	check(aims() == 1, "no aim before 15 s, the 13 s reload from the switch: " .. aims() .. " aims")
+	H.step(1)
+	check(aims() == 2, "then he aims")
 end
 
 T.solo_moves_with_own_facing_and_run_toggle = function()
@@ -4646,7 +4765,7 @@ T.a_high_raise_does_not_take_the_level_ones_length = function()
 	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
 	H.E.D.raises = {} -- the harness's raise runs 1 s, not the .anim's: learned on the first, as a modded unit's
 	H.E.rig.pitch = 0.08 H.step(0.1)
-	H.tap("Left mouse") H.step(15) -- a level shot and its reload: the level raise's length learned
+	H.tap("Left mouse") H.step(20) -- a level shot and its reload: the level raise's length learned
 	H.E.rig.pitch = 0 H.step(0.1)
 	local raise, fire
 	H.tap("Left mouse")

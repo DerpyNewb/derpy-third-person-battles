@@ -302,9 +302,10 @@ function M.build(mr)
 		anim = orig_of[mr.tostring(anim)] or anim -- disarmed, he still has his swings
 		return not mr.is_null(anim) and mr.read_uint16(anim, 0x50 + slot * 2) ~= 0xffff
 	end
+	-- RELOAD_1 or nothing: a man without it (a crossbow, a grenadier) reloads on the clock (the author, 2026-10-17: his
+	-- raise to aim, taken for his reload, let some ranged units bypass the reload time)
 	function P.reload_slot(m)
 		if P.has_slot(m, 1564) then return 1564 end
-		if P.has_slot(m, 1554) then return 1554 end
 	end
 	function P.mount(m)
 		if not P.features.steer then return nil end

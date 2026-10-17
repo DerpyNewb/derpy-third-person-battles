@@ -96,7 +96,7 @@ function H.unit(o)
 	local men = o.men or 1
 	for i = 1, men do -- one rank along x, centred on the unit, facing +z (bearing 0)
 		u._models[i] = {id = next_id * 1000 + i, x = u._x + (i - (men + 1) / 2), y = 0, z = u._z,
-			slots = o.slots, reload = o.reload_slot or (u._type:find("crossbowmen") and 1554 or 1564), hp = 100, hp_max = 100,
+			slots = o.slots, reload = o.reload_slot or not u._type:find("crossbowmen") and 1564, hp = 100, hp_max = 100,
 			clip_ms = o.clip_ms}
 		if o.reload_slot == false then u._models[i].reload = false end
 	end

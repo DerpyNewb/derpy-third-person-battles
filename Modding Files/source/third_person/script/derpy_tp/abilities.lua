@@ -82,6 +82,18 @@ return function(E)
 	function A.cast(n)
 		local key, why = ready(n)
 		if not key then return why end
+		-- a transformation replaces his unit with another (docs/BATTLE_UNIT_SWAPS.md 7): played on, the old unit's man
+		-- was steered on and the new unit never came (the author, 2026-10-17: "change ammunition units will disappear
+		-- when the ability is pressed"). Third person ends first, everything put back while the unit is there, then it
+		-- goes off as CA's button sends it, which swapped them whole with third person off (seen in game); the new
+		-- form is played on when it comes (main.lua M.follow)
+		if E.D.abilities[key] == "transform" then
+			E.main.stop("transform")
+			E.main.follow()
+			if not pcall(E.hud.ability_command, n, "PerformAbilityForOwner") then pcall(F.uc.perform_special_ability, F.uc, key, F.unit) end
+			E.log("cast " .. key .. " (transform)")
+			return nil
+		end
 		local kind = kind_of(n, key)
 		local ok, err, via_context
 		if kind == "ground" then

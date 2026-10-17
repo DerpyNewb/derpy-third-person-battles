@@ -14,8 +14,10 @@ MUTANTS = [
     (C, 'local aims = P.has_slot(F.model, shot.aim_slot)', 'local aims = false', 'solo_aims_fires_then_reloads'),
     (C, 'aim_len[F.utype .. shot.aim_slot] = aim_len[F.utype .. shot.aim_slot] or now - shot.at\n\t\t\t\tif shot.hold_slot then play_phase(shot, "hold", shot.hold_slot, now) else play_phase(shot, "fire", shot.fire_slot, now) end\n\t\t\t\treturn',
      'aim_len[F.utype .. shot.aim_slot] = aim_len[F.utype .. shot.aim_slot] or now - shot.at\n\t\t\t\treturn', 'solo_aims_fires_then_reloads'),
-    (C, 'if shot.phase == "fire" and F.reload_slot ~= SLOT_AIM then', 'if shot.phase == "fire" then', 'solo_aims_fires_then_reloads'),
-    (C, 'local SLOT_AIM = 1554 ', 'local SLOT_AIM = 1552 ', 'solo_aims_fires_then_reloads'),
+    # 2026-10-17: the raise to aim is no reload slot any more (it let men without RELOAD_1 skip the reload time)
+    ('script/derpy_tp/platform.lua', 'if P.has_slot(m, 1564) then return 1564 end\n', 'if P.has_slot(m, 1564) then return 1564 end\n\t\tif P.has_slot(m, 1554) then return 1554 end\n', 'platform_reload_uses_the_active_fragment'),
+    # its one use since 2026-10-17 is the high pair's check (no reload slot compares with it)
+    (C, 'local SLOT_AIM = 1554 ', 'local SLOT_AIM = 1552 ', 'a_man_without_the_whole_high_pair_keeps_the_level_one'),
     (C, 'if F.unit:is_currently_flying() and P.has_slot(m, 1941) then', 'if false then', 'flying_mount_swings_use_airborne_rider_slots'),
     (C, 'elseif P.has_slot(m, 1901) then', 'elseif false then', 'mounted_swings_use_rider_slots'),
     (C, 'P.play(m, chosen, 6)', 'P.play(m, chosen)', 'rider_without_a_parent_keeps_its_own_clip'),
