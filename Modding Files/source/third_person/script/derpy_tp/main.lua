@@ -167,8 +167,12 @@ return function(E)
 		local zout = P.held(S.keys.zoom_out) and 1 or 0
 		local notches = P.wheel and P.wheel() or 0
 		if zin ~= zout or notches ~= 0 then
-			E.rig.zoom_by((zout - zin) * S.zoom_rate * dt - notches * ZOOM_NOTCH)
+			local step = (zout - zin) * S.zoom_rate * dt - notches * ZOOM_NOTCH
+			local closest = E.rig.zoom_by(step)
 			E.zoom_by_type[F.utype] = E.rig.zoom
+			-- zoomed in all the way, first person; zoomed out, back behind him (the author, 2026-10-17: "the first person
+			-- mode should work if the player scrolled to the lowest")
+			if step < 0 and closest then E.first_person = true elseif step > 0 then E.first_person = false end
 		end
 	end
 

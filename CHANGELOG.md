@@ -8,7 +8,7 @@
 - Artillery's Manual fire stays open: the click waits a second for the camera to settle.
 - Decompiled exe code taken out of the repo.
 - Smoother camera turning, with a Turn smoothing setting (0 turns at once).
-- First person view on V: from the man you play, or a unit of one.
+- First person view on V, or by zooming in all the way: from the man you play, or a unit of one.
 - Default time between swings 4 s, between jump attacks 10 s.
 
 ## 2026-10-16

@@ -205,3 +205,10 @@ in first person, and his weapon can come into view in a swing.
 
 `probes/zz_tp_fp.lua` (`_G.TP_FP_TYPE`, `_G.TP_FP_SMOOTH`) measures both. Round 38: 18 mutants, all killed; three older
 anchors re-aimed (`mutants_actions`, `mutants_round19`, `mutants_tuning`).
+
+**Zooming in all the way (17:52; the author: "the first person mode should work if the player scrolled to the lowest").**
+`R.zoom_by` answers whether the zoom is at its closest (0.6); a zoom in that ends there turns first person on, any zoom
+out turns it off, wheel or keys; V still works. Below about 0.64 the third-person eye (2.5 m x zoom) was already under
+the 1.6 m ground clearance and slid in to his head, so the closest zooms looked like a broken first person. Round 39: 4
+mutants, killed. 387 tests. Deployed `03ae747b` (`Modding Files/Backup/derpy_third_person_data_before_zoom_fp_20261017.pack`
+is `d61c3fee`). Not run live: the wheel reading is unchanged, the switch is Lua the harness drives.

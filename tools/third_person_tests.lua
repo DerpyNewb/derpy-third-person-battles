@@ -596,6 +596,23 @@ T.v_switches_to_first_person_and_back = function()
 	check(H.eye.x < mx - 3, "V again: behind him once more, " .. H.eye.x)
 end
 
+-- the author, 2026-10-17: "the first person mode should work if the player scrolled to the lowest". Zoomed in as far as
+-- it goes, the camera goes into his head; zoomed out again, it comes back out
+T.zooming_in_all_the_way_goes_first_person = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local m = H.E.F.model
+	H.wheel_notches = 2 H.step(0.5)
+	check(not H.E.first_person and H.eye.z < m.z - 2, "two notches in: still behind him, " .. H.eye.z)
+	H.wheel_notches = 20 H.step(0.5)
+	check(H.E.first_person and near(H.eye.z, m.z + 0.35, 0.01), "the closest zoom: from his head, " .. H.eye.z)
+	H.wheel_notches = 1 H.step(0.5)
+	check(H.E.first_person, "scrolling in further stays there")
+	H.wheel_notches = -1 H.step(1)
+	check(not H.E.first_person and H.eye.z < m.z - 2, "a notch out: behind him again, " .. H.eye.z)
+	H.down("+") H.step(2) H.up("+") H.step(0.5)
+	check(H.E.first_person, "the zoom key in all the way does it too")
+end
+
 T.first_person_keeps_up_with_his_head = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.tap("V") H.step(1)

@@ -41,8 +41,9 @@ return function(E)
 		R.want_pitch = math.max(R.first and FP_PITCH_MIN or PITCH_MIN, math.min(PITCH_MAX, R.want_pitch + dy * S.sensitivity))
 	end
 
-	function R.zoom_by(steps) -- natural-log steps: positive zooms out
+	function R.zoom_by(steps) -- natural-log steps: positive zooms out; true at the closest zoom
 		R.zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, R.zoom * math.exp(steps)))
+		return R.zoom <= ZOOM_MIN
 	end
 
 	-- melee: his unit fights hand to hand, and the camera comes in to S.melee_distance (the author, 2026-10-15)
