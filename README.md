@@ -44,9 +44,9 @@ behind it, never the whole mod.
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 3,000 lines of Lua), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 390 tests, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 386 tests, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 352 probe scripts run against the live game, and 58 mutation sets (731 mutants) |
+| `Modding Files/source/lord_control/probes/` | 361 probe scripts run against the live game, and 59 mutation sets (745 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs and the core plan |
 | `docs/history/` | the handoffs written as each part was measured in game, and the working ledger |
 
@@ -67,11 +67,11 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 390 tests.
+  frame by frame and asserts on the commands the modules sent: 386 tests.
 - **Every rule is proven to be caught.** `probes/tp_mutate.py` plants one plausible mistake at a
   time in the shipped Lua, runs the suite, and restores the file byte for byte. It might be a
   guard dropped, a constant changed, or a branch inverted. A mutant the tests do not catch is a
-  finding, and so is an anchor that no longer matches the code. 731 mutants in 58 sets; four of
+  finding, and so is an anchor that no longer matches the code. 745 mutants in 59 sets; four of
   the oldest sets still carry stale anchors from code that was rewritten since.
 - **Measured, not assumed.** Animation slot ids, clip lengths, the camera's floor and the
   projectile release point were each read from the running game through the probes, or from
@@ -79,6 +79,10 @@ There is no test framework.
 - **The pattern check.** `third_person_patterns.py` checks the byte pattern `platform.lua`
   relies on against `Warhammer3.exe` on disk, and prints the row to add for a build it does not
   know.
+- **The code cave.** The engine's stop and walk calls for the man played run inside his own
+  update on the battle thread, from a small machine-code cave (`third_person_cave.py` holds its
+  assembly). `--check` matches the bytes in `platform.lua` and the site in the exe; `--selftest`
+  runs those bytes under an x64 emulator through every path, and breaks them eight ways.
 - **The HUD.** `gen_third_person_hud.py --check` validates the generated layout.
   `preview_third_person_hud.py` draws the HUD from the shipped Lua at three resolutions.
 
@@ -95,6 +99,7 @@ and the HUD's art paths.
   says so.
 - **The preview** needs the source of Backmechuisa's TWUI Studio (0.22.2) in `TWUI_Studio/src`.
   It is source-available under its own licence, so it is not included.
+- **The cave's tests** need the Python packages `keystone-engine`, `unicorn` and `capstone`.
 - **Building the pack** needs [RPFM](https://github.com/Frodo45127/rpfm) open with its MCP server.
 - **The probes** talk to the running game through the WH3 MCP bridge (`probes/send.py`).
 

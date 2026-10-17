@@ -109,6 +109,12 @@ def selftest(only=None):
     print(r.stdout, end="")
     if r.returncode:
         bad.append("the command pattern does not check out against the exe")
+    # the mailbox's cave: platform.lua's bytes are its assembly, the site is the code it displaces, and the bytes behave
+    for flag in ("--check", "--selftest"):
+        r = subprocess.run([sys.executable, os.path.join(tools, "third_person_cave.py"), flag], capture_output=True, text=True)
+        print(r.stdout, end="")
+        if r.returncode:
+            bad.append("third_person_cave.py %s:\n%s" % (flag, (r.stdout + r.stderr).strip()))
     for b in bad:
         print("FINDING: %s" % b)
     return not bad

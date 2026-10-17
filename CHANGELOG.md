@@ -15,8 +15,9 @@
 - Flying units are played as one man.
 - Known issue: a flying unit landed in third person takes off again only after third person is turned off and on.
 - War machines played whole turn to the aim and fire there, instead of swinging back to the nearest enemy.
-- Known issue: a rare crash while playing one man of a mounted unit.
+- Fixed a crash while playing one man.
 - Default time between swings 4 s, between jump attacks 10 s.
+- New: `tools/third_person_cave.py`.
 
 ## 2026-10-16
 

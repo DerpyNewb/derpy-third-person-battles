@@ -11,7 +11,7 @@ MUTANTS = [
     (P, "\t\treturn mr.patch(gate, update, reset) ~= nil\n", "\t\treturn true\n", ON),
     (P, "if on then return mr.patch(gate, reset, update) ~= nil end", "if on then mr.patch(gate, reset, update) return true end", ALONE),
     (P, "0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09,", "0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x0a,", ON),
-    (P, "melee = 0x3ad24b8, queued_gate = 0x3087378}", "melee = 0x3ad24b8, queued_gate = 0x3087379}", ON),
+    (P, "melee = 0x3ad24b8, queued_gate = 0x3087378,", "melee = 0x3ad24b8, queued_gate = 0x3087379,", ON),
     (P, "local gate = row and row.queued_gate and mr.patch and at(base, row.queued_gate)",
      "local gate = mr.patch and at(base, 0x3087378)", ALONE),
     # put back as it loads

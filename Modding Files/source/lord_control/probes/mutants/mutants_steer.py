@@ -1,35 +1,35 @@
 L = "script/derpy_tp/platform.lua"
 MV = "script/derpy_tp/move.lua"
-LEAD = "P.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw, speed)"
-STOP = 'if mr.eq(command, walk_a) or mr.eq(command, walk_b) then mr.call(walk_stop, "pointer(pointer)", m) end'
+LEAD = "P.steer(m, x + dx * lead, z + dz * lead, run, F.face_yaw, speed)"
+WALK, HOLD = "a_steer_posts_the_walk_builders_block", "holding_still_posts_a_stop"
 MUTANTS = [
-    # walking: his own walk takes the point in place, anything else is replaced natively
-    (L, "if mr.eq(command, walk_b) then", "if true then", "steering_leaves_the_aim_point_alone"),
-    (L, "mr.write(m, 0x368, x)", "-- removed walk x", "steering_writes_his_own_walk_and_replaces_a_regiment_walk"),
-    (L, "mr.write(m, 0x370, z)", "-- removed walk z", "steering_writes_his_own_walk_and_replaces_a_regiment_walk"),
-    (L, "if mr.eq(command, walk_b) then", "if mr.eq(command, walk_b) or mr.eq(command, walk_a) then", "steering_writes_his_own_walk_and_replaces_a_regiment_walk"),
-    (L, 'mr.call(walk_start, "pointer(pointer, pointer)", m, walk)', '-- removed native walk start', 'steering_starts_a_native_walk_from_idle'),
-    (L, "if (x - mx) ^ 2 + (z - mz) ^ 2 <= 0.01 then return end", "", "steering_at_own_spot_does_not_start_a_walk"),
-    (L, '0x44, 0x45, 0x4a', '0x45', 'steering_starts_a_native_walk_from_idle'),
-    (L, 'unit, run and 1 or 0)', 'unit, 0)', 'steering_uses_native_run_speed'),
-    (L, 'mr.write(m, 0x394, speed)', 'do end', 'steering_uses_native_run_speed'),
-    (L, 'mr.write(walk, 0x46, mr.uint8(run and 1 or 0))', 'mr.write(walk, 0x46, mr.uint8(1))', 'steering_starts_a_native_walk_from_idle'),
-    (L, 'if changed then mr.write(m, 0x3c0, mr.uint8(0)) end', 'if changed then do end end', 'steering_uses_native_run_speed'),
-    (L, 'local changed = moved or', 'local changed =', 'steering_refreshes_a_changed_goal_without_a_gait_change'),
-    (L, 'mr.write(m, 0xb0, mr.uint16(angle))', 'do end', 'solo_keeps_its_own_facing'),
+    # walking (2026-10-17: posted to the mailbox; the in-place-or-build decision is the cave's, and
+    # tools/third_person_cave.py --selftest breaks that half)
+    (L, "mr.write(m, 0xb0, mr.uint16(angle))", "do end", WALK),
+    (L, "mr.write(block, b, x) mr.write(block, b + 4, my)", "mr.write(block, b + 4, my)", WALK),
+    (L, "mr.write(block, b + 8, z)", "", WALK),
+    (L, "unit, run and 1 or 0)", "unit, 0)", WALK),
+    (L, "if scale then speed = speed * scale end", "", WALK),
+    (L, "if not speed then return end", "", WALK),
+    (L, "mr.write(block, b + 0x46, mr.uint8(run and 1 or 0))", "mr.write(block, b + 0x46, mr.uint8(1))", WALK),
+    (L, "mr.write(block, b + 0x28, mr.uint32(run and 1 or 0))", "mr.write(block, b + 0x28, mr.uint32(1))", WALK),
+    (L, "mr.write(block, MB.has_angle, mr.uint8(angle and 1 or 0))", "mr.write(block, MB.has_angle, mr.uint8(1))", WALK),
+    (L, "<= 0.01 and 1 or 0))", "<= 0.01 and 0 or 0))", WALK),
+    (L, 'post(m, "walk", 2)', 'post(m, "walk", 1)', WALK),
+    (L, "mr.write(block, b + 0x30, mr.uint16(angle or", "mr.write(block, b + 0x30, mr.uint16(nil or", WALK),
+    (L, "\t\tif not block then return end\n\t\tlocal unit", "\t\tlocal unit", "no_mailbox_nothing_is_posted_and_nothing_called"),
     # holding still: a running walk gets the engine's stop, nothing else is touched (measured 2026-10-14)
-    (L, STOP, STOP.replace("mr.eq(command, walk_a) or ", ""), "holding_still_stops_a_running_walk_natively"),
-    (L, STOP, STOP.replace(" or mr.eq(command, walk_b)", ""), "holding_still_stops_a_running_walk_natively"),
-    (L, STOP, 'mr.call(walk_stop, "pointer(pointer)", m)', "holding_still_leaves_a_standing_man_alone"),
-    (L, STOP, "", "holding_still_stops_a_running_walk_natively"),
-    (L, "end\n\t\tP.face(m, yaw)\n\tend", "end\n\tend", "holding_still_leaves_a_standing_man_alone"),
+    (L, '\t\tif block then post(m, "walk", 1) end\n', "", HOLD),
+    (L, 'if block then post(m, "walk", 1) end', 'if block then post(m, "walk", 2) end', HOLD),
+    (L, 'if block then post(m, "walk", 1) end', 'post(m, "walk", 1)', "no_mailbox_nothing_is_posted_and_nothing_called"),
+    (L, "end\n\t\tP.face(m, yaw)\n\tend", "end\n\tend", HOLD),
     (MV, "P.hold(m, F.man_hold[1], F.man_hold[2], not sw and (F.face_yaw or E.rig.yaw) or nil)", "P.steer(m, F.man_hold[1], F.man_hold[2], false, E.rig.yaw)", "one_man_walks_alone"),
     (MV, "P.hold(F.model, x, z, F.face_yaw or E.rig.yaw)", "P.steer(F.model, x, z, false, E.rig.yaw)", "one_man_stop_cancels_its_lead_point"),
     (MV, "if F.model and P.alive(F.unit, F.model) then", "if false then", "one_man_stop_cancels_its_lead_point"),
-    (MV, LEAD, "P.place(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD) " + LEAD, "one_man_never_nudges_through_a_wall"),
+    (MV, LEAD, "P.place(m, x + dx * lead, z + dz * lead) " + LEAD, "one_man_never_nudges_through_a_wall"),
     (MV, LEAD, LEAD.replace(", F.face_yaw, speed)", ", nil, speed)"), "solo_moves_with_own_facing_and_run_toggle"),
     # starting and the fallback
-    ("script/derpy_tp/main.lua", "and P.features.steer and not F.arty", "and not F.arty", "unknown_walk_commands_play_the_regiment_whole"),
+    ("script/derpy_tp/main.lua", "and P.features.steer and P.features.mailbox and not F.arty", "and P.features.mailbox and not F.arty", "unknown_walk_commands_play_the_regiment_whole"),
     ("script/derpy_tp/main.lua", "F.uc:halt()", "do end", "solo_start_cancels_the_existing_attack_order"),
     ("script/derpy_tp/main.lua", "F.uc:halt()", "do end", "f2_cancels_existing_movement_before_accepting_input"),
     ("script/derpy_tp/main.lua", 'c:SetVisible(false)', 'c:SetVisible(true)', 'third_person_hides_unrequested_hud'),

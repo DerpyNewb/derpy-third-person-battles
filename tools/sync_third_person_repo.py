@@ -40,6 +40,8 @@ TOOLS = [
     # build, generate, preview
     "build_third_person.py", "gen_third_person_hud.py", "gen_tp_emitter.py", "preview_third_person_hud.py",
     "third_person_patterns.py", "third_person_fires.py", "read_animpack.py",
+    # the mailbox's code cave: its assembly, the bytes it writes into platform.lua, and their emulator test
+    "third_person_cave.py",
     # the harness that runs the shipped modules, its tests and the preview's scene
     "third_person_harness.lua", "third_person_tests.lua", "third_person_hud_dump.lua",
     # audits

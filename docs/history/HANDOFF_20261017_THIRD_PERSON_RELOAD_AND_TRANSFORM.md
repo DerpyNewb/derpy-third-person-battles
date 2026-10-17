@@ -289,3 +289,64 @@ is the one before).
 the pack caught it and went off, the game fell over after. This is the open race in `docs/BATTLE_ENGINE_RE.md` section 9
 (the guard destroys an engine command from the script thread while the battle's worker threads use it; yesterday's dump
 was `exe+0x305B39A`). Not fixed: the doc's route is a patch on the battle thread, not a script call.
+
+## 10. The crash fixed: the mailbox (21:00-22:35; the author: "start there")
+
+**Cause.** `P.guard`, `P.hold` and `P.steer` called the engine's stop (`exe+306edd4`) and its walk builder
+(`exe+306f954`) from the script thread. Both destroy the command at `+0x328/+0x330` that a battle worker may be
+running. **Reproduced on demand**: `probes/zz_tp_race_stress.lua` makes the old guard's call on every man of a
+171-man regiment in a melee every 30 ms. 1089 calls, then a crash 3 s in, `exe+0x305FA54`: reading `0x2f4`, a man
+pointer of `0xc` (`+0x2e8`, his unit) in code comparing two models' units. That is a command payload freed under
+a worker. One man at a time it took hours.
+
+**Fix.** A memreader Plus code cave at the top of a man's update, `exe+3086f04` (vtable `+0x18`; every model
+class reaches it, the horse included, measured). It makes the same calls with the same tests, on the battle
+thread, in his own update. The script only posts requests into a block:
+
+- the man (the mount of a rider)
+- a guard request
+- a walk request: 1 hold, 2 steer
+- the walk builder's 0x60-byte parameter block
+- has_angle and near flags
+- two counters: met and stops
+
+`tools/third_person_cave.py` holds the assembly, writes the 410 bytes and the block's offsets into
+`platform.lua`, and checks the site against the exe on disk (`--check`). `--selftest` runs the SHIPPED bytes
+under unicorn. It covers:
+
+- the four engine commands stopped and seven left
+- a dead man
+- hold
+- steer: built, at the point, in place, and the cached-destination byte only on a change
+- both requests in one update
+- every register the ABI needs kept, and calls 16-byte aligned
+
+It also breaks the assembly 8 ways and requires every break caught. `build_third_person.py --selftest` runs
+both. The cave stays for the session; a later battle reads its block back out of its first instruction
+(`mov rax, <block>`) and clears the man and the requests. One man is played only with the mailbox in
+(`P.features.mailbox`), and a refused install is asked again at the next start. The 9.0 build has no update
+row and plays regiments whole.
+
+**Live** (bridge-loaded source, then the deployed pack; `probes/zz_tp_mailbox.lua`, read with `_read`):
+
+| Run | Walk 6 s | Hold drift | Melee | Guard stops |
+|---|---|---|---|---|
+| Greatswords, enemy 298 m off | 18.9 m | 0 m | 60 s: regiment marched off, he stayed (5.9 m path, 1.4 net) | 4 |
+| Greatswords, two units engaged on him | 15.8 m | 0 m | 120 s: 25 m path, 13.7 net | 385 |
+| Montecastello (horse), two units engaged | 10.5 m | 0.3 m | 120 s: 10.2 m path, 2.1 net | 246 |
+| Battle restarted, source reloaded | same block `15C927120` read back from the cave, nothing new installed | | 30 s | 69 |
+| Deployed pack, fresh launch | 7.6 m (two units on him) | 0.5 m | 30 s, battle clock moving | 91 |
+
+No crash and no stall in 795 battle-thread stops. Tests 386 (12 script-thread steering tests replaced by 8 that
+check what is posted; the in-place, build and stop decisions are the cave selftest's). Mutants:
+
+- round 44: 18, killed
+- re-aimed `mutants_steer`, `mutants_round30`, `mutants_round32`, `mutants_round35`, `mutants_men`: all killed,
+  no stale anchors
+- still open from earlier rounds, not this change: `mutants_fire_cycle` (2 mount-swing survivors, 1 stale) and
+  `mutants_round33` (`F.swung` survivor)
+
+Deployed `b240e792` (`Modding Files/Backup/derpy_third_person_data_20261017_2228.pack` is the one before).
+
+**Ceiling:** the cave serves one model, the one played. The same cave could carry a per-man gate (section 8 of
+`BATTLE_ENGINE_RE.md`), which the global byte patch still stands in for.

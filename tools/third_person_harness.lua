@@ -330,7 +330,13 @@ local function fake_platform()
 	local P = {features = {}, problems = {}, build = 0x6ac6d907}
 	for k, val in pairs(H.features) do P.features[k] = val end
 	P.features.steer = H.features.steer ~= false
+	P.features.mailbox = H.features.mailbox ~= false
 	if not P.features.input then P.problems[1] = "input: test" return P end
+	function P.check_mailbox()
+		if H.features.mailbox == false then return false, "test: mailbox off" end
+		P.features.mailbox = true
+		return true
+	end
 	local was = {}
 	function P.focused() return H.focus end
 	function P.held(vk)

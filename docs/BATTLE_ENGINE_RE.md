@@ -223,7 +223,8 @@ Result, live (Teutogen Guard under two Clanrat units, a click every 2.4 s): 4 an
 
 **Ceiling:** while it is in, a parked action on **any** man beats that tick's order, not only his. In a battle the
 pack plays, only `P.play` parks one. A per-man version needs a code cave (memreader `code_cave`) comparing the man
-with a stored pointer. Caves cannot be removed for the session, which is why the one-byte version shipped.
+with a stored pointer. Caves cannot be removed for the session, which is why the one-byte version shipped. Since
+2026-10-17 the mailbox (section 9) is such a cave at the top of the same update, with the man played in its block.
 
 ## 9. Threads, and measuring it live
 
@@ -232,12 +233,31 @@ dump's faulting thread (index 7 of 91, `exe+305B39A`, a fiber job) while the scr
 bridge; and a guard that read `stand` at `+0x330` while its own second read, microseconds later, found an engine
 command. So:
 
-- **Do not destroy or build engine objects from Lua.** `walk_stop` / `walk_start` from the script do, and that is
-  the open crash race the guard carries. Calling `306e850` from Lua would add another.
+- **Do not destroy or build engine objects from Lua.** `walk_stop` / `walk_start` from the script did, and it
+  crashed (exe+7AB1DA and exe+305B39A in play). Reproduced on 2026-10-17: the stop from the script on every man of a
+  171-man regiment in melee, every 30 ms, crashed in 3 s (`exe+305FA54`, a man pointer of `0xc` in code comparing two
+  models' units). Calling `306e850` from Lua would be the same mistake.
 - **memreader Plus Lua hooks never run on other threads** (its README: "Other threads never reach links"; calls from
   other threads run the original). A Lua hook on a battle function therefore sees only script-thread calls.
 - **A code byte is executed by whichever thread reaches it.** A patch moves the decision onto the battle thread with
   nothing to race. Caves likewise, but they stay for the session.
+
+**The mailbox** (2026-10-17, the fix): a memreader Plus code cave (`p:cave`) at the top of a man's update
+`exe+3086f04`. It makes the stop, the walk builder and the in-place walk writes for the one man played, on the
+battle thread inside his own update, where the engine changes his command itself. The script posts requests
+into a `game_alloc` block. The cave's bytes run first, then a copy of the 7 bytes its jump displaced
+(`mov rax, rsp; mov [rax+0x10], rbx`), then back into the game. At that entry rax and the flags are dead, so the
+fast path (not him) touches nothing else. On his path the cave saves rcx/rdx/r8/r9 and xmm0-3 and calls with rsp
+16-aligned.
+
+A cave cannot be removed, and a second one at an address is refused. `p:cave` with the same name and bytes
+answers the existing cave, so a later battle reads its block pointer back out of the cave's first instruction
+(`hook_info(site).cave`, offset 2) and asks again with identical bytes.
+
+Every model class's update reaches `3086f04`: the subclass `312de40` calls it first, and so do seven other
+updates. Measured on a horse. `tools/third_person_cave.py` assembles the cave with keystone and runs the shipped
+bytes under unicorn: every path, register and stack alignment, plus 8 broken variants. Live, 795 stops with no
+fault (session handoff 2026-10-17 section 10).
 
 **Recipes that made the measurement work** (all in `Modding Files/source/lord_control/probes/`, test scaffolding):
 
@@ -293,12 +313,20 @@ How it works and why:
    caller, and its two `cmp byte ptr [rdi+...]` lines are the queued holder's has/done bytes.
 3. Re-check the fields in section 3 with a live probe before shipping. `P.gate` refuses on an unknown build, and
    does nothing when the bytes differ.
+4. The mailbox: `py tools/third_person_cave.py --check` fails when his update moved or starts differently. The
+   update is slot `+0x18` of the infantry man's vtable (`exe_re.py q <vtable+0x18> 1`). Set `SITE_RVA` and
+   `SITE_BYTES` (the cave needs 5+ bytes of whole instructions, no jump or rip-relative operand among them) and
+   the build row's `update`, re-check the field offsets in `MAN`, then `py tools/third_person_cave.py` and
+   `--selftest`. Without a known update the pack plays regiments whole.
 
 ## 12. Open
 
 - Which formation routine issues him an order every melee tick (the caller of `+0x4b0`): not traced. Not needed
   for the fix.
 - The `0x81` in the clip payload.
-- A per-man gate (a code cave).
-- The guard's script-thread `walk_stop` race (crash `exe+305B39A`, not proven to be it) and the post-fire `nil`
-  then `1557` frame after a shot: both still open.
+- A per-man gate. The mailbox's cave (section 9) already knows the man played, so the gate's decision could move
+  into it.
+- The post-fire `nil` then `1557` frame after a shot.
+- Which installer puts each engine command on him: the melee attack `3ad24b8` is built in the order issuer
+  `306e89c` (constructor `3053684`), the regiment walk `3919350` and move `3ae1928` in `324e9dc` (from `306fea0`),
+  move `39199f8` in `324e2c8` (five callers). Refusing them at the source would need a cave at each.

@@ -538,6 +538,23 @@ T.men_check_fails_plays_the_regiment_whole = function()
 	check(H.logged("regiments are played whole: test: men off"), "the failed check is logged")
 end
 
+-- one man is steered, held and guarded only through the mailbox (platform.lua): without its cave nothing on the battle
+-- thread would act on him, and the script must not. It is asked again at each start: a cave refused because a thread
+-- was in his update goes in at the next
+T.no_mailbox_plays_the_regiment_whole_and_asks_again = function()
+	H.fresh({features = {input = true, anim = true, wheel = true, mailbox = false},
+		units = {{general = true}, {type = "wh3_main_cth_inf_jade_warrior_crossbowmen_1", men = 20, x = 40, range = 160, ammo = 3960}}})
+	H.select(H.units[2])
+	H.tap("F2")
+	check(H.E.F.on and H.E.F.model == nil, "the regiment is played whole")
+	check(H.logged("regiments are played whole: test: mailbox off"), "the reason is logged")
+	H.tap("F2")
+	H.features.mailbox = nil
+	H.step(0.5)
+	H.tap("F2")
+	check(H.E.F.on and H.E.F.model ~= nil, "put in at the next start: one man")
+end
+
 T.wheel_fails_zoom_on_keys = function()
 	H.fresh({features = {input = true, anim = true, wheel = false}})
 	H.tap("F2")
@@ -2020,95 +2037,181 @@ T.steering_leaves_the_aim_point_alone = function()
 	end
 end
 
--- measured live 2026-10-14: a regiment walk (3912b98) never followed a point written into it; his own walk is
--- built natively in its place, and only that walk (3add278) takes a point in place
-T.steering_writes_his_own_walk_and_replaces_a_regiment_walk = function()
-	local P, mr, put, BASE = real_platform()
-	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x2e8, BASE + 0x6400000, 8)
-	put(m.addr + 0x330, BASE + 0x3add278, 8)
-	P.steer(m, -37.5, 294.8)
-	check(mr.wrote[m.addr + 0x368] == -37.5 and mr.wrote[m.addr + 0x370] == 294.8, "his own walk follows its point")
-	mr.wrote = {}
-	put(m.addr + 0x330, BASE + 0x3912b98, 8)
-	local started
-	function mr.call(f, sig, a) if f.addr == BASE + 0x306a8fc then started = a end return 1.5 end
-	P.steer(m, -37.5, 294.8)
-	check(started and started.addr == m.addr, "a regiment walk is replaced by a native walk")
-	check(mr.wrote[m.addr + 0x368] == nil, "a regiment walk is never written")
-end
-
--- measured live 2026-10-14 (probes/tp_cmd_trace.py): a walk that has reached its point, or was refreshed toward
--- his own feet, keeps him moving until its command is replaced, and while F2 holds him nothing replaced it. The
--- engine's own stop, exe+3069d7c, swaps it for "stand in his state" (390cba8), as uc:halt does for each man.
-T.holding_still_stops_a_running_walk_natively = function()
-	for _, vt in ipairs({0x3912b98, 0x3add278}) do
-		local P, mr, put, BASE = real_platform()
-		local m = mr.add(mr.base, 0x6300000)
-		put(m.addr + 0x330, BASE + vt, 8)
-		local stopped
-		function mr.call(f, sig, a) if f.addr == BASE + 0x3069d7c then stopped = a end end
-		P.hold(m, 4, 5, math.pi / 2)
-		check(stopped and stopped.addr == m.addr, "the engine stops his walk")
-		check(mr.wrote[m.addr + 0x368] == nil and mr.wrote[m.addr + 0x3c0] == nil, "no walk refreshed toward his own feet")
-		check(mr.wrote[m.addr + 0x1e0] == 4 and mr.wrote[m.addr + 0x198] == 5, "his slot copies take the hold point")
-		check(mr.wrote[m.addr + 0xb0] == 16384, "he faces the camera")
+-- the mailbox (tools/third_person_cave.py, whose --selftest runs the cave's bytes under an emulator): a code cave at the
+-- top of his update makes the stop's and the walk builder's calls on the battle thread, and the script only posts
+-- requests into its block. memreader Plus's patcher, game_alloc, hook_info and read_original, as far as it uses them; a
+-- cave's bytes land in memory, so a second platform on the same fake (the next battle of the session) finds it
+local UPDATE_AT, UPDATE_START = 0x3086f04, {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x10}
+local function with_plus(mr, put, BASE, site)
+	for i, b in ipairs(site or UPDATE_START) do put(BASE + UPDATE_AT + i - 1, b, 1) end
+	mr.caves, mr.cave_calls, mr.game_allocs = {}, {}, 0
+	local next_cave, next_block = BASE + 0x4f00000, BASE + 0x4e00000
+	function mr.read_original(p, o, n)
+		local t = {} for i = 0, n - 1 do t[#t + 1] = string.char(mr.read_uint8(p, o + i)) end return table.concat(t)
+	end
+	function mr.hook_info(p) local c = mr.caves[p.addr] return c and {kind = "cave", cave = c.at} end
+	function mr.game_alloc() mr.game_allocs = mr.game_allocs + 1 next_block = next_block + 0x1000 return mr.add(mr.base, next_block - BASE) end
+	function mr.patcher(owner)
+		return {cave = function(_, name, at, bytes)
+			mr.cave_calls[#mr.cave_calls + 1] = {owner = owner, name = name, at = at.addr, bytes = bytes}
+			if mr.refuse then return nil, mr.refuse end
+			local c = mr.caves[at.addr]
+			if c then
+				if c.bytes ~= bytes then return nil, "the name is already used for a different change" end
+				return c.at
+			end
+			next_cave = next_cave + 0x1000
+			for i = 1, #bytes do put(next_cave + i - 1, bytes:byte(i), 1) end
+			mr.caves[at.addr] = {bytes = bytes, at = mr.add(mr.base, next_cave - BASE)}
+			return mr.caves[at.addr].at
+		end}
 	end
 end
 
-T.holding_still_leaves_a_standing_man_alone = function()
-	for _, vt in ipairs({0x3914618, 0x390cba8, 0x390d090, 0x3913a68}) do -- idle, standing, changing state, firing
-		local P, mr, put, BASE = real_platform()
+local function patched_platform(o)
+	o = o or {}
+	H.real_platform = true
+	local M = assert(loadfile("/script/derpy_tp/platform"))()
+	H.real_platform = false
+	local mr, put, BASE = fake_image(0x6acec6f4)
+	if not o.old_plus then with_plus(mr, put, BASE, o.site) end
+	mr.refuse = o.refuse
+	return M.build(mr), mr, put, BASE, M
+end
+
+-- what was last written at the block's field k (a pointer comes back as its address)
+local function posted(P, M, mr, k, off)
+	local v = mr.wrote[P.mailbox.addr + M.MB[k] + (off or 0)]
+	if type(v) == "table" then return v.addr end
+	return v
+end
+local STOP_AT, START_AT, SPEED_AT = 0x306edd4, 0x306f954, 0x303b744
+local function script_built_or_destroyed(mr, BASE)
+	for _, f in ipairs(mr.calls) do
+		if type(f) == "table" and (f.addr == BASE + STOP_AT or f.addr == BASE + START_AT) then return true end
+	end
+	return false
+end
+
+T.the_mailbox_is_put_in_once_and_found_by_the_next_battle = function()
+	local P, mr, put, BASE, M = patched_platform()
+	check(P.features.mailbox and P.mailbox ~= nil, "put in as the platform loads: " .. table.concat(P.problems, "; "))
+	check(#mr.cave_calls == 1 and mr.cave_calls[1].at == BASE + UPDATE_AT and mr.cave_calls[1].owner == "derpy_tp",
+		"one cave, at the top of his update, owned")
+	local block = P.mailbox.addr
+	check(mr.read_pointer(mr.caves[BASE + UPDATE_AT].at, M.CAVE_BLOCK).addr == block, "the cave carries its block")
+	for k, rva in pairs({walk_a = 0x3919350, move_a = 0x39199f8, move_b = 0x3ae1928, melee = 0x3ad24b8, walk_b = 0x3ae2400,
+		walk_stop = STOP_AT, walk_start = START_AT}) do
+		check(posted(P, M, mr, k) == BASE + rva, "the block's " .. k)
+	end
+	check(posted(P, M, mr, "man") == 0 and posted(P, M, mr, "guard") == 0 and posted(P, M, mr, "walk") == 0, "nobody, no request")
+	check(posted(P, M, mr, "buf", 0x34) == 3 and posted(P, M, mr, "buf", 0x44) == 1 and posted(P, M, mr, "buf", 0x45) == 1
+		and posted(P, M, mr, "buf", 0x4a) == 1, "the walk builder's straight path and movement flags")
+	-- the next battle: Lua starts over, the cave and its block are the session's
+	mr.wrote = {}
+	local P2 = M.build(mr)
+	check(P2.features.mailbox and P2.mailbox.addr == block and mr.game_allocs == 1, "the same block, read back from the cave")
+	check(#mr.cave_calls == 2 and mr.cave_calls[2].bytes == mr.cave_calls[1].bytes, "asked again with the same bytes")
+	check(posted(P2, M, mr, "man") == 0 and posted(P2, M, mr, "guard") == 0 and posted(P2, M, mr, "walk") == 0,
+		"what an earlier battle left in it is cleared")
+end
+
+T.no_mailbox_nothing_is_posted_and_nothing_called = function()
+	for _, o in ipairs({{refuse = "a thread is inside derpy_tp/mailbox"}, {site = {0xe9, 0, 0, 0, 0, 0x90, 0x90}}, {old_plus = true}}) do
+		local P, mr, put, BASE = patched_platform(o)
+		check(not P.features.mailbox and P.mailbox == nil, "no mailbox")
+		check(table.concat(P.problems, "; "):find("mailbox", 1, true), "the reason is kept: " .. table.concat(P.problems, "; "))
+		local m = mr.add(mr.base, 0x6300000)
+		put(m.addr + 0x2e8, BASE + 0x6500000, 8)
+		mr.calls = {}
+		P.steer(m, 4, 5, true, 1)
+		P.hold(m, 4, 5, 1)
+		check(P.guard(m) == false and not script_built_or_destroyed(mr, BASE), "nothing native on him")
+	end
+	local P, mr = patched_platform({site = {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x18}})
+	check(#mr.cave_calls == 0, "no cave over code it does not know")
+end
+
+-- the crash it is for: exe+7AB1DA (2026-10-17), a command's destructor reading FFFFFFFFFFFFFFFF, P.guard the script
+-- log's last line - the script destroyed a command a battle thread was running
+T.nothing_builds_or_destroys_his_command_from_the_script = function()
+	for _, vt in ipairs({0x3919350, 0x39199f8, 0x3ae1928, 0x3ad24b8, 0x3ae2400, 0x3911fb0, 0x39126f0, 0x3919b28}) do
+		local P, mr, put, BASE = patched_platform()
 		local m = mr.add(mr.base, 0x6300000)
 		put(m.addr + 0x330, BASE + vt, 8)
-		mr.calls = {} -- building the platform called the game already
-		P.hold(m, 4, 5, math.pi / 2)
-		check(#mr.calls == 0, "nothing native runs on a man not walking")
-		check(mr.wrote[m.addr + 0x368] == nil, "his command's payload is untouched")
-		check(mr.wrote[m.addr + 0xb0] == 16384, "he faces the camera")
+		put(m.addr + 0x2e8, BASE + 0x6500000, 8)
+		put(m.addr + 0xb1c, 80, 4)
+		mr.calls, mr.wrote = {}, {}
+		P.guard(m)
+		P.steer(m, 4, 5, true, 1)
+		P.steer(m, 0, 0, false)
+		P.hold(m, 4, 5, 1)
+		check(not script_built_or_destroyed(mr, BASE), string.format("under 0x%x: no stop or walk builder from the script", vt))
+		for off = 0x328, 0x3c0 do check(mr.wrote[m.addr + off] == nil, string.format("under 0x%x: his command untouched", vt)) end
 	end
 end
 
 -- measured live 2026-10-16 (probes/zz_tp_regiment_test.lua, Kossars in a lasting melee, nobody at the keys): the
 -- commands the engine itself puts on the man played alone moved him 24.1 m in 30 s; stopped with its own stop the
 -- moment they are on him, 11 m, 8.5 m of it standing. On build 6acec6f4: the regiment's walk, two moves and the melee
--- attack (the auto attack; the author, 2026-10-14: "absolute control and no auto attack")
-local function patched_platform()
-	H.real_platform = true
-	local M = assert(loadfile("/script/derpy_tp/platform"))()
-	H.real_platform = false
-	local mr, put, BASE = fake_image(0x6acec6f4)
-	return M.build(mr), mr, put, BASE
-end
-
-T.the_engines_own_orders_on_him_are_stopped = function()
-	for _, vt in ipairs({0x3919350, 0x39199f8, 0x3ae1928, 0x3ad24b8}) do
-		local P, mr, put, BASE = patched_platform()
-		local m = mr.add(mr.base, 0x6300000)
-		put(m.addr + 0x330, BASE + vt, 8)
-		put(m.addr + 0xb1c, 80, 4)
-		local stopped
-		function mr.call(f, sig, a) if f.addr == BASE + 0x306edd4 then stopped = a end end
-		check(P.guard(m) == true and stopped and stopped.addr == m.addr, string.format("the engine's stop on 0x%x", vt))
-	end
-end
-
--- left to run: his own walk, clip and stand; the engine's idle (0x3919b28: stopped, a regiment charging past carried
--- him 31.6 m standing, against 4.9 m in it); a knockback, a knockdown and the getting up (he was hit); a dead man's
-T.his_own_commands_his_idle_and_a_hit_are_left_to_run = function()
-	for _, vt in ipairs({0x3ae2400, 0x3911fb0, 0x39126f0, 0x3919b28, 0x3ae2b38, 0x3ae2a08, 0x3912820}) do
-		local P, mr, put, BASE = patched_platform()
-		local m = mr.add(mr.base, 0x6300000)
-		put(m.addr + 0x330, BASE + vt, 8)
-		put(m.addr + 0xb1c, 80, 4)
-		mr.calls = {}
-		check(P.guard(m) == false and #mr.calls == 0, string.format("0x%x left to run", vt))
-	end
-	local P, mr, put, BASE = patched_platform()
+-- attack (the auto attack; the author, 2026-10-14: "absolute control and no auto attack"). Which commands the cave
+-- stops, and that a dead man's are left alone, is tools/third_person_cave.py --selftest's
+T.the_guard_posts_to_his_update = function()
+	local P, mr, put, BASE, M = patched_platform()
 	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x330, BASE + 0x3ad24b8, 8)
-	mr.calls = {}
-	check(P.guard(m) == false and #mr.calls == 0, "a dead man's last swing is the engine's")
+	check(P.guard(m) == true, "posted")
+	check(posted(P, M, mr, "man") == m.addr and posted(P, M, mr, "guard") == 1, "a guard request, for him")
+end
+
+T.holding_still_posts_a_stop = function()
+	local P, mr, put, BASE, M = patched_platform()
+	local m = mr.add(mr.base, 0x6300000)
+	P.hold(m, 4, 5, math.pi / 2)
+	check(posted(P, M, mr, "man") == m.addr and posted(P, M, mr, "walk") == 1, "a hold request, for him")
+	check(mr.wrote[m.addr + 0x1e0] == 4 and mr.wrote[m.addr + 0x198] == 5, "his slot copies take the hold point")
+	check(mr.wrote[m.addr + 0xb0] == 16384, "he faces the camera")
+end
+
+-- the walk builder's parameter block, as platform.lua always filled it: the cave builds his walk from it, or writes its
+-- point, run, speed, gait and heading into his own walk in place
+T.a_steer_posts_the_walk_builders_block = function()
+	local P, mr, put, BASE, M = patched_platform()
+	local m = mr.add(mr.base, 0x6300000)
+	put(m.addr + 0x2e8, BASE + 0x6400000, 8)
+	local speed_run
+	function mr.call(f, sig, a, b) if f.addr == BASE + SPEED_AT then speed_run = b return 1.5 end end
+	P.steer(m, 0, 6, false)
+	check(posted(P, M, mr, "man") == m.addr and posted(P, M, mr, "walk") == 2, "a steer request, for him")
+	check(posted(P, M, mr, "buf", 0) == 0 and posted(P, M, mr, "buf", 8) == 6, "the point")
+	check(posted(P, M, mr, "buf", 0x2c) == 1.5 and speed_run == 0 and posted(P, M, mr, "buf", 0x28) == 0
+		and posted(P, M, mr, "buf", 0x46) == 0, "walking: the engine's speed, its fraction kept")
+	check(posted(P, M, mr, "has_angle") == 0 and posted(P, M, mr, "buf", 0x30) == 0, "no yaw: heading toward the point")
+	check(posted(P, M, mr, "near") == 0, "6 m away: a walk may be built")
+	function mr.call(f, sig, u, run) if f.addr == BASE + SPEED_AT then speed_run = run return 3.5 end end
+	P.steer(m, 0, 6, true, math.pi / 2, 1.5)
+	check(speed_run == 1 and posted(P, M, mr, "buf", 0x2c) == 3.5 * 1.5 and posted(P, M, mr, "buf", 0x28) == 1
+		and posted(P, M, mr, "buf", 0x46) == 1, "running, at a sprint's scale")
+	check(posted(P, M, mr, "has_angle") == 1 and posted(P, M, mr, "buf", 0x30) == 16384 and mr.wrote[m.addr + 0xb0] == 16384,
+		"he keeps his own facing")
+	P.steer(m, 0, 0, false)
+	check(posted(P, M, mr, "near") == 1, "at his own spot: no walk built (idle keeps its animations)")
+	mr.wrote = {}
+	function mr.call() end
+	P.steer(m, 0, 6, false)
+	check(posted(P, M, mr, "walk") == nil, "no speed, no request")
+end
+
+T.a_horse_is_steered_held_and_guarded = function()
+	local P, mr, put, BASE, M = patched_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x2e0, horse, 8)
+	put(horse + 0x2e8, BASE + 0x6500000, 8)
+	P.steer(m, 4, 5, true, math.pi / 2)
+	check(posted(P, M, mr, "man") == horse and posted(P, M, mr, "walk") == 2, "the horse is steered")
+	check(mr.wrote[horse + 0xb0] == 16384, "the horse faces the move")
+	P.hold(m, 4, 5, math.pi / 2)
+	check(posted(P, M, mr, "man") == horse and posted(P, M, mr, "walk") == 1, "releasing the key stops the horse")
+	check(P.guard(m) and posted(P, M, mr, "man") == horse and posted(P, M, mr, "guard") == 1, "the horse's auto attack, not its rider's")
 end
 
 -- his animation fragment, +0x308: a vtable, then a u16 clip index per slot from +0x50, 0xffff for none; one per
@@ -2306,16 +2409,6 @@ T.f2_cancels_existing_movement_before_accepting_input = function()
 	end
 end
 
-T.steering_refreshes_a_changed_goal_without_a_gait_change = function()
-	local P, mr, put, BASE = real_platform()
-	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x330, BASE + 0x3add278, 8)
-	put(m.addr + 0x3c0, 1, 1)
-	mr.fl[m.addr + 0x368], mr.fl[m.addr + 0x370] = 0, 3
-	P.steer(m, 0, 0, false)
-	check(mr.wrote[m.addr + 0x3c0] == 0, "a new hold point invalidates the native walk's cached destination")
-end
-
 T.one_man_stop_cancels_its_lead_point = function()
 	crossbowmen()
 	H.down("W") H.step(0.1) H.up("W")
@@ -2324,59 +2417,6 @@ T.one_man_stop_cancels_its_lead_point = function()
 	local m, c = H.E.F.model, H.last("hold")
 	check(H.count("hold") == held + 1 and c[3] == m.x and c[4] == m.z, "F2 off holds the soldier at his own position")
 	check(H.count("steer") == steered, "F2 off steers no walk")
-end
-
-T.steering_starts_a_native_walk_from_idle = function()
-	H.fresh()
-	local P, mr, put, BASE = real_platform()
-	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x330, BASE + 0x3914618, 8)
-	put(m.addr + 0x2e8, BASE + 0x6400000, 8)
-	local started, speed_run
-	function mr.call(f, sig, a, b)
-		if f.addr == BASE + 0x3036640 then speed_run = b return 1.5 end
-		if f.addr == BASE + 0x306a8fc then started = {a, b} end
-	end
-	P.steer(m, 0, 6, false)
-	check(started and started[1].addr == m.addr, "engine constructs a walk on this model")
-	local p = started[2].addr
-	check(mr.wrote[p] == 0 and mr.wrote[p + 8] == 6, "native target")
-	check(mr.wrote[p + 0x2c] == 1.5 and speed_run == 0, "native walking speed retains its fraction")
-	check(mr.wrote[p + 0x34] == 3 and mr.wrote[p + 0x44] == 1 and mr.wrote[p + 0x46] == 0 and mr.wrote[p + 0x4a] == 1, "engine movement flags select walking gait")
-	check(mr.wrote[m.addr + 0x368] == nil, "old command payload never overwritten as coordinates")
-end
-
-T.steering_at_own_spot_does_not_start_a_walk = function()
-	local P, mr, put, BASE = real_platform()
-	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x330, BASE + 0x3914618, 8)
-	put(m.addr + 0x2e8, BASE + 0x6400000, 8)
-	local started = false
-	function mr.call(f) if f.addr == BASE + 0x306a8fc then started = true end return 1.5 end
-	P.steer(m, 0, 0)
-	check(not started, "idle holding preserves animations and pending state commands")
-end
-
-T.steering_uses_native_run_speed = function()
-	local P, mr, put, BASE = real_platform()
-	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x330, BASE + 0x3add278, 8)
-	put(m.addr + 0x2e8, BASE + 0x6400000, 8)
-	local running
-	function mr.call(f, sig, u, run) if f.addr == BASE + 0x3036640 then running = run return 3.5 end end
-	P.steer(m, 0, 6, true)
-	check(running == 1 and mr.wrote[m.addr + 0x394] == 3.5, "native run speed without integer truncation")
-	check(mr.wrote[m.addr + 0x390] == 1, "walking command's run flag is an integer")
-	check(mr.wrote[m.addr + 0x3ae] == 1 and mr.wrote[m.addr + 0x3c0] == 0, "gait changes refresh the cached movement flags")
-end
-
-T.solo_keeps_its_own_facing = function()
-	local P, mr, put, BASE = real_platform()
-	local m = mr.add(mr.base, 0x6300000)
-	put(m.addr + 0x330, BASE + 0x3add278, 8)
-	P.steer(m, 0, 0, false, math.pi / 2)
-	check(mr.wrote[m.addr + 0xb0] == 16384, "controlled model faces the camera, not its regiment")
-	check(mr.wrote[m.addr + 0x398] == 16384 and mr.wrote[m.addr + 0x3c0] == 0, "walking command refreshes its own heading")
 end
 
 -- the author, 2026-10-14: "moving while aiming (sliding on ground)". While a shot runs nothing drives him, so a
@@ -5088,21 +5128,6 @@ T.tyrion_swings_through_his_mount_without_rider_attack_one = function()
 	check(H.count("uc:attack_unit") == 0, "no fallback order in place of his swing")
 end
 
-T.a_cavalry_move_steers_and_stops_the_horse = function()
-	local P, mr, put, BASE = real_platform()
-	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
-	put(m.addr + 0x2e0, horse, 8)
-	put(horse + 0x2e8, BASE + 0x6500000, 8)
-	put(horse + 0x330, BASE + 0x3add278, 8)
-	P.steer(m, 4, 5, true, math.pi / 2)
-	check(mr.wrote[horse + 0x368] == 4 and mr.wrote[horse + 0x370] == 5, "the horse follows the steering point")
-	check(mr.wrote[horse + 0xb0] == 16384, "the horse faces the move")
-	local stopped
-	function mr.call(f, sig, a) if f.addr == BASE + 0x3069d7c then stopped = a end end
-	P.hold(m, 4, 5, math.pi / 2)
-	check(stopped and stopped.addr == horse, "releasing the key stops the horse")
-end
-
 -- measured live 2026-10-16 (probes/zz_tp_run_speed.lua, the Knights of the White Wolf, W held): his own walk carried the
 -- engine's run speed, 7.8 m/s, and the horse moved 1.25 m/s, sprinting 1.31 - never faster than it could stop in the 3 m
 -- to its steering point (the author: "horse speed mismatch; running but still staying at walking speed"). The point 15 m
@@ -5115,18 +5140,6 @@ T.a_horses_steering_point_is_far_enough_to_run = function()
 	check(s and s[2] == horse.id, "the horse is steered")
 	local d = math.sqrt((s[3] - horse.x) ^ 2 + (s[4] - horse.z) ^ 2)
 	check(near(d, 15), "its point 15 m ahead: " .. d)
-end
-
-T.the_regiments_melee_is_stopped_on_the_horse = function()
-	local P, mr, put, BASE = patched_platform()
-	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
-	put(m.addr + 0x2e0, horse, 8)
-	put(m.addr + 0xb1c, 8, 4)
-	put(horse + 0xb1c, 114, 4)
-	put(horse + 0x330, BASE + 0x3ad24b8, 8)
-	local stopped
-	function mr.call(f, sig, a) if f.addr == BASE + 0x306edd4 then stopped = a end end
-	check(P.guard(m) and stopped and stopped.addr == horse, "stop the horse's auto attack, not its rider")
 end
 
 T.a_riders_health_is_the_mounts_health = function()
