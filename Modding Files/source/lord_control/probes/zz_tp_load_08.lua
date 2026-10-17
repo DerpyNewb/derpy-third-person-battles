@@ -171,8 +171,15 @@ return function(E)
 		local zout = P.held(S.keys.zoom_out) and 1 or 0
 		local notches = P.wheel and P.wheel() or 0
 		if zin ~= zout or notches ~= 0 then
-			E.rig.zoom_by((zout - zin) * S.zoom_rate * dt - notches * ZOOM_NOTCH)
+			local step = (zout - zin) * S.zoom_rate * dt - notches * ZOOM_NOTCH
+			local closest = E.rig.zoom_by(step)
 			E.zoom_by_type[F.utype] = E.rig.zoom
+			-- zoomed in all the way, or to where the ground would bring the eye in to his head, first person; zoomed out to
+			-- where it fits behind him, third (the author, 2026-10-17: "the first person mode should work if the player
+			-- scrolled to the lowest"; the ground did that from zoom 0.9 on a slope, probes/zz_tp_zoomsweep.lua)
+			local fits = E.rig.fits(E.rig.zoom)
+			if step < 0 and (closest or not fits) then E.first_person = true
+			elseif step > 0 and fits then E.first_person = false end
 		end
 	end
 
@@ -351,14 +358,5 @@ return function(E)
 			if not ok then E.once("anim", "swings become attack orders: " .. tostring(why)) end
 			ok, why = check("wheel", P.open_wheel)
 			if not ok then E.once("wheel", "zoom is on the keys only: " .. tostring(why)) end
-			E.log("build " .. tostring(P.build) .. " via " .. tostring(P.source) .. ": anim " .. tostring(P.features.anim)
-				.. ", wheel " .. tostring(P.features.wheel))
-		end
-		unit = unit or pick_unit()
-		if not unit or unit:number_of_men_alive() == 0 then return end
-		F.unit, F.uc, F.utype, F.arty = unit, create_unitcontroller(unit), unit:type(), unit:is_artillery()
-		local men_ok, why = check("men", P.check_men, unit)
-		F.men_ok = men_ok
-		E.log("men check on " .. F.utype .. ": " .. tostring(men_ok))
 ]==]
 return "part 8 of 11"

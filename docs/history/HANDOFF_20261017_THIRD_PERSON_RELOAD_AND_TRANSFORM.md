@@ -211,4 +211,21 @@ anchors re-aimed (`mutants_actions`, `mutants_round19`, `mutants_tuning`).
 out turns it off, wheel or keys; V still works. Below about 0.64 the third-person eye (2.5 m x zoom) was already under
 the 1.6 m ground clearance and slid in to his head, so the closest zooms looked like a broken first person. Round 39: 4
 mutants, killed. 387 tests. Deployed `03ae747b` (`Modding Files/Backup/derpy_third_person_data_before_zoom_fp_20261017.pack`
-is `d61c3fee`). Not run live: the wheel reading is unchanged, the switch is Lua the harness drives.
+is `d61c3fee`).
+
+**Live, that was not enough (18:00-18:45; the author: "try it in game first").** The switch itself worked (wheel and keys
+reach first person at 0.6 and leave it on a zoom out), but the ground behind a man is seldom level:
+`probes/zz_tp_zoomsweep.lua` (`_G.TP_ZS_TYPE`) sets the zoom 1, 0.95 ... 0.6 and reads where the eye lands. Behind a
+Hessmarine with the ground 0.4-0.7 m up, the eye came in to 0.2-0.3 m behind his head at every zoom from 0.9; behind a
+Montante Greatsword with it 0.3 m up, from 0.75. Every notch between there and 0.6 was the broken head view. Now
+`R.fits(zoom)` runs the rig's own eye-behind-him and ground-clearance code (`behind`, `clear`, factored out of
+`R.update`) at the new zoom, and a zoom in that would bring the eye in to his head goes first person on that notch; a
+zoom out leaves first person only where the eye fits behind him. Live (`probes/zz_tp_zoomfp.lua`, Greatswords): 2 in
+(0.74) first person, 1 out (0.70) still first person, 3 more out (1.09) third person 6.6 m behind, the key held first
+person; `tp_zoom_close.tga` is a clean first-person view where it was the inside of the regiment. Not covered: walking
+onto a slope at a zoom the player chose still slides the eye in (no zoom, no switch), as it did before today. Round 40: 7
+mutants, killed; round 39 and `mutants_camfloor` re-aimed. 388 tests. Deployed `4a79b7cc`
+(`Modding Files/Backup/derpy_third_person_data_20261017_1845.pack` is the one before).
+
+Live tests now run 1280x720 windowed, muted, medium graphics (the author): `tools/wh3_test_prefs.py --apply` with the
+game shut, `--revert` after it exits.

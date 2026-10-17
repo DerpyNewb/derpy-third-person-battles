@@ -2,6 +2,15 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
+			E.log("build " .. tostring(P.build) .. " via " .. tostring(P.source) .. ": anim " .. tostring(P.features.anim)
+				.. ", wheel " .. tostring(P.features.wheel))
+		end
+		unit = unit or pick_unit()
+		if not unit or unit:number_of_men_alive() == 0 then return end
+		F.unit, F.uc, F.utype, F.arty = unit, create_unitcontroller(unit), unit:type(), unit:is_artillery()
+		local men_ok, why = check("men", P.check_men, unit)
+		F.men_ok = men_ok
+		E.log("men check on " .. F.utype .. ": " .. tostring(men_ok))
 		if not men_ok then E.once("men", "regiments are played whole: " .. tostring(why)) end
 		if S.one_man and not P.features.steer then E.once("steer", "regiments are played whole: walking command types unknown for build " .. tostring(P.build)) end
 		-- one man of a regiment, never of a flying machine (measured 2026-10-15: a gyro gunship's crew steered nothing)

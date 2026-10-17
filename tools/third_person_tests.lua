@@ -613,6 +613,34 @@ T.zooming_in_all_the_way_goes_first_person = function()
 	check(H.E.first_person, "the zoom key in all the way does it too")
 end
 
+-- measured 2026-10-17 (probes/zz_tp_zoomsweep.lua): with the ground 0.4-0.7 m up behind a Hessmarine, the eye came in
+-- along its boom to 0.2-0.3 m behind his head at every zoom under 0.9, so "the lowest" is where that happens
+T.zooming_in_once_the_ground_brings_the_eye_in_goes_first_person = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local m, bank = H.E.F.model, 1.2
+	H.ground = function(_, z) return z < m.z - 0.5 and bank or 0 end -- a bank behind him
+	H.step(0.5)
+	check(H.eye.z > m.z - 1 and not H.E.first_person, "the bank brings the eye in to his head, and that alone changes "
+		.. "nothing: " .. H.eye.z)
+	H.wheel_notches = 1 H.step(0.1)
+	check(H.E.first_person and near(H.eye.z, m.z + 0.35, 0.01), "a notch in from there: first person, " .. H.eye.z)
+	H.wheel_notches = -1 H.step(0.1)
+	check(H.E.first_person, "a notch out with the bank still in the way stays first person: behind him is his head")
+	bank = 0.7 -- the eye clears it at zoom 1 and not a notch in
+	H.wheel_notches = -1 H.step(0.5)
+	check(not H.E.first_person and H.eye.z < m.z - 2, "a notch out once it fits behind him: third person, " .. H.eye.z)
+	H.wheel_notches = 1 H.step(0.1)
+	check(not H.E.first_person and H.eye.z < m.z - 2, "a notch in that still fits: third person, " .. H.eye.z)
+	H.wheel_notches = 1 H.step(0.02)
+	check(H.E.first_person, "the notch in that would bring it to his head goes straight to first person")
+	H.ground = function(_, z) return z < m.z - 0.5 and -2 or 0 end -- the ground falls away behind him
+	H.wheel_notches = -20 H.step(0.1)
+	check(not H.E.first_person, "zoomed out")
+	H.wheel_notches = 20 H.step(0.1)
+	check(H.E.first_person, "the eye fits behind him at the closest zoom here, and the closest is first person all the same")
+	H.ground = nil
+end
+
 T.first_person_keeps_up_with_his_head = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.tap("V") H.step(1)

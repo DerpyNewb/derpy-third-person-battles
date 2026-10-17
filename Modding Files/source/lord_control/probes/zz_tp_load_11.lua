@@ -168,8 +168,51 @@ return function(E)
 		R.want_pitch = math.max(R.first and FP_PITCH_MIN or PITCH_MIN, math.min(PITCH_MAX, R.want_pitch + dy * S.sensitivity))
 	end
 
-	function R.zoom_by(steps) -- natural-log steps: positive zooms out
+	function R.zoom_by(steps) -- natural-log steps: positive zooms out; true at the closest zoom
 		R.zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, R.zoom * math.exp(steps)))
+		return R.zoom <= ZOOM_MIN
+	end
+
+	-- the eye and the point it looks at, behind him at zoom zm and over his shoulder as far as R.ots, before the ground
+	local function behind(zm)
+		local S = E.S
+		local fx, fz = math.sin(R.yaw), math.cos(R.yaw)
+		local dist = S.distance + (math.min(S.melee_distance, S.distance) - S.distance) * R.close
+		local back, lift = dist * zm * math.cos(R.pitch), dist * zm * math.sin(R.pitch)
+		local ex, ey, ez = R.sx - fx * back, R.sy + S.height * zm + lift, R.sz - fz * back
+		local lx, ly, lz = R.sx + fx * AHEAD * zm, R.sy + LOOK_H * zm, R.sz + fz * AHEAD * zm
+		if R.ots > 0.001 then
+			local rx, rz = fz * S.shoulder, -fx * S.shoulder
+			local ox, oy, oz = R.sx + (rx * OTS_SIDE - fx * S.aim_back) * zm, R.sy + OTS_HEIGHT * zm, R.sz + (rz * OTS_SIDE - fz * S.aim_back) * zm
+			local c, sn = math.cos(R.pitch), math.sin(R.pitch)
+			local ax, ay, az = ox + fx * c * OTS_AHEAD, oy - sn * OTS_AHEAD, oz + fz * c * OTS_AHEAD
+			local k = R.ots
+			ex, ey, ez = ex + (ox - ex) * k, ey + (oy - ey) * k, ez + (oz - ez) * k
+			lx, ly, lz = lx + (ax - lx) * k, ly + (ay - ly) * k, lz + (az - lz) * k
+		end
+		return ex, ey, ez, lx, ly, lz
+	end
+
+	-- the engine's altitude floor is lowered while on (main.lua: it lifted the eye with the terrain, measured
+	-- 2026-10-15), so the eye keeps out of the ground here: it comes in along the boom from his head, not up. The fourth
+	-- return is the tenth of the boom it stopped at: 1, nothing behind his head cleared
+	local function clear(zm, ex, ey, ez)
+		local px, py, pz = R.sx, R.sy + LOOK_H * zm, R.sz
+		for i = 10, 1, -1 do
+			local t = i / 10 * R.boom
+			local x, y, z = px + (ex - px) * t, py + (ey - py) * t, pz + (ez - pz) * t
+			local g = bm:get_terrain_height(x, z) + CLEAR
+			if y >= g or i == 1 then return x, math.max(y, g), z, i end
+		end
+	end
+
+	-- the eye can stay behind him at this zoom, where he stands now: false where the ground brings it in to his head
+	-- (measured 2026-10-17, probes/zz_tp_zoomsweep.lua: 0.2-0.3 m behind a Hessmarine's head at every zoom under 0.9, the
+	-- ground 0.4-0.7 m up behind him)
+	function R.fits(zoom)
+		local ex, ey, ez = behind(zoom)
+		local _, _, _, i = clear(zoom, ex, ey, ez)
+		return i > 1
 	end
 
 	-- melee: his unit fights hand to hand, and the camera comes in to S.melee_distance (the author, 2026-10-15)
@@ -209,22 +252,9 @@ return function(E)
 			R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = ex, ey, ez, lx, ly, lz
 			return ex, ey, ez, lx, ly, lz
 		end
-		local zm = R.zoom
 		R.close = R.close + ((melee and 1 or 0) - R.close) * math.min(1, OTS_RATE * dt)
-		local dist = S.distance + (math.min(S.melee_distance, S.distance) - S.distance) * R.close
-		local back, lift = dist * zm * math.cos(R.pitch), dist * zm * math.sin(R.pitch)
-		local ex, ey, ez = R.sx - fx * back, R.sy + S.height * zm + lift, R.sz - fz * back
-		local lx, ly, lz = R.sx + fx * AHEAD * zm, R.sy + LOOK_H * zm, R.sz + fz * AHEAD * zm
 		R.ots = R.ots + ((ranged and 1 or 0) - R.ots) * math.min(1, OTS_RATE * dt)
-		if R.ots > 0.001 then
-			local rx, rz = fz * S.shoulder, -fx * S.shoulder
-			local ox, oy, oz = R.sx + (rx * OTS_SIDE - fx * S.aim_back) * zm, R.sy + OTS_HEIGHT * zm, R.sz + (rz * OTS_SIDE - fz * S.aim_back) * zm
-			local c, sn = math.cos(R.pitch), math.sin(R.pitch)
-			local ax, ay, az = ox + fx * c * OTS_AHEAD, oy - sn * OTS_AHEAD, oz + fz * c * OTS_AHEAD
-			local k = R.ots
-			ex, ey, ez = ex + (ox - ex) * k, ey + (oy - ey) * k, ez + (oz - ez) * k
-			lx, ly, lz = lx + (ax - lx) * k, ly + (ay - ly) * k, lz + (az - lz) * k
-		end
+		local ex, ey, ez, lx, ly, lz = behind(R.zoom)
 		-- got_y: where the engine put an eye of the last frames, against where they were asked. It reports two frames
 		-- late (measured 2026-10-15, probes/zz_tp_recorder.lua: on open ground it gave the y asked two frames before), so
 		-- every quick drop of the eye read as a roof's lift and pulled the boom into a head-cam ("the camera issue is still
@@ -241,15 +271,7 @@ return function(E)
 				R.boom = math.min(R.cap and R.cap[1] or 1, R.boom + BOOM_OUT * dt)
 			end
 		end
-		-- the engine's altitude floor is lowered while on (main.lua: it lifted the eye with the terrain, measured
-		-- 2026-10-15), so the eye keeps out of the ground here: it comes in along the boom from his head, not up
-		local px, py, pz = R.sx, R.sy + LOOK_H * zm, R.sz
-		for i = 10, 1, -1 do
-			local t = i / 10 * R.boom
-			local x, y, z = px + (ex - px) * t, py + (ey - py) * t, pz + (ez - pz) * t
-			local g = bm:get_terrain_height(x, z) + CLEAR
-			if y >= g or i == 1 then ex, ey, ez = x, math.max(y, g), z break end
-		end
+		ex, ey, ez = clear(R.zoom, ex, ey, ez)
 		R.ey2, R.ey1 = R.ey1, R.ey
 		R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = ex, ey, ez, lx, ly, lz
 		return ex, ey, ez, lx, ly, lz

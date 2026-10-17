@@ -5,5 +5,5 @@ MUTANTS = [
     (M, "\t\tcam:change_height_range(0, 100)", "\t\t--", FLOOR),
     (M, "try(function() cam:change_height_range(-1, -1) end)", "", FLOOR),
     (R, "if y >= g or i == 1 then", "if true then", HILL),
-    (R, "ex, ey, ez = x, math.max(y, g), z break", "ex, ey, ez = ex, math.max(ey, g), ez break", HILL),
+    (R, "return x, math.max(y, g), z, i end", "return ex, math.max(ey, g), ez, i end", HILL),
 ]

@@ -170,9 +170,12 @@ return function(E)
 			local step = (zout - zin) * S.zoom_rate * dt - notches * ZOOM_NOTCH
 			local closest = E.rig.zoom_by(step)
 			E.zoom_by_type[F.utype] = E.rig.zoom
-			-- zoomed in all the way, first person; zoomed out, back behind him (the author, 2026-10-17: "the first person
-			-- mode should work if the player scrolled to the lowest")
-			if step < 0 and closest then E.first_person = true elseif step > 0 then E.first_person = false end
+			-- zoomed in all the way, or to where the ground would bring the eye in to his head, first person; zoomed out to
+			-- where it fits behind him, third (the author, 2026-10-17: "the first person mode should work if the player
+			-- scrolled to the lowest"; the ground did that from zoom 0.9 on a slope, probes/zz_tp_zoomsweep.lua)
+			local fits = E.rig.fits(E.rig.zoom)
+			if step < 0 and (closest or not fits) then E.first_person = true
+			elseif step > 0 and fits then E.first_person = false end
 		end
 	end
 

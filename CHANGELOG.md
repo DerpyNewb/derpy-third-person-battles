@@ -9,6 +9,7 @@
 - Decompiled exe code taken out of the repo.
 - Smoother camera turning, with a Turn smoothing setting (0 turns at once).
 - First person view on V, or by zooming in all the way: from the man you play, or a unit of one.
+- Zooming in goes first person where the camera would end up in his head (on slopes, well before the closest zoom).
 - Default time between swings 4 s, between jump attacks 10 s.
 
 ## 2026-10-16
