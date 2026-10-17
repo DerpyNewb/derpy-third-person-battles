@@ -14,7 +14,7 @@ MUTANTS = [
      "a_played_unit_keeps_its_ground_and_gets_its_setting_back"),
     (M, 'if F.defend_was == false then try(', "if false then try(",
      "a_played_unit_keeps_its_ground_and_gets_its_setting_back"),
-    (C, "\t\t\tF.uc:fire_at_will(true)\n", "", "fire_at_will_is_on_only_while_he_shoots"),
+    (C, "\t\tF.uc:fire_at_will(true)\n\t\tF.uc:attack_location(", "\t\tF.uc:attack_location(", "fire_at_will_is_on_only_while_he_shoots"),
     (C, "if F.held_fire then F.uc:fire_at_will(false) end -- shooting over", "-- shooting over",
      "fire_at_will_is_on_only_while_he_shoots"),
 ]

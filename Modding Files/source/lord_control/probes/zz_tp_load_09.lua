@@ -19,7 +19,9 @@ S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
 		E.log("men check on " .. F.utype .. ": " .. tostring(men_ok))
 		if not men_ok then E.once("men", "regiments are played whole: " .. tostring(why)) end
 		if S.one_man and not P.features.steer then E.once("steer", "regiments are played whole: walking command types unknown for build " .. tostring(P.build)) end
-		-- one man of a regiment, never of a flying machine (measured 2026-10-15: a gyro gunship's crew steered nothing)
+		-- one man of a regiment, flyers too (the author, 2026-10-17: "flying units still controls the whole battalion as well
+		-- when moving"; measured that day, probes/zz_tp_fly_one.lua: a Birdman steered alone in the air and landed. On
+		-- 2026-10-15's steering a gyro gunship's crew steered nothing, and flyers were played whole)
 		F.model = S.one_man and men_ok and P.features.steer and not F.arty and not unit:is_war_machine()
 			and E.move.front_man(unit) or nil
 		F.reload_slot = F.model and P.reload_slot(F.model)

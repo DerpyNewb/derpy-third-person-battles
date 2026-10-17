@@ -304,6 +304,10 @@ return function(E)
 		-- the gap from any order, the first fire too: the walk's halt just before it (round 25)
 		if now - (F.last_order or -1e9) < STEER_GAP
 			or F.fire_at and (ax - F.fire_at[1]) ^ 2 + (az - F.fire_at[2]) ^ 2 < FIRE_REAIM * FIRE_REAIM then return end
+		-- a ground-fire order with fire at will off looses nothing (measured 2026-10-15): it is on while he shoots, from
+		-- the order and not the click - on through the turn, the unit swung back to the enemy it could already shoot and
+		-- never faced the aim (the author, 2026-10-17: "check artillery still bugging"; the Tilean tank, zz_tp_tank_fire.lua)
+		F.uc:fire_at_will(true)
 		F.uc:attack_location(v(ax, bm:get_terrain_height(ax, az), az), false)
 		F.uc:release_control()
 		F.fire_at, F.last_order, F.driving = {ax, az}, now, false
@@ -323,8 +327,6 @@ return function(E)
 		if clicked and not F.firing and E.can_shoot() then
 			-- the commit counts from the click: a turn that never ends does not keep him firing (round 25)
 			F.firing, F.fire_ammo, F.fire_order_t = true, F.unit:ammo_left(), now
-			-- a ground-fire order with fire at will off looses nothing (measured 2026-10-15): it is on while he shoots
-			F.uc:fire_at_will(true)
 		end
 		if not F.firing then return end
 		local shot = F.unit:ammo_left() < F.fire_ammo

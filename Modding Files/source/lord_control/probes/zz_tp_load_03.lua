@@ -2,6 +2,12 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
+		local p, fires = PAIRS[want], E.D["fires_" .. want]
+		if want == "level" or not (fires and fires[F.utype]) or not P.has_slot(F.model, p[2])
+			or P.has_slot(F.model, p[1]) ~= P.has_slot(F.model, SLOT_AIM) then return "level", a, want end
+		return want, a, want
+	end
+
 	local function r1(n) return math.floor(n * 10 + 0.5) / 10 end
 
 	local function man_shot(now)

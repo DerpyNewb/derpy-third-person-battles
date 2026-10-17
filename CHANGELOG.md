@@ -14,6 +14,8 @@
 - Sprint and charge 50% faster than the run.
 - Flying units are played as one man.
 - Known issue: a flying unit landed in third person takes off again only after third person is turned off and on.
+- War machines played whole turn to the aim and fire there, instead of swinging back to the nearest enemy.
+- Known issue: a rare crash while playing one man of a mounted unit.
 - Default time between swings 4 s, between jump attacks 10 s.
 
 ## 2026-10-16

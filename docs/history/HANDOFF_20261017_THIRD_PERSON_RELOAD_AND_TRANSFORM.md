@@ -260,3 +260,32 @@ person off. Ruled out: the order gate (`P.gate`), `bm:disable_orders`, guard mod
 
 Round 41 (2), round 42 (1), killed; round 29 and `mutants_actions` re-aimed. 389 tests. Deployed `d4aa5580`
 (`Modding Files/Backup/derpy_third_person_data_20261017_1950.pack` is the one before).
+
+## 9. "Check artillery still bugging" (19:53-20:46)
+
+The Tilean army has no artillery; its war machine is the tank, `teb_tank_ror` (category war_machine, class chariot, a
+beam fired by the vehicle), played whole. The author's 18:51 log has it driving and five ground-fire orders in 3.5 s.
+`probes/zz_tp_tank_fire.lua` (`_G.TP_TF_MODE` vanilla / unit / steady / sweep, `_G.TP_TF_AHEAD`, `_G.TP_TF_TURN`) counts
+its rounds over 30 s with every order the pack gives logged through a proxy on its controller:
+
+| Case | Result |
+|---|---|
+| third person off, `attack_location` on the enemy (288 m) / `attack_unit` | 2 rounds, standing, both |
+| third person off, `attack_location` on bare ground, every enemy dead or 600 m off | drove at the point, 0 rounds |
+| the pack, aim on the enemy inside its arc | one order, 2 rounds, standing |
+| the pack, aim on bare ground 120 m ahead, enemy in range | standing, 2 rounds |
+| the pack, aim sweeping 6 m every 0.6 s | 19+ orders, 3 rounds, standing: re-orders cost nothing |
+| **the pack, aim 90 deg off, an enemy ahead** | **the turn began (9 -> 33 deg), then swung back to 8 and stayed; no fire order in 30 s** |
+
+The click put fire at will on before the turn, and the tank turned back to the enemy it could already shoot. **Fix:**
+fire at will goes on with the fire order (`combat.lua`'s `fire`), not the click. Live after: turned to 84 deg, the fire
+order at 5.8 s, rounds at 13 and 29 s, facing the aim. A ground-fire rule by land unit category was tried first and
+dropped: the Knellgun, which fired fine this morning, is a war_machine chariot as well. Round 43: 2 mutants, killed;
+`mutants_control` re-aimed. 390 tests. Deployed `b18aef6b` (`Modding Files/Backup/derpy_third_person_data_20261017_2046.pack`
+is the one before).
+
+**A crash in the author's own play, 20:31** (in the test game, `script_log_171026_2016.txt`): playing the Montecastello,
+3 s after a jump attack, `P.guard`'s `walk_stop` on the horse hit an access violation at `exe+0x7AB1DA` (reading -1);
+the pack caught it and went off, the game fell over after. This is the open race in `docs/BATTLE_ENGINE_RE.md` section 9
+(the guard destroys an engine command from the script thread while the battle's worker threads use it; yesterday's dump
+was `exe+0x305B39A`). Not fixed: the doc's route is a patch on the battle thread, not a script call.

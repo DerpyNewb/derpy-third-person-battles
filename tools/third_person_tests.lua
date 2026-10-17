@@ -814,6 +814,25 @@ T.ground_fire_turns_first = function()
 	check(H.count("uc:attack_location") == 0, "and does not fire outside its arc")
 end
 
+-- the author, 2026-10-17: "check artillery still bugging". Measured (probes/zz_tp_tank_fire.lua, the Tilean tank, an
+-- enemy ahead and the aim 90 deg off): the turn began, then the tank swung back to the enemy it could already shoot -
+-- the click had put fire at will on - and the fire key did nothing for 30 s. Fire at will waits for the fire order
+T.ground_fire_turns_with_fire_at_will_off = function()
+	local u = playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
+	H.step(0.5) -- clear of the start's halt
+	H.mouse = {393, 0} -- a quarter turn of the camera
+	H.step(1 / 60)
+	H.tap("Left mouse") H.step(0.1)
+	local faw = H.last("uc:fire_at_will")
+	check(H.count("uc:goto_location_angle_width") == 1 and faw and faw[3] == false, "turning, fire at will still off: "
+		.. tostring(faw and faw[3]))
+	u._bearing = math.deg(H.E.rig.yaw) % 360 -- the turn done
+	H.down("Left mouse") H.step(1)
+	faw = H.last("uc:fire_at_will")
+	check(H.count("uc:attack_location") == 1 and faw[3] == true, "facing the aim: the fire order, and fire at will on")
+	H.up("Left mouse")
+end
+
 T.ground_fire_stops_on_focus_loss = function()
 	local u = playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
 	local halts = H.count("uc:halt")
@@ -3273,7 +3292,9 @@ T.fire_at_will_is_on_only_while_he_shoots = function()
 	H.tap("F2") H.step(0.1)
 	check(H.units[1]._faw == false, "not shooting: holding fire")
 	H.tap("Left mouse") H.step(1 / 60)
-	check(H.E.F.firing and H.units[1]._faw == true, "the click: fire at will, at the ground he aims at")
+	check(H.E.F.firing and H.units[1]._faw == false, "the click: not yet, the order waits its half second")
+	H.step(0.5)
+	check(H.E.F.firing and H.units[1]._faw == true, "the fire order: fire at will, at the ground he aims at")
 	H.step(6)
 	check(not H.E.F.firing and H.units[1]._faw == false, "the shot done: holding fire again")
 end
