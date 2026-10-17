@@ -3297,13 +3297,18 @@ T.arming_on_the_first_frame_is_no_error = function()
 end
 
 
--- the author, 2026-10-15: "cant move shoot or use melee attack flying helicopter". Measured: a gyro gunship is 5 models,
--- flying, with FIRE_LEVEL only - one man of a flying machine steered nothing. Flyers are played whole
-T.a_flying_unit_is_played_whole = function()
-	playing({type = "wh_test_gyro", men = 5, can_fly = true, flying = true, x = 40})
-	check(H.E.F.model == nil, "the whole machine, not one crewman")
-	playing({type = "wh_test_gyro", men = 5, can_fly = true, flying = true, range = 100, ammo = 10, x = 40})
-	check(H.E.F.model == nil and H.E.F.ranged, "a shooting one too, and it can shoot")
+-- the author, 2026-10-15: "cant move shoot or use melee attack flying helicopter" (then: a gyro gunship's crew steered
+-- nothing, and flyers were played whole); 2026-10-17: "flying units still controls the whole battalion as well when
+-- moving". Measured live on today's steering (probes/zz_tp_fly_one.lua, the Birdmen of Catrazza): one man went 14-17 m
+-- in 3 s on W, in the air and landed, the rest of his regiment under 2 m. One man of a flyer, as of any regiment
+T.a_flying_unit_is_played_one_man = function()
+	playing({type = "teb_birdmen", men = 16, can_fly = true, flying = true, x = 40})
+	check(H.E.F.model ~= nil, "one man, not the whole regiment")
+	H.down("W") H.step(1) H.up("W")
+	check(H.count("steer") > 0 and H.count("uc:goto_location") == 0, "W steers him and orders the regiment nowhere")
+	playing({type = "teb_birdmen", men = 16, can_fly = true, flying = true, range = 100, ammo = 10, x = 40,
+		slots = {[42] = true, [454] = true, [1557] = true}})
+	check(H.E.F.model ~= nil and H.E.F.solo and H.E.F.ranged, "a shooting one too, and he shoots alone")
 end
 
 -- the author, 2026-10-15: "im still controlling the entire weapons team". Measured: each of a rocket team's 12 men has
@@ -3333,6 +3338,25 @@ T.an_exalted_plaguebearer_throws_his_death_head_alone = function()
 	H.step(0.4)
 	check(H.count("launch") == 1 and u._ammo == 9, "one Death's Head at 1.96 s: " .. H.count("launch"))
 	check(H.count("uc:attack_location") == 0 and H.E.F.model == man, "the regiment never fires, the camera stays on him")
+end
+
+-- the author, 2026-10-17: "are mounted archers not supported? they are missing their ranged option". Measured
+-- (tools/third_person_fires.py's bins, the installed packs): 165 mounted missile units' riders have no FIRE_LEVEL or
+-- GRENADIER and shoot from RIDER_FIRE_FORWARD_LEVEL (2105), Kislev's Horse Archers among them
+T.a_horse_archer_shoots_from_the_saddle_alone = function()
+	H.fresh({units = {{general = true}, {type = "wh3_main_ksl_cav_horse_archers_0", men = 20, x = 40, range = 160,
+		ammo = 10, reload_slot = false, slots = {[42] = true, [2105] = true}}}})
+	local u = H.units[2]
+	for i, m in ipairs(u._models) do m.mount = {id = 990 + i, x = m.x, y = m.y, z = m.z, hp = 100, hp_max = 100} end
+	H.select(u) H.tap("F2") H.step(0.1)
+	local man = H.E.F.model
+	check(man ~= nil and H.E.F.solo and H.E.F.ranged, "one rider, with his ranged mode")
+	H.tap("Left mouse") H.step(0.1)
+	local p = H.last("play")
+	check(p and p[2] == man.id and p[3] == 2105, "the forward shot from the saddle, on him: " .. tostring(p and p[3]))
+	H.step(3)
+	check(H.count("launch") == 1 and u._ammo == 9, "one arrow: " .. H.count("launch"))
+	check(H.count("uc:attack_location") == 0, "the regiment never fires")
 end
 
 T.a_weapon_team_man_fires_alone_and_reloads_on_the_clock = function()
@@ -3491,7 +3515,7 @@ T.the_charge_attack_is_thrown_on_the_run = function()
 	local steers = H.count("steer")
 	H.step(1)
 	check(H.count("steer") >= steers + 50, "he is steered on through it, every frame: " .. (H.count("steer") - steers))
-	check(near(H.last("steer")[7], 1.2), "at the sprint: " .. tostring(H.last("steer")[7]))
+	check(near(H.last("steer")[7], 1.5), "at the sprint: " .. tostring(H.last("steer")[7]))
 	check(near(H.last("steer")[6], H.E.F.face_yaw), "along his own facing")
 	H.up("Shift") H.up("W")
 end
@@ -4588,26 +4612,26 @@ T.a_swing_the_engine_never_plays_is_logged = function()
 end
 
 -- the author, 2026-10-16: "if no charge animation, add a 20% boost to speed", then "20% boost even with charge
--- animation": a sprint is 1.2 times his run
-T.a_sprint_is_a_fifth_faster = function()
+-- animation"; 2026-10-17: "add 50% speed boost when charging/sprinting": a sprint is 1.5 times his run
+T.a_sprint_is_half_again_as_fast = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.down("W") H.step(0.6)
 	check((H.last("steer")[7] or 1) == 1, "running: his own speed")
 	H.down("Shift") H.step(0.3)
-	check(near(H.last("steer")[7], 1.2), "sprinting: 1.2 times: " .. tostring(H.last("steer")[7]))
+	check(near(H.last("steer")[7], 1.5), "sprinting: 1.5 times: " .. tostring(H.last("steer")[7]))
 	H.up("Shift") H.step(0.1)
 	check((H.last("steer")[7] or 1) == 1, "let go: his own again")
 	H.up("W")
 end
 
 -- a regiment played whole: CA's walk speed scalar, after each order at the sprint (it resets with every order)
-T.a_unit_played_whole_sprints_a_fifth_faster = function()
+T.a_unit_played_whole_sprints_half_again_as_fast = function()
 	general_on() H.step(0.5)
 	H.down("W") H.step(0.6)
 	check(H.count("uc:change_current_walk_speed") == 0, "running: no scalar")
 	H.down("Shift") H.step(0.6)
 	local s = H.last("uc:change_current_walk_speed")
-	check(s and near(s[3], 1.2), "sprinting: 1.2")
+	check(s and near(s[3], 1.5), "sprinting: 1.5: " .. tostring(s and s[3]))
 	local last_order, last_speed = 0, 0
 	for i, c in ipairs(H.calls) do
 		if c[1] == "uc:goto_location" then last_order = i elseif c[1] == "uc:change_current_walk_speed" then last_speed = i end

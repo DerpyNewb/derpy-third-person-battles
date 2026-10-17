@@ -2,6 +2,12 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
+		if not E.checked then
+			E.checked = true
+			local ok, why = check("anim", P.check_anim)
+			if not ok then E.once("anim", "swings become attack orders: " .. tostring(why)) end
+			ok, why = check("wheel", P.open_wheel)
+			if not ok then E.once("wheel", "zoom is on the keys only: " .. tostring(why)) end
 			E.log("build " .. tostring(P.build) .. " via " .. tostring(P.source) .. ": anim " .. tostring(P.features.anim)
 				.. ", wheel " .. tostring(P.features.wheel))
 		end
@@ -14,7 +20,7 @@ S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
 		if not men_ok then E.once("men", "regiments are played whole: " .. tostring(why)) end
 		if S.one_man and not P.features.steer then E.once("steer", "regiments are played whole: walking command types unknown for build " .. tostring(P.build)) end
 		-- one man of a regiment, never of a flying machine (measured 2026-10-15: a gyro gunship's crew steered nothing)
-		F.model = S.one_man and men_ok and P.features.steer and not F.arty and not unit:is_war_machine() and not unit:can_fly()
+		F.model = S.one_man and men_ok and P.features.steer and not F.arty and not unit:is_war_machine()
 			and E.move.front_man(unit) or nil
 		F.reload_slot = F.model and P.reload_slot(F.model)
 		F.thrown = false
@@ -255,7 +261,7 @@ return function(E)
 		end
 	end
 
-	-- kf, kr: -1, 0 or 1 forward and right from the keys; run: at the run; speed: times his own (a sprint's 1.2)
+	-- kf, kr: -1, 0 or 1 forward and right from the keys; run: at the run; speed: times his own (a sprint's 1.5)
 	function M.drive(now, kf, kr, run, speed)
 		speed = speed or 1
 		if kf ~= 0 or kr ~= 0 then F.native_attack = nil end

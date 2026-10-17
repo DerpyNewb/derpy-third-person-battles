@@ -4,7 +4,7 @@ V = "script/derpy_tp/move.lua"
 MUZ = "a_muzzle_inside_him_moves_out_along_the_shot"
 RAISE = "the_first_high_shot_goes_from_the_raise_into_the_fire"
 LEARN = "a_raise_data_lua_lacks_is_learned_on_the_first_shot"
-FAST, WHOLE = "a_sprint_is_a_fifth_faster", "a_unit_played_whole_sprints_a_fifth_faster"
+FAST, WHOLE = "a_sprint_is_half_again_as_fast", "a_unit_played_whole_sprints_half_again_as_fast"
 STALL, NEVER = "a_stall_with_the_keys_held_is_logged", "a_swing_the_engine_never_plays_is_logged"
 # Round 29 (2026-10-16): a muzzle inside him moves out, each raise's length off its .anim, the sprint 1.2 times, and the
 # in-combat stall logged
@@ -18,7 +18,7 @@ MUTANTS = [
     (C, "if not len or len <= 0 then len = aim_len", "if not len then len = aim_len", LEARN),
     (C, "\t\tif L.m and not L.seen then\n", "\t\tif false then\n", NEVER),
     (M, "F.sprinting and SPRINT_SPEED or 1) end", "1) end", FAST),
-    (M, "local SPRINT_SPEED = 1.2", "local SPRINT_SPEED = 1.5", FAST),
+    (M, "local SPRINT_SPEED = 1.5", "local SPRINT_SPEED = 1.2", FAST),
     (M, "if E.S.debug and not paused then", "if false then", STALL),
     (M, "\t\t\t\ts.told = true\n", "\n", STALL),
     (M, "if kf == 0 and kr == 0 then F.stall = nil", "if false then F.stall = nil", STALL),

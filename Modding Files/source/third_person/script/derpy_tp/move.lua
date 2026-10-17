@@ -88,7 +88,7 @@ return function(E)
 		end
 	end
 
-	-- kf, kr: -1, 0 or 1 forward and right from the keys; run: at the run; speed: times his own (a sprint's 1.2)
+	-- kf, kr: -1, 0 or 1 forward and right from the keys; run: at the run; speed: times his own (a sprint's 1.5)
 	function M.drive(now, kf, kr, run, speed)
 		speed = speed or 1
 		if kf ~= 0 or kr ~= 0 then F.native_attack = nil end

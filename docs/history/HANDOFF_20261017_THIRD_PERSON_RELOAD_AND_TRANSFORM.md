@@ -229,3 +229,34 @@ mutants, killed; round 39 and `mutants_camfloor` re-aimed. 388 tests. Deployed `
 
 Live tests now run 1280x720 windowed, muted, medium graphics (the author): `tools/wh3_test_prefs.py --apply` with the
 game shut, `--revert` after it exits.
+
+## 8. Mounted archers, the sprint, flyers (18:56-19:50)
+
+**Mounted archers (the author: "are mounted archers not supported? they are missing their ranged option").** A man
+plays alone only with a fire clip of his own, and `fire_clip` knew `FIRE_LEVEL` (1557) and `GRENADIER` (949). Read off
+the bins (`tools/third_person_fires.py`'s files, every installed pack): 165 mounted missile units' riders have neither and
+shoot from `RIDER_FIRE_FORWARD_LEVEL` (2105), with `_LEFT_` / `_RIGHT_` / `_BACK_` (2108/2111/2114) beside it - Kislev's
+Horse Archers, Pistoliers, the RoR `teb_roc_montecastello`. Such a man was `F.cannot_shoot`, melee only. `fire_clip` now
+falls back to 2105, and the survey reads it too, so `data.lua` has their spawns (791 fire clips, from 625; Horse Archers
+2.244 s, 2.37 m up). Forward only: the horse faces the crosshair. 49 more mounted missile units have no rider fire clip
+at all (chariots, vehicles, a mount that shoots) and stay melee only. Live (`zz_tp_machines.lua`, Montecastello): one
+man shooting alone, clip 2105 reported playing, ammo 2160 -> 2159 -> 2158, the regiment never fired.
+
+**Sprint 1.5 (the author: "add 50% speed boost when charging/sprinting").** `SPRINT_SPEED` 1.2 -> 1.5; the charge is the
+sprint, and a regiment played whole gets it through `change_current_walk_speed`. Live (`zz_tp_run_speed.lua`, a Montante
+Greatsword): 3.35 m/s running, 4.96 sprinting, 1.48 times.
+
+**Flyers as one man (the author: "flying units still controls the whole battalion as well when moving").** They were
+played whole since 2026-10-15, when a gyro gunship's crew steered nothing. On today's steering
+(`probes/zz_tp_fly_one.lua`, Birdmen of Catrazza) one man went 14-17 m in 3 s on W, in the air and landed, the rest of
+his regiment under 2 m; so `can_fly` no longer rules one man out. **Gyrocopters are unverified** on the new steering
+(none in the test army) - if one stays put, that 2026-10-15 result still holds for them.
+
+**Found, not fixed: a flyer that lands in third person cannot take off again in that session** (`zz_tp_fly_toggle.lua`).
+The fly key lands the regiment and the button goes back to "selected" on the next press, but nobody leaves the ground -
+played whole too, so not the one-man change. A fresh session takes off, and so does the game's own button with third
+person off. Ruled out: the order gate (`P.gate`), `bm:disable_orders`, guard mode, fire at will, halt and release
+(`zz_tp_fly_gate.lua` and the scratch probes). Also seen: the man played lands about 3 s after the rest.
+
+Round 41 (2), round 42 (1), killed; round 29 and `mutants_actions` re-aimed. 389 tests. Deployed `d4aa5580`
+(`Modding Files/Backup/derpy_third_person_data_20261017_1950.pack` is the one before).

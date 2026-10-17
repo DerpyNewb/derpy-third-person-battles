@@ -12,7 +12,6 @@ SHOWS, COUNTS, CHG, RELOAD, EMPTY = ("the_action_bar_shows_what_the_unit_can_do"
 TEAM = "a_weapon_team_man_fires_alone_and_reloads_on_the_clock"
 MUTANTS = [
     # the three bugs of the morning
-    (M, "and not unit:can_fly()\n", "\n", "a_flying_unit_is_played_whole"),
     (C, "elseif clicked then -- an artillery crew swings too", "elseif clicked and not F.arty then --", "an_artillery_crew_swings_on_a_click"),
     # a weapon team's man shoots alone, his reload on the clock
     (M, "P.features.anim and F.fire_slot ~= nil\n", "P.features.anim and F.reload_slot ~= nil and F.fire_slot ~= nil\n", TEAM),

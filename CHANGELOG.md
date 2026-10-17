@@ -10,6 +10,10 @@
 - Smoother camera turning, with a Turn smoothing setting (0 turns at once).
 - First person view on V, or by zooming in all the way: from the man you play, or a unit of one.
 - Zooming in goes first person where the camera would end up in his head (on slopes, well before the closest zoom).
+- Mounted archers get their ranged mode and shoot from the saddle.
+- Sprint and charge 50% faster than the run.
+- Flying units are played as one man.
+- Known issue: a flying unit landed in third person takes off again only after third person is turned off and on.
 - Default time between swings 4 s, between jump attacks 10 s.
 
 ## 2026-10-16

@@ -8,9 +8,9 @@ local MAX_ERRORS, ZOOM_LARGE, ZOOM_NOTCH = 3, 2, 0.15
 -- standing still this long in real time. ponytail: the first half second of a pause still acts; a UI
 -- pause signal would close that gap if one is ever found.
 local PAUSE_AFTER = 0.5
--- a sprint's speed against his run (the author, 2026-10-16: "if no charge animation, add a 20% boost to speed", then
--- "20% boost even with charge animation")
-local SPRINT_SPEED = 1.2
+-- a sprint's speed against his run, the charge's too (the author, 2026-10-16: "if no charge animation, add a 20% boost
+-- to speed", then "20% boost even with charge animation"; 2026-10-17: "add 50% speed boost when charging/sprinting")
+local SPRINT_SPEED = 1.5
 
 return function(E)
 	local F, P = E.F, E.P
@@ -46,8 +46,12 @@ return function(E)
 	function E.can_shoot() return not F.cannot_shoot and F.unit:missile_range() > 0 and F.unit:ammo_left() > 0 end
 
 	-- the clip a man shoots with alone: FIRE_LEVEL, or GRENADIER for a thrower with none (measured 2026-10-15: Exalted
-	-- Plaguebearers' Death's Head, 25 units of 827 - third_person_fires.py); nil, none
-	local function fire_clip(m) if P.has_slot(m, 1557) then return 1557 elseif P.has_slot(m, 949) then return 949 end end
+	-- Plaguebearers' Death's Head, 25 units of 827 - third_person_fires.py), or RIDER_FIRE_FORWARD_LEVEL for a rider with
+	-- neither (measured 2026-10-17: 165 mounted missile units, Kislev's Horse Archers among them; the author: "are mounted
+	-- archers not supported? they are missing their ranged option"); nil, none
+	local function fire_clip(m)
+		for _, s in ipairs({1557, 949, 2105}) do if P.has_slot(m, s) then return s end end
+	end
 
 	local function capabilities(m)
 		m = m and (P.mount(m) or m)
@@ -365,8 +369,10 @@ return function(E)
 		E.log("men check on " .. F.utype .. ": " .. tostring(men_ok))
 		if not men_ok then E.once("men", "regiments are played whole: " .. tostring(why)) end
 		if S.one_man and not P.features.steer then E.once("steer", "regiments are played whole: walking command types unknown for build " .. tostring(P.build)) end
-		-- one man of a regiment, never of a flying machine (measured 2026-10-15: a gyro gunship's crew steered nothing)
-		F.model = S.one_man and men_ok and P.features.steer and not F.arty and not unit:is_war_machine() and not unit:can_fly()
+		-- one man of a regiment, flyers too (the author, 2026-10-17: "flying units still controls the whole battalion as well
+		-- when moving"; measured that day, probes/zz_tp_fly_one.lua: a Birdman steered alone in the air and landed. On
+		-- 2026-10-15's steering a gyro gunship's crew steered nothing, and flyers were played whole)
+		F.model = S.one_man and men_ok and P.features.steer and not F.arty and not unit:is_war_machine()
 			and E.move.front_man(unit) or nil
 		F.reload_slot = F.model and P.reload_slot(F.model)
 		F.thrown = false

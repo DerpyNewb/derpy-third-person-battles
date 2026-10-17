@@ -9,10 +9,11 @@ fire clip's .anm.meta (measured 2026-10-15: a rocket barrage carries 18, 1.0 to 
 the ironbreakers' blasting charge one, at 2.3 s), and no script call or context exposes them, so they are read here:
 
     land_units.man_animation -> animations/database/battle/bin/<man_animation>.bin (loose in anim2.pack, inside a
-    mod's .animpack) -> its FIRE_LEVEL row (slot 1557), else its GRENADIER row (949) -> each anim's .anm.meta -> its
-    FIRE_POS events. GRENADIER is the throw of a man with no FIRE_LEVEL (measured 2026-10-15: Exalted Plaguebearers'
-    Death's Head, hu04d_plaguebearer_favoured_missile_attack_grenadier_01, FIRE_POS at 1.962 s; 25 units of 827 throw
-    from it alone)
+    mod's .animpack) -> its FIRE_LEVEL row (slot 1557), else its GRENADIER row (949), else its RIDER_FIRE_FORWARD_LEVEL
+    row (2105) -> each anim's .anm.meta -> its FIRE_POS events. GRENADIER is the throw of a man with no FIRE_LEVEL
+    (measured 2026-10-15: Exalted Plaguebearers' Death's Head, hu04d_plaguebearer_favoured_missile_attack_grenadier_01,
+    FIRE_POS at 1.962 s; 25 units of 827 throw from it alone); RIDER_FIRE_FORWARD_LEVEL the shot of a rider with
+    neither (measured 2026-10-17: 165 mounted missile units, Kislev's Horse Archers among them)
 
 Mods are read too: every pack in the Workshop folder and every non-CA pack in data/, so the units of the mods installed
 where the pack is built are covered; a unit of a mod not installed there gets one shot (combat.lua). A path a mod ships
@@ -30,7 +31,7 @@ import read_animpack as RA  # noqa: E402
 
 DATA = os.path.dirname(DB_PACK)
 WORKSHOP = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(DATA))), "workshop", "content", "1142710")
-FIRE, GRENADIER = 1557, 949  # FIRE_LEVEL, the fire clip combat.lua plays; else the throw it plays
+FIRE, GRENADIER, RIDER_FIRE = 1557, 949, 2105  # FIRE_LEVEL, the fire clip combat.lua plays; else the throw; else a rider's
 # FIRE_LOW, FIRE_HIGH: played instead of FIRE_LEVEL for a shot that leaves low or high, each with its own muzzle
 # (measured 2026-10-15: 413 and 421 of 864 missile units have them; the drakegun's muzzle 0.40, 0.86, 1.18 m up)
 FIRE_LOW, FIRE_HIGH = 1556, 1558
@@ -165,7 +166,7 @@ def lands(packs):
     return out
 
 
-def times_of(files, man_animation, slots=(FIRE, GRENADIER)):
+def times_of(files, man_animation, slots=(FIRE, GRENADIER, RIDER_FIRE)):
     """The FIRE_POS events of the first of slots his bin has a row for."""
     b = files.get(BIN + man_animation + ".bin")
     if not b:
@@ -184,10 +185,10 @@ def times_of(files, man_animation, slots=(FIRE, GRENADIER)):
 
 def build(*specs, raises=None, runs=None):
     """land unit key -> FIRE_POS times, for every unit with a missile weapon whose fire clip carries any. specs: the
-    slot lists to read, each in order of preference (default FIRE_LEVEL, else GRENADIER); one dict per spec, or the
+    slot lists to read, each in order of preference (default FIRE_LEVEL, else GRENADIER, else RIDER_FIRE); one dict per spec, or the
     one dict when given none or one. raises: a dict to fill with each such unit's raise_lengths. runs: one to fill with
     every land unit's longest charge attack, s."""
-    specs = specs or ((FIRE, GRENADIER),)
+    specs = specs or ((FIRE, GRENADIER, RIDER_FIRE),)
     mods = mod_packs()
     files = Files(mods + [os.path.join(DATA, n) for n in CA_ANIM])
     outs = [{} for _ in specs]
