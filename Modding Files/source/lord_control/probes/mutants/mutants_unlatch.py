@@ -3,7 +3,7 @@ SLIDE, REST, SPACED = "a_step_after_the_mode_key_mid_aim_does_not_slide", "walki
 CUT, KEEP, DELAY = "a_step_cuts_the_reload_short", "a_step_does_not_cut_the_aim_or_the_firing_clip", "a_cut_reload_still_delays_the_next_shot"
 MODE, MID_AIM, XBOW = "the_mode_key_does_not_skip_the_reload", "the_mode_key_mid_aim_adds_no_wait", "a_crossbow_switching_modes_after_its_bolt_still_waits"
 PLAY = "\t\t\t\tP.play(m, WALK_1, 0)\n"
-STEER = "\t\t\tP.steer(m, x + dx * MAN_LEAD, z + dz * MAN_LEAD, run, F.face_yaw, speed)\n"
+STEER = "\t\t\tP.steer(m, x + dx * STEER_LEAD, z + dz * STEER_LEAD, run, F.face_yaw, speed)\n"
 GATE = "if shot.launched then F.ready_at = (shot.reload_at or now) + E.D.shots[F.utype][2] * E.S.reload_factor end"
 MUTANTS = [
     # the walking clip that ends a latched one (measured 2026-10-14, probes/zz_tp_unclip.lua)

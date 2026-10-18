@@ -203,8 +203,7 @@ return function(E)
 		C.drop(now)
 		F.native_attack = nil
 		F.face_yaw = nil
-		local man = F.model or F.single
-		if man then P.face(man, E.rig.yaw) end
+		if F.model then P.face(F.model, E.rig.yaw) end
 	end
 
 	local function swing(slots, primary, now, hold, mask)

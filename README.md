@@ -46,7 +46,7 @@ behind it, never the whole mod.
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 3,000 lines of Lua), the MCT page and the HUD layout |
 | `tools/` | the build, the Lua harness and its 398 tests, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 396 probe scripts run against the live game, and 61 mutation sets (768 mutants) |
+| `Modding Files/source/lord_control/probes/` | 397 probe scripts run against the live game, and 61 mutation sets (767 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs and the core plan |
 | `docs/history/` | the handoffs written as each part was measured in game, and the working ledger |
 
@@ -71,7 +71,7 @@ There is no test framework.
 - **Every rule is proven to be caught.** `probes/tp_mutate.py` plants one plausible mistake at a
   time in the shipped Lua, runs the suite, and restores the file byte for byte. It might be a
   guard dropped, a constant changed, or a branch inverted. A mutant the tests do not catch is a
-  finding, and so is an anchor that no longer matches the code. 768 mutants in 61 sets; 15 of
+  finding, and so is an anchor that no longer matches the code. 767 mutants in 61 sets; 15 of
   the oldest sets still carry stale anchors from code that was rewritten since.
 - **Measured, not assumed.** Animation slot ids, clip lengths, the camera's floor and the
   projectile release point were each read from the running game through the probes, or from

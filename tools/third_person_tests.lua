@@ -432,7 +432,12 @@ T.one_man_walks_alone = function()
 	H.step(1)
 	check(H.count("uc:goto_location") == 0, "the regiment gets no order")
 	local s = H.last("steer")
-	check(s[2] == man.id and near(s[4] - man.z, 3), "his steering point 3 m ahead")
+	-- 15 m, as a horse's and a unit of one's: at 3 m a body runs no faster than it can stop in it. Measured live
+	-- 2026-10-18 with real keys (probes/zz_tp_watch_sprint.lua; the author: "chaos spawn, charging/sprinting does not
+	-- make the unit go faster than running"): Spawn of Tzeentch at 3 m ran 1.3-3.2 m/s and sprinted 0.6-3.4, at 15 m
+	-- 4.3-4.4 and 5.8-6.7 of the 4.2 and 6.3 his walk asked; Champions of Slaanesh 1.9 / 2.0 against 7.4 / 10.4; Chosen
+	-- the same either way (sprint 4.2-4.6)
+	check(s[2] == man.id and near(s[4] - man.z, 15), "his steering point 15 m ahead: " .. tostring(s[4] - man.z))
 	check(H.count("place") == 0, "the engine starts his walk without teleporting")
 	H.up("W")
 	local steered = H.count("steer")
@@ -5307,7 +5312,7 @@ end
 -- measured live 2026-10-16 (probes/zz_tp_run_speed.lua, the Knights of the White Wolf, W held): his own walk carried the
 -- engine's run speed, 7.8 m/s, and the horse moved 1.25 m/s, sprinting 1.31 - never faster than it could stop in the 3 m
 -- to its steering point (the author: "horse speed mismatch; running but still staying at walking speed"). The point 15 m
--- ahead: 7.35 m/s, sprinting 8.89 of 9.36. A man on foot keeps 3 m
+-- ahead: 7.35 m/s, sprinting 8.89 of 9.36. A man on foot has 15 m too since 2026-10-18 (one_man_walks_alone)
 T.a_horses_steering_point_is_far_enough_to_run = function()
 	local u = playing({type = "wh_test_mount", men = 2})
 	for i, m in ipairs(u._models) do m.mount = {id = 990 + i, x = m.x, y = m.y, z = m.z, hp = 100, hp_max = 100} end

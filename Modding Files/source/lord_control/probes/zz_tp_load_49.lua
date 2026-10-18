@@ -191,10 +191,11 @@ S["/script/derpy_tp/move"] = (S["/script/derpy_tp/move"] or "") .. [==[
 -- and one man of a regiment is steered alone. Directions are relative to the camera's yaw.
 -- return function(E) -> M.
 local LEAD, REFRESH, STEER_DEG, STEER_GAP = 15, 6, 12, 0.5 -- m ahead; re-order within m; deg of turn; s between orders
-local MAN_LEAD = 3 -- one man's steering point, m ahead
--- a horse runs no faster than it can stop in the distance to its point (measured 2026-10-16, probes/zz_tp_run_speed.lua:
--- 1.25 m/s of 7.8 at 3 m, 7.35 at 15 m)
-local MOUNT_LEAD = 15
+-- his steering point, m ahead: a body runs no faster than it can stop in the distance to it. At 3 m a horse made 1.25
+-- m/s of 7.8, 7.35 at 15 (measured 2026-10-16, probes/zz_tp_run_speed.lua), the Mutalith half his speed (2026-10-18),
+-- and a monster played as one man sprinted no faster than he ran: Spawn of Tzeentch 3.4 m/s of 6.3, 6.7 at 15 m;
+-- Champions of Slaanesh 2.0, 10.4 (2026-10-18, real keys, probes/zz_tp_watch_sprint.lua). Infantry the same either way
+local STEER_LEAD = 15
 local TOOK = 2 -- m between the engine's ordered position and ours: further, the order was dropped
 local WALK_1, UNLATCH_GAP = 42, 0.3 -- 9.0 slot id; s between two walking clips
 
@@ -275,10 +276,7 @@ return function(E)
 				P.play(m, WALK_1, 0)
 				F.unlatch_at = now + UNLATCH_GAP
 			end
-			-- a unit of one from MOUNT_LEAD too: at 3 m the Mutalith ran at half his speed (measured 2026-10-18,
-			-- probes/zz_tp_entity_steer.lua)
-			local lead = F.model and P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD
-			P.steer(m, x + dx * lead, z + dz * lead, run, F.face_yaw, speed)
+			P.steer(m, x + dx * STEER_LEAD, z + dz * STEER_LEAD, run, F.face_yaw, speed)
 		end
 	end
 

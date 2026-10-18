@@ -88,7 +88,7 @@ def _walk(rel, exts):
 def manifest():
     out = [(p, p) for p in _walk(SRC, (".lua", ".xml"))]
     out += [("Modding Files/source/lord_control/derpy_lord_control.lua",) * 2]
-    out += [(p, p) for p in _walk(PROBES, (".lua", ".py"))]
+    out += [(p, p) for p in _walk(PROBES, (".lua", ".py", ".ps1"))]  # tp_keys.ps1: real keys into the game
     out += [("tools/" + n, "tools/" + n) for n in TOOLS]
     out += [("docs/superpowers/specs/" + n, "docs/design/" + n) for n in SPECS]
     out += [("docs/superpowers/plans/" + n, "docs/plans/" + n) for n in PLANS]
