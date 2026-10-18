@@ -5424,6 +5424,26 @@ T.a_flying_mount_chooses_an_available_air_attack = function()
 	check(p and p[2] == 999 and p[3] == 495, "the only available airborne attack plays")
 end
 
+-- the author, 2026-10-18: "flying units when using melee uses ground melee attacks e.g belakor". Be'lakor flies on his own
+-- wings, no mount, with ATTACK_1-5 and FLY_ATTACK_1-4 (read live that day); in the air no jump attack either, a ground clip
+T.a_flyer_with_no_mount_swings_his_air_attacks = function()
+	local slots = {[489] = true}
+	for s = 454, 458 do slots[s] = true end
+	for s = 494, 497 do slots[s] = true end
+	local u = playing({type = "wh_test_belakor", men = 1, can_fly = true, flying = true, slots = slots})
+	H.tap("Left mouse") past_swing_gap() H.tap("Right mouse")
+	local p = H.all("play")
+	local air = #p == 2
+	for _, x in ipairs(p) do air = air and x[3] >= 494 and x[3] <= 497 end
+	check(air, "in the air, his FLY_ATTACKs: " .. #p .. " clips, " .. tostring(p[1] and p[1][3]) .. ", " .. tostring(p[2] and p[2][3]))
+	H.step(H.E.S.jump_cooldown + 0.1) H.tap("E")
+	check(H.count("play") == 2, "in the air, no jump attack: " .. H.count("play"))
+	u._flying = false past_swing_gap() H.tap("Left mouse")
+	check(H.count("play") == 3 and H.last("play")[3] >= 454 and H.last("play")[3] <= 458, "landed, his ground attack: " .. tostring(H.last("play")[3]))
+	H.step(H.E.S.jump_cooldown + 0.1) H.tap("E")
+	check(H.last("play")[3] == 489, "landed, his jump attack: " .. tostring(H.last("play")[3]))
+end
+
 T.switching_to_ranged_cancels_a_native_melee_attack = function()
 	playing({type = "wh_test_ranged_lord", men = 1, range = 90, ammo = 20, slots = {[42] = true}}, {{z = 3, men = 10}})
 	H.step(0.6) H.tap("Right mouse") H.tap("Left mouse") H.step(0.6)

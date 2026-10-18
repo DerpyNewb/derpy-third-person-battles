@@ -207,13 +207,16 @@ return function(E)
 		-- rotated past them played nothing), each list on its own count
 		local first, has = F.model or P.models(F.unit)[1], {}
 		local mount = first and P.mount(first)
-		local air = mount and F.unit:is_currently_flying() and (slots == SLOTS_LMB or slots == SLOTS_RMB)
+		-- what flies: his mount, or he on his own wings (the author, 2026-10-18: "flying units when using melee uses ground
+		-- melee attacks e.g belakor"; Be'lakor has no mount, ATTACK_1-5 and FLY_ATTACK_1-4, read live)
+		local flyer = mount or first
+		local air = flyer and F.unit:is_currently_flying() and (slots == SLOTS_LMB or slots == SLOTS_RMB)
 		for _, s in ipairs(slots) do
 			if air then
-				if P.has_slot(mount, s + 40) then has[#has + 1] = s end
+				if P.has_slot(flyer, s + 40) then has[#has + 1] = s end
 			elseif first and (P.has_slot(first, s) or mount and P.has_slot(mount, s)) then has[#has + 1] = s end
 		end
-		if air and #has == 0 then for s = 454, 460 do if P.has_slot(mount, s + 40) then has[#has + 1] = s end end end
+		if air and #has == 0 then for s = 454, 460 do if P.has_slot(flyer, s + 40) then has[#has + 1] = s end end end
 		if #has == 0 then has = slots end -- a rider's fallback clip, or the attack order
 		local k = turn[slots] or 0
 		local slot = has[k % #has + 1]
@@ -237,6 +240,9 @@ return function(E)
 				if P.has_slot(mount, chosen) then P.play(mount, chosen, mask) return mount, chosen end
 				if P.has_slot(m, slot) then P.play(m, slot, mask) return m, slot end -- an artillery crewman's parent is his gun
 				return
+			end
+			if F.unit:is_currently_flying() and slot >= 454 and slot <= 460 and P.has_slot(m, slot + 40) then
+				P.play(m, slot + 40, mask) return m, slot + 40 -- FLY_ATTACK_n, as a mount's
 			end
 			local rider = slot + 1447 -- ATTACK_1 -> RIDER_ATTACK_1
 			local chosen = slot
@@ -670,9 +676,11 @@ return function(E)
 	end
 
 	-- the jump attack (the author, 2026-10-15: E): JUMPING_ATTACK_1-5 as a swing, on its own cooldown. A unit whose men
-	-- have none does nothing - no attack order in its place (F.can_jump, read off his men at the start)
+	-- have none does nothing - no attack order in its place (F.can_jump, read off his men at the start). None in the air:
+	-- a ground clip, as the charge attack's
 	function C.jump(now)
-		if C.locked(now) or not F.can_jump or now < F.next_jump or not (P.features.anim and F.men_ok) then return end
+		if C.locked(now) or not F.can_jump or now < F.next_jump or not (P.features.anim and F.men_ok)
+			or F.unit:is_currently_flying() then return end
 		F.next_jump = now + E.S.jump_cooldown
 		E.log("jump attack")
 		swing(SLOTS_JUMP, true, now)

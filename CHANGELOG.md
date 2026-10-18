@@ -11,6 +11,7 @@
 - Lords, heroes and monsters: no turn order before a swing; the swing plays where the camera looks.
 - A swing after a turn order is no longer cut by the next click or the charge run.
 - One man of a regiment sprints at full speed: monsters (Spawn of Tzeentch, Champions of Slaanesh) ran no faster than their run.
+- Flyers without a mount (Be'lakor) swing their flying attacks in the air; no jump attack in the air.
 
 ## 2026-10-17
 
