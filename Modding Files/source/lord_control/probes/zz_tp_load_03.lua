@@ -2,6 +2,8 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
+	local function pair_of(x, y, z, ax, ay, az)
+		local a = launch_angle(x, y, z, ax, ay, az)
 		local want = a >= BAND and "high" or a <= -BAND and "low" or "level"
 		local p, fires = PAIRS[want], E.D["fires_" .. want]
 		if want == "level" or not (fires and fires[F.utype]) or not P.has_slot(F.model, p[2])
@@ -254,7 +256,8 @@ S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
 		if not L then return false end
 		-- over once the engine has reported the clip and then something else; never reported, after LOCK_WAIT
 		local slot = L.m and P.anim_slot(L.m)
-		if slot == L.slot then L.seen = true end
+		-- no clip sent yet (a turn order's wait) is nothing reported: read as seen, the lock ended as the clip was sent
+		if L.m and slot == L.slot then L.seen = true end
 		local over = now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT)
 		if not over then return true end
 		-- a charge attack thrown on the run stays latched under the walk (measured 2026-10-16): freed here, or by the charge
@@ -358,10 +361,5 @@ S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
 	-- comepletely stops the player and stops its legs"). At the default mask the clip took his whole body and he stopped
 	-- for ~1.8 s (measured, standing); a step cuts a default-mask clip (the jump, measured) and a walk under a masked one
 	-- latches it (probes/zz_tp_unclip.lua). Over his torso and arms, his legs are the run's. Not measured on the run:
-	-- probes/zz_tp_charge_run.lua tries each mask
-	function C.charge_attack(now)
-		F.next_charge = now + E.S.charge_cooldown
-		E.log("charge attack")
-		swing(SLOTS_RUN, true, now, nil, TORSO_AND_ARMS)
 ]==]
 return "part 3 of 52"

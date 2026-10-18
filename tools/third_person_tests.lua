@@ -1666,6 +1666,53 @@ T.the_man_played_alone_has_no_swing_but_his_own = function()
 end
 
 -- the gate (a_queued_swing_beats_the_ticks_order) is in while a man is played alone, and only then
+-- measured live 2026-10-18 (probes/zz_tp_one_timeline.lua, the Mutalith in a lasting melee): the engine orders a unit
+-- of one's melee attack again every tick and the guard stops it, and a queued clip loses to that order as one man's did:
+-- his jump and four swings in 11 s, none played; with the gate in, all six, 0.2 s each (the author: "mutalith is spamming
+-- the melee button, its like the actions are queued or still auto attacking")
+T.the_gate_is_in_while_a_unit_of_one_is_steered_alone = function()
+	general_on() H.step(0.5)
+	check(H.E.F.single and H.last("gate") and H.last("gate")[2] == true, "on as he is taken")
+	H.tap("F2") H.step(0.5)
+	check(H.last("gate")[2] == false, "off at the end")
+	H.fresh({units = {{general = true}}, features = {input = true, anim = true, wheel = true, mailbox = false}})
+	H.tap("F2") H.step(0.5)
+	check(H.E.F.on and H.count("gate") == 0, "walked by orders, he keeps the game's own")
+end
+
+-- a unit of one steered alone swings where the camera looks at once, faced to it as one man is. The turn order and its
+-- wait were for a unit walked by orders; on him (measured live 2026-10-18, Harald standing, the camera 60 deg off his
+-- facing) the swing went through his queue and never played
+T.a_unit_of_one_swings_where_the_camera_looks_with_no_turn_order = function()
+	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	local man = H.units[1]._models[1]
+	set_view(H.E.rig.yaw + 1.05) H.step(1 / 60)
+	local faces = H.count("face")
+	H.report_ms = 300 -- the engine reports his clip late
+	H.tap("Left mouse") H.step(0.1)
+	check(H.count("uc:goto_location_angle_width") == 0, "no turn order")
+	local p = H.last("play")
+	check(p and p[2] == man.id and p[3] >= 454 and p[3] <= 463, "his swing at once: " .. tostring(p and p[3]))
+	local f = H.last("face")
+	check(H.count("face") > faces and f[2] == man.id and near(f[3], H.E.rig.yaw, 0.01), "faced to the camera")
+	check(H.count("face") - faces >= 3, "and held to it until his clip is reported: " .. H.count("face") - faces)
+end
+
+-- after the turn order a regiment played whole waits for, his lock has no clip to watch: it was read as reported
+-- (nil == nil) and ended the moment the clip was sent, and the next click or the sprint's charge clip cut it (measured
+-- live 2026-10-18; the author: "pressing charge attack as well repeats the charge animation randomly")
+T.a_swing_after_a_turn_order_keeps_its_lock_until_its_clip_plays = function()
+	whole_on({type = "wh_test_melee", men = 21, enemies = {{x = 3, z = 3, men = 10}}}) H.step(0.6)
+	set_view(H.E.rig.yaw + 2) H.step(1 / 60)
+	H.report_ms = 500 -- reported 0.5 s after it is sent
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("uc:goto_location_angle_width") == 1 and H.count("play") >= 1, "turned, then the swing")
+	check(H.E.F.lock ~= nil, "still his while the clip is not reported")
+	H.step(0.45) -- sent 0.35 s after the click, reported 0.5 s after that
+	check(H.E.F.lock ~= nil and H.E.F.lock.seen, "reported, his until it ends")
+end
+
 T.the_gate_is_in_while_a_man_is_played_alone = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	check(H.last("gate") and H.last("gate")[2] == true, "on as he is taken")
@@ -5187,8 +5234,7 @@ T.a_whole_unit_click_just_after_stopping_attacks = function()
 end
 
 T.a_whole_unit_turn_just_after_stopping_is_not_dropped = function()
-	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 3, z = 3, men = 10}}})
-	H.tap("F2") H.step(0.6)
+	whole_on({type = "wh_test_melee", men = 21, enemies = {{x = 3, z = 3, men = 10}}}) H.step(0.6)
 	H.down("W") H.step(0.6) H.up("W")
 	set_view(H.E.rig.yaw + 2) H.step(1 / 60)
 	H.tap("Left mouse") H.step(1.5)

@@ -7,6 +7,9 @@
 - Melee mode centres the camera on him; aiming an ability looks ahead again.
 - Aiming shoulder setting: Right, Left or Top.
 - Camera rig tests run on their own.
+- Lords, heroes and monsters: swings, jumps and charge attacks play in a lasting melee.
+- Lords, heroes and monsters: no turn order before a swing; the swing plays where the camera looks.
+- A swing after a turn order is no longer cut by the next click or the charge run.
 
 ## 2026-10-17
 

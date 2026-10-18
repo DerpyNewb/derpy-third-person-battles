@@ -18,6 +18,6 @@ MUTANTS = [
     (P, "\tP.gate(false) -- a battle left while it was in (no stop) left it in\n", "", LEFT),
     # in while one man is played, out at the stop
     (M, "\t\t\tF.gated = P.gate(true)\n", "\t\t\tF.gated = true\n", PLAYED),
-    (M, "\t\tif F.model then\n\t\t\tF.gated = P.gate(true)", "\t\tif true then\n\t\t\tF.gated = P.gate(true)", PLAYED),
+    (M, "\t\tif F.model or F.single_steer then\n\t\t\tF.gated = P.gate(true)", "\t\tif true then\n\t\t\tF.gated = P.gate(true)", PLAYED),
     (M, "if F.gated then F.gated = nil try(function() P.gate(false) end) end", "", PLAYED),
 ]

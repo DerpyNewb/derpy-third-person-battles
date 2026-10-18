@@ -73,8 +73,9 @@ S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
 		if not F.defend_was and unit:can_use_behaviour("defend") then F.uc:change_behaviour_active("defend", true, false) end
 		F.uc:halt()
 		F.uc:release_control()
-		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate)
-		if F.model then
+		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate); a unit of one steered
+		-- alone too, whose melee attack the engine orders again every tick (measured 2026-10-18: none of 5 played, gated 6 of 6)
+		if F.model or F.single_steer then
 			F.gated = P.gate(true)
 			if not F.gated then E.once("gate", "a swing in a melee waits for a tick without an order: no gate on build " .. tostring(P.build)) end
 		end

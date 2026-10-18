@@ -6,7 +6,7 @@ PANEL, NOHP, MEN = ("the_panel_shows_health_and_a_casters_winds", "no_health_fig
                     "men_alive_shows_for_a_regiment_only")
 MUTANTS = [
     # an action clip the engine reports late (0.19-0.31 s in a busy battle) still holds him to its end
-    (C, "if slot == L.slot then L.seen = true end", "", LATE),
+    (C, "if L.m and slot == L.slot then L.seen = true end", "", LATE),
     (C, "not L.seen and now >= L.from + LOCK_WAIT", "not L.seen and now >= L.from + 0.25", LATE),
     (C, "local LOCK_MAX, LOCK_WAIT = 3, 1", "local LOCK_MAX, LOCK_WAIT = 3, 0.25", LATE),
     # the shot leaves from the fire clip's FIRE_POS, turned with him

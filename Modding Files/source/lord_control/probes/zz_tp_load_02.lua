@@ -203,7 +203,8 @@ return function(E)
 		C.drop(now)
 		F.native_attack = nil
 		F.face_yaw = nil
-		if F.model then P.face(F.model, E.rig.yaw) end
+		local man = F.model or F.single
+		if man then P.face(man, E.rig.yaw) end
 	end
 
 	local function swing(slots, primary, now, hold, mask)
@@ -266,7 +267,8 @@ return function(E)
 		end
 		local want = math.deg(E.rig.yaw) % 360
 		local off = math.abs((want - F.unit:bearing() + 540) % 360 - 180)
-		if off > TURN_DEG and not F.model then
+		-- a unit of one steered alone is faced as one man is (act): the turn order lost his swing (measured 2026-10-18)
+		if off > TURN_DEG and not (F.model or F.single) then
 			send(function()
 				local q = F.unit:position()
 				F.uc:goto_location_angle_width(v(q:get_x(), q:get_y(), q:get_z()), want, math.max(F.unit:ordered_width(), 1), false)
@@ -358,7 +360,5 @@ return function(E)
 	end
 
 	-- the shot's pair: low or high only when he has both its clips (or neither aim, as for level) and data.lua its muzzle
-	local function pair_of(x, y, z, ax, ay, az)
-		local a = launch_angle(x, y, z, ax, ay, az)
 ]==]
 return "part 2 of 52"

@@ -262,7 +262,8 @@ return function(E)
 		end
 		local want = math.deg(E.rig.yaw) % 360
 		local off = math.abs((want - F.unit:bearing() + 540) % 360 - 180)
-		if off > TURN_DEG and not F.model then
+		-- a unit of one steered alone is faced as one man is (act): the turn order lost his swing (measured 2026-10-18)
+		if off > TURN_DEG and not (F.model or F.single) then
 			send(function()
 				local q = F.unit:position()
 				F.uc:goto_location_angle_width(v(q:get_x(), q:get_y(), q:get_z()), want, math.max(F.unit:ordered_width(), 1), false)
@@ -608,7 +609,8 @@ return function(E)
 		if not L then return false end
 		-- over once the engine has reported the clip and then something else; never reported, after LOCK_WAIT
 		local slot = L.m and P.anim_slot(L.m)
-		if slot == L.slot then L.seen = true end
+		-- no clip sent yet (a turn order's wait) is nothing reported: read as seen, the lock ended as the clip was sent
+		if L.m and slot == L.slot then L.seen = true end
 		local over = now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT)
 		if not over then return true end
 		-- a charge attack thrown on the run stays latched under the walk (measured 2026-10-16): freed here, or by the charge

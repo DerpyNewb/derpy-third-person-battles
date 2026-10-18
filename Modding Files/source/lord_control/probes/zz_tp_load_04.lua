@@ -2,6 +2,11 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
+	-- probes/zz_tp_charge_run.lua tries each mask
+	function C.charge_attack(now)
+		F.next_charge = now + E.S.charge_cooldown
+		E.log("charge attack")
+		swing(SLOTS_RUN, true, now, nil, TORSO_AND_ARMS)
 		-- steered, the clip never reports its end (latched, measured 2026-10-16): the lock ends at its length, data.lua's
 		-- longest MOVING_ATTACK off the .anim; a unit with none, at LOCK_MAX
 		local len = E.D.runs and E.D.runs[F.utype]

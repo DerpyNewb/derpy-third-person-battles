@@ -294,7 +294,8 @@ return function(E)
 			elseif E.combat.locked(gnow) and not F.lock.runs then
 				-- a swing or cheer: until the engine reports its clip (0.19-0.31 s), as a clip under way still turns him; then the
 				-- clip turns him (round 25)
-				if F.model and not (F.lock.turns and F.lock.seen) then P.face(F.model, F.lock.yaw) end
+				local m = F.model or F.single
+				if m and not (F.lock.turns and F.lock.seen) then P.face(m, F.lock.yaw) end
 			elseif not F.firing then E.move.drive(gnow, kf, kr, F.running, F.sprinting and SPRINT_SPEED or 1) end
 		end
 		-- the author, 2026-10-16: "UNRESPONSIVE UNITS WHEN IN COMBAT INCL BATTALION STILL NOT FIXED", not reproduced off the
@@ -422,8 +423,9 @@ return function(E)
 		if not F.defend_was and unit:can_use_behaviour("defend") then F.uc:change_behaviour_active("defend", true, false) end
 		F.uc:halt()
 		F.uc:release_control()
-		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate)
-		if F.model then
+		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate); a unit of one steered
+		-- alone too, whose melee attack the engine orders again every tick (measured 2026-10-18: none of 5 played, gated 6 of 6)
+		if F.model or F.single_steer then
 			F.gated = P.gate(true)
 			if not F.gated then E.once("gate", "a swing in a melee waits for a tick without an order: no gate on build " .. tostring(P.build)) end
 		end

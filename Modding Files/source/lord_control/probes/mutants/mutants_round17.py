@@ -8,7 +8,7 @@ MUTANTS = [
     (C, "\t\tif not first then return end\n", "", MANY),
     (C, "now >= shot.from + shot.times[shot.spawned + 1]", "now >= shot.from + shot.times[1]", MANY),
     # an action faces the camera as it starts and keeps that facing
-    (M, "if F.model and not (F.lock.turns and F.lock.seen) then P.face(F.model, F.lock.yaw) end", "", FACE),
-    (M, "P.face(F.model, F.lock.yaw)", "P.face(F.model, E.rig.yaw)", FACE),
+    (M, "if m and not (F.lock.turns and F.lock.seen) then P.face(m, F.lock.yaw) end", "", FACE),
+    (M, "P.face(m, F.lock.yaw)", "P.face(m, E.rig.yaw)", FACE),
     (C, "till = now + (hold or LOCK_MAX), yaw = E.rig.yaw,", "till = now + (hold or LOCK_MAX), yaw = 0,", FACE),
 ]

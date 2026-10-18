@@ -14,7 +14,7 @@ MUTANTS = [
     (C, "turns = hold ~= nil}", "turns = true}", JUMP),
     (C, "turns = hold ~= nil}", "turns = false}", TURN),
     (C, "\t\tif F.model then P.face(F.model, E.rig.yaw) end\n", "", TURN),
-    (M, "if F.model and not (F.lock.turns and F.lock.seen) then", "if F.model then", TURN),
+    (M, "if m and not (F.lock.turns and F.lock.seen) then", "if m then", TURN),
     # cheer only for a man with a CELEBRATE or TAUNT clip
     (M, CAN, "F.can_cheer = any(1094) or any(1099)", TAUNT),
     (M, CAN, "F.can_cheer = true", NOCHEER),

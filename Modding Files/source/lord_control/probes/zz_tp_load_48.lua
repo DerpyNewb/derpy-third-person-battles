@@ -298,7 +298,8 @@ return function(E)
 			elseif E.combat.locked(gnow) and not F.lock.runs then
 				-- a swing or cheer: until the engine reports its clip (0.19-0.31 s), as a clip under way still turns him; then the
 				-- clip turns him (round 25)
-				if F.model and not (F.lock.turns and F.lock.seen) then P.face(F.model, F.lock.yaw) end
+				local m = F.model or F.single
+				if m and not (F.lock.turns and F.lock.seen) then P.face(m, F.lock.yaw) end
 			elseif not F.firing then E.move.drive(gnow, kf, kr, F.running, F.sprinting and SPRINT_SPEED or 1) end
 		end
 		-- the author, 2026-10-16: "UNRESPONSIVE UNITS WHEN IN COMBAT INCL BATTALION STILL NOT FIXED", not reproduced off the

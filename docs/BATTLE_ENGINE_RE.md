@@ -121,6 +121,7 @@ start or command `3918e90`, chosen by its fragment's `+0x127c` bit 2.
 | `3919350` | the regiment's walk | the pack's guard stops it |
 | `39199f8`, `3ae1928` | the engine's moves | guard stops |
 | `3ad24b8` | the engine's melee attack | guard stops |
+| `3ad2d18` | the engine's charge | measured 2026-10-18 (`probes/zz_tp_charge_gait.lua`, Harald on CA's `attack_unit` from 45 m): his own walk for 0.4 s, then this for 5.4 s at 4.0 m/s against his run's 3.3, **no forced clip on him** (the charge cycle is his locomotion and loops), then MOVING_ATTACK_2 (485) at contact. The walk's gait byte `+0x3ae` stayed 0 throughout. The pack's sprint fakes it with the CHARGE clip (135), 0.8 s and not looping on Harald, re-sent every 0.6 s |
 | `39126f0` | stand in his state | what `walk_stop` `exe+306edd4` leaves |
 | `3919b28` | idle | |
 | `3ae2de8` | defend (block) | order kind 18 under it, measured |
@@ -220,6 +221,14 @@ case a battle was left mid-control. A build without the `queued_gate` row gets n
 Result, live (Teutogen Guard under two Clanrat units, a click every 2.4 s): 4 and 0 of 10 swings started before;
 10, 10 and 10 with it, in 200-400 ms; the same code with only the patch stubbed out, 10, 7 and 9 with waits to
 1.8 s. Shots, the horse's run speed and the no-auto-attack fragment were re-measured with it in and are unchanged.
+
+**A unit of one needs it too** (2026-10-18, `probes/zz_tp_one_timeline.lua`, the Mutalith, a jump then a click every
+0.4 s for 8 s, in melee with two Skaven units). Ungated, against Skavenslaves: the engine's melee order came back every
+tick and the guard stopped it (`melee` / stand alternating, `+0x324` = 1 on 234 frames), and the jump and four swings
+all read `c00` for 11 s, none started. With the gate in: 6 of 6, then 4 of 4 and 5 of 5 against Stormvermin, each 0.2 s
+after its send. **One gated run stalled**: right after a fresh engage, 7.4 s of stand (`39126f0`) with `+0x324` stuck
+at 1 and the queued action `c00`, until the engine's next melee order, when the parked swing started. `+0xb20` was
+not read in that run; set, it sends his update to vtable `+0x490` and past the gate. Not reproduced in two retries.
 
 **Ceiling:** while it is in, a parked action on **any** man beats that tick's order, not only his. In a battle the
 pack plays, only `P.play` parks one. A per-man version needs a code cave (memreader `code_cave`) comparing the man
