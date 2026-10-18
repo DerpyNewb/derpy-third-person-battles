@@ -1,11 +1,12 @@
 # Third person: the siege walk, the gun as the unit, the unit card report, the camera in buildings (2026-10-18 night)
 
 **Current state:** `36c14c58` copied into the Workshop folder (item 3822187184) at 23:39 with the game shut, and
-`loadfast_cache_battle.bin` deleted (section 8); **not uploaded** (the upload is the author's). It adds the camera
+`loadfast_cache_battle.bin` deleted (section 8); **uploaded 23:54** at the author's request (manifest
+2791404133276005302, `file_size` 2382006 read back; change note in `PATCH_NOTES_20261018_THIRD_PERSON.md`). It adds the camera
 fix (section 4) to `dd336125` (22:15), which is backed up as `Modding Files/Backup/derpy_third_person_workshop_20261018_233900.pack`;
 the pack before that is `..._221545.pack` (`8a2e0ab0`). Nothing in `data/`. 418 tests pass; `mutants_round51.py` and
-`mutants_round52.py` 10/10 each; 11 anchors re-aimed (section 5). The public repo is **not synced**
-(`tools/sync_third_person_repo.py`).
+`mutants_round52.py` 10/10 each; 11 anchors re-aimed (section 5). Public repo pushed as `da811c2` (README counts and
+CHANGELOG updated).
 
 Continues `HANDOFF_20261018_THIRD_PERSON_SPRINT_FLY_CHARGE_CAMERA.md`. **Overturns its section 8 in one respect:** the
 steering point is no longer a fixed 15 m for everyone - 15 m is where it starts and where it goes back to.
