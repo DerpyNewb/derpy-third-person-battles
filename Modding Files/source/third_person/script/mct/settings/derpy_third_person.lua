@@ -52,9 +52,9 @@ checkbox("camera", "camera_invert_y", "Invert up and down", "Moving the mouse up
 slider("camera", "camera_distance", "Distance behind", "Metres from the unit to the camera.", 6, 3, 15)
 local side = m:add_new_option("camera_shoulder", "dropdown")
 side:set_text("Aiming shoulder")
-side:set_tooltip_text("Which shoulder the camera sits over in ranged mode.")
+side:set_tooltip_text("Where the camera sits in ranged mode: over his right or left shoulder, or above his head.")
 side:add_dropdown_values({{key = "right", text = "Right", tt = "", is_default = true},
-	{key = "left", text = "Left", tt = "", is_default = false}})
+	{key = "left", text = "Left", tt = "", is_default = false}, {key = "top", text = "Top", tt = "", is_default = false}})
 side:set_assigned_section("camera")
 slider("camera", "camera_zoom_speed", "Zoom speed", "How fast holding + or - zooms, in tenths.", 12, 5, 30)
 slider("camera", "camera_height", "Height", "Tenths of a metre the camera sits above the unit.", 25, 10, 80)

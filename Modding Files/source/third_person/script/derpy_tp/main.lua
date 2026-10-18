@@ -191,6 +191,7 @@ return function(E)
 		if unit:number_of_men_alive() == 0 or unit:is_routing() then M.stop("unit lost") return end
 		local single = not F.model and unit:number_of_men_alive() == 1 and P.models(unit)[1]
 		if single and P.model_hp(single) <= 0 then M.stop("unit lost") return end
+		F.single = F.single_steer and single or nil
 		-- orders are off, selection is not: a click on another unit or on the ground would take the portrait
 		if bm:num_units_selected() ~= 1 or not selected(unit) then bm:clear_selection() unit:select_in_ui() end
 		if F.model and (unit:number_of_men_alive() < 2 or not P.alive(unit, F.model)) then
@@ -316,8 +317,9 @@ return function(E)
 		end
 		E.combat.crosshair((F.ranged or F.armed ~= nil) and F.dragging and not F.ui_off)
 		E.hud.update(gnow)
+		-- melee mode centres on him; an ability armed looks ahead, where its crosshair aims (combat.lua C.aim_point)
 		local ex, ey, ez, lx, ly, lz = E.rig.update(now, dt, x, y, z, F.ranged, unit:is_in_melee(),
-			cam:position():get_y(), height)
+			cam:position():get_y(), height, not F.ranged and not F.armed)
 		cam:move_to(v(ex, ey, ez), v(lx, ly, lz), 0, false, -1, false)
 		F.frames = F.frames + 1
 	end
@@ -371,7 +373,7 @@ return function(E)
 		if S.one_man and not P.features.steer then E.once("steer", "regiments are played whole: walking command types unknown for build " .. tostring(P.build)) end
 		-- one man is steered, held and guarded only on the battle thread (platform.lua's mailbox); a cave refused because a
 		-- thread was in his update goes in at a later start
-		if S.one_man and P.features.steer and not P.features.mailbox then
+		if P.features.steer and not P.features.mailbox then
 			local ok, why = check("mailbox", P.check_mailbox)
 			if not ok then E.once("mailbox", "regiments are played whole: " .. tostring(why)) end
 		end
@@ -380,6 +382,10 @@ return function(E)
 		-- 2026-10-15's steering a gyro gunship's crew steered nothing, and flyers were played whole)
 		F.model = S.one_man and men_ok and P.features.steer and P.features.mailbox and not F.arty and not unit:is_war_machine()
 			and E.move.front_man(unit) or nil
+		-- a unit of one walks steered alone too, his sprint in the steer (the author, 2026-10-18; CA's walk speed scalar
+		-- leaves a single entity's speed alone, measured that day): main.lua's frame keeps F.single, his model
+		F.single_steer = not F.model and men_ok and P.features.steer and P.features.mailbox and not F.arty
+			and not unit:is_war_machine()
 		F.reload_slot = F.model and P.reload_slot(F.model)
 		F.thrown = false
 		learn_shot(unit)

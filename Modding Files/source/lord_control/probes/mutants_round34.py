@@ -7,9 +7,9 @@ BLOCK = "a_swing_held_back_by_a_block_still_plays"
 NEVER = "a_swing_that_never_plays_gives_him_back_after_lock_max"
 MUTANTS = [
     # the horse's steering point
-    (V, "local lead = P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD", "local lead = MAN_LEAD", HORSE),
+    (V, "local lead = F.model and P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD", "local lead = MAN_LEAD", HORSE),
     (V, "local MOUNT_LEAD = 15", "local MOUNT_LEAD = 3", HORSE),
-    (V, "local lead = P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD", "local lead = P.same(m, F.model) and MOUNT_LEAD or MAN_LEAD",
+    (V, "local lead = F.model and P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD", "local lead = F.model and P.same(m, F.model) and MOUNT_LEAD or MAN_LEAD",
      "one_man_walks_alone"),
     # the shot's lead timed from the raise's send
     (C, "now >= shot.sent + len - AIM_LEAD then", "now >= shot.at + len - AIM_LEAD then", SHOT),

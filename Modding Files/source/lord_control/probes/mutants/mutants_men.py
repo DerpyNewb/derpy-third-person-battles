@@ -6,7 +6,7 @@ MUTANTS = [
     (L, IMG, 'if false then', "men_check_refuses_any_man_whose_marker_is_outside_the_exe"),
     (L, "local s = mr.tostring(mr.read_pointer(m, 0))", "local s = mr.tostring(mr.read_pointer(ms[1], 0))",
      "men_check_refuses_any_man_whose_marker_is_outside_the_exe"),
-    ("script/derpy_tp/main.lua", "and not unit:is_war_machine()\n", "\n", "a_war_machine_is_played_whole"),
+    ("script/derpy_tp/main.lua", "and not unit:is_war_machine()\n\t\t\tand E.move.front_man(unit)", "\n\t\t\tand E.move.front_man(unit)", "a_war_machine_is_played_whole"),
     (L, IMG, 'if false then', OUT),
     (L, IMG, 'if s < lo then', OUT),
     (L, IMG, 'if s >= hi then', OUT),

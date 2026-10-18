@@ -13,7 +13,7 @@ local ok, res = pcall(function()
 	local army, u = bm:get_player_army(), nil
 	for i = 1, army:units():count() do
 		local x = army:units():item(i)
-		if x:type() == want and x:number_of_men_alive() > 1 then u = x break end
+		if x:type() == want and x:number_of_men_alive() > 0 then u = x break end
 	end
 	if not u then return "no " .. want end
 	local p = u:position()

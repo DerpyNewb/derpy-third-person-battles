@@ -30,7 +30,7 @@ MUTANTS = [
     (P, "\t\tif not block then return false end\n\t\tpost(", "\t\tpost(", NONE),
     (P, "P.mailbox, P.features.mailbox = block, true", "P.mailbox, P.features.mailbox = block, false", IN),
     # main: no one man without it, and asked again at the next start
-    (M, "and P.features.steer and P.features.mailbox and not F.arty", "and P.features.steer and not F.arty", WHOLE),
-    (M, "if S.one_man and P.features.steer and not P.features.mailbox then", "if false then", WHOLE),
+    (M, "S.one_man and men_ok and P.features.steer and P.features.mailbox and not F.arty", "S.one_man and men_ok and P.features.steer and not F.arty", WHOLE),
+    (M, "if P.features.steer and not P.features.mailbox then", "if false then", WHOLE),
     (M, 'if not ok then E.once("mailbox", "regiments are played whole: " .. tostring(why)) end', "", WHOLE),
 ]

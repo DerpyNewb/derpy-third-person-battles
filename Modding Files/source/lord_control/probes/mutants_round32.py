@@ -21,7 +21,7 @@ MUTANTS = [
      "tyrion_swings_through_his_mount_without_rider_attack_one"),
     (C, "P.play(mount, chosen, mask) return mount, chosen", "P.play(mount, 454, mask) return mount, 454",
      "a_riders_jump_plays_the_mounts_jump"),
-    (C, "local on = want and first and P.has_slot(first, CHARGE) and P.features.anim and F.men_ok",
+    (C, "local on = want and first and P.has_slot(first, clip) and P.features.anim and F.men_ok",
      "local on = want and F.can_charge and P.features.anim and F.men_ok", "a_mount_can_sprint_without_a_moving_attack"),
     (C, "first = first and (P.mount(first) or first)\n\t\tlocal function has(list)",
      "local function has(list)", "a_riders_cheer_plays_the_mounts_celebration"),

@@ -34,10 +34,11 @@ return function(E)
 	end
 
 	function M.halt()
-		if F.model and P.alive(F.unit, F.model) then
-			local x, _, z = P.model_pos(F.model)
+		local man = F.model or F.single
+		if man and P.alive(F.unit, man) then
+			local x, _, z = P.model_pos(man)
 			F.man_hold = {x, z}
-			P.hold(F.model, x, z, F.face_yaw or E.rig.yaw)
+			P.hold(man, x, z, F.face_yaw or E.rig.yaw)
 		end
 		if F.driving then
 			F.uc:halt()
@@ -51,8 +52,10 @@ return function(E)
 	-- P.steer starts the engine's walking command when needed and P.hold stops it natively. Holding his own
 	-- point keeps him out of his formation slot; the engine moves him and handles collisions, with no
 	-- position nudges.
+	-- F.model, one man of a regiment; F.single, a unit of one (main.lua)
 	local function man_drive(now, dx, dz, run, speed)
-		local m = P.mount(F.model) or F.model
+		local man = F.model or F.single
+		local m = P.mount(man) or man
 		local x, _, z = P.model_pos(m)
 		-- he faces where he walks and keeps that facing when he stops, as a single entity does (the author, 2026-10-15:
 		-- steered with the camera's facing, a man pressed left walked mostly forward, measured). A swing or a shot
@@ -83,7 +86,9 @@ return function(E)
 				P.play(m, WALK_1, 0)
 				F.unlatch_at = now + UNLATCH_GAP
 			end
-			local lead = P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD
+			-- a unit of one from MOUNT_LEAD too: at 3 m the Mutalith ran at half his speed (measured 2026-10-18,
+			-- probes/zz_tp_entity_steer.lua)
+			local lead = F.model and P.same(m, F.model) and MAN_LEAD or MOUNT_LEAD
 			P.steer(m, x + dx * lead, z + dz * lead, run, F.face_yaw, speed)
 		end
 	end
@@ -99,7 +104,7 @@ return function(E)
 			local n = math.sqrt(dx * dx + dz * dz)
 			dx, dz = dx / n, dz / n
 		end
-		if F.model then man_drive(now, dx, dz, run, speed) return end
+		if F.model or F.single then man_drive(now, dx, dz, run, speed) return end
 		if kf == 0 and kr == 0 then M.halt() return end
 		local q = F.unit:position()
 		local px, py, pz = q:get_x(), q:get_y(), q:get_z()
@@ -114,7 +119,9 @@ return function(E)
 		if need then
 			F.gx, F.gz, F.dx, F.dz = px + dx * LEAD, pz + dz * LEAD, dx, dz
 			F.uc:goto_location(v(F.gx, py, F.gz), run)
-			-- CA's scalar on the speed of the order just given (every order resets it, CA's doc)
+			-- CA's scalar on the speed of the order just given (every order resets it, CA's doc). Measured 2026-10-18
+			-- (probes/zz_tp_walk_scalar.lua): Chaos Marauders at the run 2.41 m/s, x1.5 4.14; a single entity's speed it
+			-- leaves alone, at any scale, run or walk (Harald 2.74, the Mutalith 5.7)
 			if speed ~= 1 then F.uc:change_current_walk_speed(speed) end
 			F.uc:release_control()
 			F.kf, F.kr, F.run, F.speed, F.driving, F.last_order = kf, kr, run, speed, true, now

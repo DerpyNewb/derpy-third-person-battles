@@ -31,7 +31,7 @@ return function(mct, K)
 	S.smooth = get("camera_smoothing", 5) / 100
 	S.invert_y = get("camera_invert_y", false) == true
 	S.distance = get("camera_distance", 6)
-	S.shoulder = get("camera_shoulder", "right") == "left" and -1 or 1
+	S.shoulder = ({left = -1, right = 1, top = 0})[get("camera_shoulder", "right")] or 1
 	S.zoom_rate = get("camera_zoom_speed", 12) / 10
 	S.height = get("camera_height", 25) / 10
 	S.lag = get("camera_lag", 45) / 100

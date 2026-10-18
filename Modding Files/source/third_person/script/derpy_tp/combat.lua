@@ -33,6 +33,7 @@ local SHOT_CLEAR = 1.1
 local THROW_MS = 2200
 -- the charge run: CHARGE, sent again inside its cycle (measured 2026-10-15: under 1 s, mask 6 only, he keeps his speed)
 local CHARGE, CHARGE_GAP, WALK_1 = 135, 0.6, 42
+local FLY_CHARGE = 102 -- FLY_CHARGE_AIR_TO_AIR
 -- the exe's body-mask enum (exe+3926238, read 2026-10-16): 0 NONE (the clip's own metadata), 1 TORSO_AND_ARMS,
 -- 2 SPINE_AND_CHILDREN, 3 NECK_AND_CHILDREN, 4 LEFT_ARM, 5 RIGHT_ARM, 6 FULL_BODY
 local TORSO_AND_ARMS = 1
@@ -628,7 +629,7 @@ return function(E)
 	function C.attack(now, clicked, held)
 		C.flush(now)
 		if C.locked(now) then return end
-		if clicked and F.charging and F.can_charge and now >= F.next_charge then C.charge_attack(now) return end
+		if clicked and F.charging and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
 		if F.ranged then
 			if F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
 		elseif clicked then -- an artillery crew swings too (the author, 2026-10-15: a mortar team had no melee)
@@ -676,14 +677,17 @@ return function(E)
 	end
 
 	-- the charge (the author, 2026-10-15: "charging running should be triggered with q as a continuious press"): the
-	-- sprint plays CHARGE for as long as it lasts; over, WALK_1 at mask 0 ends it (move.lua's unlatch)
+	-- sprint plays CHARGE for as long as it lasts; over, WALK_1 at mask 0 ends it (move.lua's unlatch). In the air, his
+	-- FLY_CHARGE_AIR_TO_AIR, else none (the author, 2026-10-18: "charging belakors triggers his land charge run"; 86 of the
+	-- 123 skeletons that fly have one, read 2026-10-18), and no charge attack: that is a ground clip
 	function C.charge_run(now, want)
 		local first = F.model or P.models(F.unit)[1]
 		first = first and (P.mount(first) or first)
-		local on = want and first and P.has_slot(first, CHARGE) and P.features.anim and F.men_ok
+		local clip = F.unit:is_currently_flying() and FLY_CHARGE or CHARGE
+		local on = want and first and P.has_slot(first, clip) and P.features.anim and F.men_ok
 		if F.lock then -- the charge attack, thrown on the run: neither clip over it
 		elseif on and now >= (F.charge_at or 0) then
-			each(function(m) m = P.mount(m) or m if P.has_slot(m, CHARGE) then P.play(m, CHARGE, 6) end end)
+			each(function(m) m = P.mount(m) or m if P.has_slot(m, clip) then P.play(m, clip, 6) end end)
 			F.charge_at = now + CHARGE_GAP
 		elseif not on and F.charging then
 			each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end)

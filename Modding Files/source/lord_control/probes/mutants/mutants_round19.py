@@ -33,7 +33,7 @@ MUTANTS = [
     (G, "R.boom = math.min(R.cap and R.cap[1] or 1, R.boom", "R.boom = math.min(1, R.boom", ROOF),
     (G, "if c and ((R.sx - c[2])", "if false and ((R.sx - c[2])", ROOF),
     (G, "or math.abs(R.yaw - c[4]) > TURNED) then", "or false) then", ROOF),
-    (M, "cam:position():get_y(), height)", "nil, height)", ROOF),
+    (M, "cam:position():get_y(), height, not F.ranged", "nil, height, not F.ranged", ROOF),
     # the man's own hit points when one man is played
     (U, "width(\"health_fill\", cur and cur / max or u:unary_hitpoints())", "width(\"health_fill\", u:unary_hitpoints())", OWN),
     (U, "\t\t\t\tlocal cur, max = own_hp()\n", "\t\t\t\tlocal cur, max\n", OWN),

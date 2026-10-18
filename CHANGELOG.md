@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-18
+
+- Lords, heroes and monsters sprint faster: a unit of one is steered like the man you play.
+- Flying units play their flying charge in the air, not the ground charge run; no charge attack in the air.
+- Melee mode centres the camera on him; aiming an ability looks ahead again.
+- Aiming shoulder setting: Right, Left or Top.
+- Camera rig tests run on their own.
+
 ## 2026-10-17
 
 - Ranged men without a reload animation (grenadiers, crossbows, gunshields) wait the full reload time.

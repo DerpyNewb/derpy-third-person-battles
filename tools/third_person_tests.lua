@@ -24,6 +24,7 @@ T.settings_reads_mct = function()
 	check(S.keys.forward == 0x26, "forward rebound to Up")
 	check(near(S.sensitivity, 0.008), "sensitivity 8 -> 0.008")
 	check(S.shoulder == -1 and S.one_man == false, "shoulder and one man")
+	check(settings_with({camera_shoulder = "top"}).shoulder == 0, "top: neither shoulder")
 end
 
 -- the author, 2026-10-15: "add camera customizations in the mct option, maybe add attack cooldown and other effects"
@@ -231,7 +232,10 @@ T.platform_split_is_float32_exact = function()
 	end
 end
 
+-- its own battle: run alone (as tp_mutate.py runs a test) the rig found no bm and every rig test failed, whatever it
+-- checked (2026-10-18)
 local function a_rig(S)
+	H.fresh()
 	local settings = assert(loadfile("/script/derpy_tp/settings"))()
 	local E = {S = S or settings(nil, H.K)}
 	return assert(loadfile("/script/derpy_tp/rig"))()(E), E
@@ -272,12 +276,30 @@ end
 
 T.rig_shoulder_side = function()
 	local settings = assert(loadfile("/script/derpy_tp/settings"))()
-	for _, side in ipairs({{"right", 1}, {"left", -1}}) do
+	local up = {}
+	for _, side in ipairs({{"right", 1}, {"left", -1}, {"top", 0}}) do
 		local R = a_rig(settings(H.mct_stub({camera_shoulder = side[1]}), H.K))
 		R.start(0, 0, 0, 0, 0, 1, true)
-		local ex = R.update(1, 1, 0, 0, 0, true)
+		local ex, ey = R.update(1, 1, 0, 0, 0, true)
 		check(near(ex, side[2] * 1.0, 0.01), side[1] .. " shoulder puts the eye at x=" .. side[2] .. ", got " .. ex)
+		up[side[1]] = ey
 	end
+	-- the author, 2026-10-17: "shoulder either left right or top on options, right as default". Over his head, the eye
+	-- above a shoulder's so the crosshair clears his head, not so far above that he leaves the view (2026-10-18)
+	check(up.top > up.right + 0.2 and up.top < up.right + 0.5 and near(up.left, up.right),
+		"top sits a little higher: " .. up.top .. " against " .. up.right)
+end
+
+-- the author, 2026-10-17: "can the camera center be at the character?" - "center when melee". Centred, the camera looks
+-- at him, not 6 m past him; not centred, 6 m ahead
+T.rig_looks_at_him_when_centred = function()
+	local R = a_rig()
+	R.start(0, 0, 0, 0, 0, 1, false)
+	-- from its first frame: melee mode starts centred
+	local _, _, _, lx, _, lz = R.update(1, 0.001, 0, 0, 0, false, false, nil, nil, true)
+	check(near(lx, 0, 0.01) and near(lz, 0, 0.01), "centred: at him: " .. lx .. "," .. lz)
+	_, _, _, lx, _, lz = R.update(2, 5, 0, 0, 0, false, false, nil, nil, false)
+	check(near(lz, 6, 0.01), "not centred: 6 m ahead: " .. lz)
 end
 
 T.rig_zoom_is_clamped = function()
@@ -290,6 +312,12 @@ T.rig_zoom_is_clamped = function()
 end
 
 local function general_on() H.fresh() H.tap("F2") end
+-- a regiment played whole walks by move orders; a unit of one is steered alone, as one man is (2026-10-18)
+local function whole_on(o)
+	H.fresh({units = {{general = true}, o or {type = "wh_test_melee", men = 21}}, enemies = o and o.enemies,
+		mct = {combat_one_man = false}})
+	H.select(H.units[2]) H.tap("F2")
+end
 
 -- the view put somewhere at once, as if the mouse had settled there: written alone, R.yaw and R.pitch ease back
 local function set_view(yaw, pitch)
@@ -379,8 +407,8 @@ T.looking_up_the_camera_comes_in_rather_than_being_lifted = function()
 	check(H.eye.z > -6, "by coming in toward him: z " .. H.eye.z)
 end
 
-T.walking_orders_a_single_entity = function()
-	general_on()
+T.walking_orders_a_regiment_played_whole = function()
+	whole_on()
 	H.step(0.5) -- clear of the start's halt: an order inside 0.5 s of it is dropped
 	H.down("W")
 	H.step(3)
@@ -1276,7 +1304,9 @@ T.ability_ground_lands_on_the_crosshair = function()
 	H.fresh({units = {{general = true, abilities = {BARRAGE}}}})
 	H.tap("F2")
 	H.step(0.1)
-	cast_key("1")
+	-- melee mode looks at him; armed, the view eases out to look ahead, and the click lands where it then meets the ground
+	H.tap("1") H.step(1)
+	H.tap("Left mouse") H.step(1 / 60)
 	local c = H.last("uc:perform_special_ability_ground")
 	check(c and c[3] == BARRAGE, "cast on the ground")
 	check(c[4].z > 30 and c[4].z < 40 and near(c[4].x, 0, 0.01), "where the view meets the ground, ~37 m ahead: " .. c[4].z)
@@ -1289,6 +1319,18 @@ T.ability_enemy_goes_to_the_unit_on_the_ray = function()
 	cast_key("1")
 	local c = H.last("uc:perform_special_ability")
 	check(c and c[3] == FIREBALL and c[4] == H.enemies[2], "the enemy straight ahead, not the one 30 m aside")
+end
+
+-- melee mode centres the camera on him (the author, 2026-10-17: "center when melee"); an ability armed, it looks ahead
+-- again, where its crosshair aims (combat.lua C.aim_point marches the camera's ray)
+T.melee_mode_centres_the_camera_on_him_but_not_aiming_an_ability = function()
+	H.fresh({units = {{general = true, abilities = {FIREBALL}}}, enemies = {{z = 50}}})
+	H.tap("F2")
+	H.step(1)
+	check(near(H.look.x, 0, 0.05) and near(H.look.z, 0, 0.05), "melee mode: at him: " .. H.look.x .. "," .. H.look.z)
+	H.tap("1")
+	H.step(1)
+	check(H.E.F.armed and H.look.z > 5, "an ability armed: ahead again: " .. H.look.z)
 end
 
 T.ability_unknown_kind_casts_on_self = function()
@@ -1712,7 +1754,7 @@ end
 -- (round 25: every order the script sends now waits STEER_GAP, so the drop is the engine's own - an order the script did
 -- not send, or a window wider than the 0.5 s measured)
 T.a_walk_order_the_engine_dropped_is_sent_again = function()
-	general_on()
+	whole_on()
 	H.step(1)
 	H.E.F.unit._order_t = H.T -- an order the script never saw, just now
 	H.down("W") H.step(2)
@@ -1723,7 +1765,7 @@ T.a_walk_order_the_engine_dropped_is_sent_again = function()
 end
 
 T.walking_orders_keep_half_a_second_apart = function()
-	general_on()
+	whole_on()
 	H.step(0.5) -- clear of the start's halt: an order inside 0.5 s of it is dropped
 	H.down("W")
 	H.step(0.1)
@@ -2367,6 +2409,15 @@ end
 
 -- seen in game 2026-10-14: a lord in a war machine (Greybeard's tank, 5 crew, not artillery) was steered as one
 -- crewman, who cannot leave his vehicle: nothing moved
+-- a war machine of one (a steam tank) is not steered alone: the mailbox is unmeasured on one, and it walks by orders
+T.a_war_machine_of_one_walks_by_orders = function()
+	H.fresh({units = {{general = true, men = 1, war_machine = true}}})
+	H.tap("F2") H.step(0.5)
+	H.down("W") H.step(0.1)
+	check(H.count("steer") == 0 and H.last("uc:goto_location"), "a move order: " .. H.count("steer"))
+	H.up("W")
+end
+
 T.a_war_machine_is_played_whole = function()
 	H.fresh({units = {{general = true, men = 5, war_machine = true}}})
 	H.tap("F2") H.step(0.5) -- clear of the start's halt: an order inside 0.5 s of it is dropped
@@ -3027,9 +3078,9 @@ T.arming_stops_ground_fire = function()
 	check(H.E.F.firing, "firing at the ground")
 	H.tap("1") H.step(1 / 60)
 	check(H.E.F.armed and not H.E.F.firing, "armed: the fire order is stopped")
-	local gotos = H.count("uc:goto_location")
+	local steers = H.count("steer")
 	H.down("W") H.step(2) H.up("W")
-	check(H.count("uc:goto_location") > gotos, "and W walks him while armed")
+	check(H.count("steer") > steers, "and W walks him while armed")
 end
 
 T.the_casting_click_fires_no_shot = function()
@@ -3491,6 +3542,37 @@ T.the_charge_attack_cools_down = function()
 	H.up("Shift") H.up("W")
 end
 
+-- the author, 2026-10-17: "disable charge when flying"; 2026-10-18: "is there a charge run for flying units? charging
+-- belakors triggers his land charge run". In the air the sprint plays his own fly charge, FLY_CHARGE_AIR_TO_AIR (102; 86
+-- of the 123 skeletons that fly have one, Be'lakor's a 1.2 s loop, read 2026-10-18), never the ground CHARGE, and a click
+-- is his air swing, not the ground charge attack; landed, the ground charge is back
+local FLY_CHARGE = 102
+local function fly_charges() local n = 0 for _, c in ipairs(H.all("play")) do if c[3] == FLY_CHARGE and c[4] == 6 then n = n + 1 end end return n end
+T.in_the_air_the_sprint_plays_his_fly_charge = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40, can_fly = true, flying = true})
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(1)
+	check(charges() == 0 and fly_charges() > 0, "flying: his fly charge, not the ground one: " .. charges() .. ", " .. fly_charges())
+	H.tap("Left mouse") H.step(0.1)
+	check(runs() == 0, "flying: no charge attack, " .. runs())
+	H.up("Shift") H.step(5)
+	u._flying = false
+	H.down("Shift") H.step(1)
+	check(charges() > 0, "landed: the charge again")
+	H.up("Shift") H.up("W")
+end
+
+T.a_flyer_with_no_fly_charge_plays_no_charge_in_the_air = function()
+	playing({type = "wh_test_melee", men = 21, x = 40, can_fly = true, flying = true, slots = {[135] = true, [42] = true, [454] = true}})
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(1)
+	check(charges() == 0 and fly_charges() == 0, "no fly charge: no clip, " .. charges() .. ", " .. fly_charges())
+	H.up("Shift") H.step(0.3)
+	-- and none to end one: no WALK_1 for a charge that never ran
+	check(#H.all("play") == 0, "nothing sent, " .. #H.all("play"))
+	H.up("W")
+end
+
 T.no_charge_for_a_unit_without_the_clips = function()
 	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [42] = true}}, {{x = 40, z = 20}})
 	H.down("W") H.step(0.3)
@@ -3668,7 +3750,7 @@ end
 
 -- a regiment steered whole: the attack is no reason to stop its run either
 T.a_regiment_throws_the_charge_attack_on_the_run = function()
-	general_on() H.step(0.5)
+	whole_on() H.step(0.5)
 	H.down("W") H.down("Shift") H.step(0.6)
 	local halts = H.count("uc:halt")
 	H.tap("Left mouse") H.step(0.1)
@@ -3810,7 +3892,7 @@ end
 
 -- a regiment played whole sprints too: its move order at the run
 T.a_unit_played_whole_sprints_at_the_run = function()
-	general_on() H.step(0.5)
+	whole_on() H.step(0.5)
 	H.tap("Z") H.down("W") H.step(0.6)
 	check(H.last("uc:goto_location")[4] == false, "walking")
 	H.down("Shift") H.step(0.6)
@@ -4685,9 +4767,57 @@ T.a_sprint_is_half_again_as_fast = function()
 	H.up("W")
 end
 
+-- a lord, hero or monster walks steered alone, as one man does (the author, 2026-10-17: "charging doesnt even speedup
+-- units"; 2026-10-18 chose it). CA's walk speed scalar leaves a single entity's speed alone at any scale, run or walk
+-- (measured 2026-10-18, probes/zz_tp_walk_scalar.lua: Harald 2.74 m/s, the Mutalith 5.7); steered through the mailbox and
+-- guarded he sprints (probes/zz_tp_entity_steer.lua: Harald 2.89 to 4.11, the Mutalith 5.6 to 7.45, Be'lakor flying 8.77
+-- to 13), toward a point 15 m ahead: at 3 m the Mutalith ran at half his speed
+T.a_single_entity_is_steered_alone_and_sprints = function()
+	general_on() H.step(0.5)
+	local guards = H.count("guard")
+	H.down("W") H.step(0.6)
+	local s = H.last("steer")
+	check(s and H.count("uc:goto_location") == 0, "W steers him: no move order")
+	check(near(s[4] - H.units[1]._models[1].z, 15, 0.01), "toward a point 15 m ahead: " .. tostring(s and s[4]))
+	check(H.count("guard") > guards, "his own unit's orders on him stopped as he walks")
+	H.down("Shift") H.step(0.6)
+	check(near(H.last("steer")[7], 1.5) and H.count("uc:change_current_walk_speed") == 0, "the sprint: 1.5 times, in the steer")
+	H.up("Shift") H.up("W") H.step(0.1)
+	check(H.last("hold"), "let go: held")
+end
+
+-- with one man off too: that setting is the regiments' (the mailbox goes in at the first start that wants it)
+T.a_single_entity_is_steered_with_one_man_off = function()
+	H.fresh({units = {{general = true}}, features = {input = true, anim = true, wheel = true, mailbox = "unchecked"},
+		mct = {combat_one_man = false}})
+	H.tap("F2") H.step(0.5)
+	H.down("W") H.step(0.6)
+	check(H.count("steer") > 0 and H.count("uc:goto_location") == 0, "steered: " .. H.count("steer"))
+	H.up("W")
+end
+
+-- F2 off in mid-walk holds him: a walk left running keeps him going (platform.lua P.hold)
+T.f2_off_in_mid_walk_holds_a_single_entity = function()
+	general_on() H.step(0.5)
+	H.down("W") H.step(0.6)
+	local holds = H.count("hold")
+	H.tap("F2") H.step(0.1)
+	check(H.count("hold") > holds, "held as third person ends")
+	H.up("W")
+end
+
+-- no mailbox, he walks by move orders as before
+T.a_single_entity_with_no_mailbox_walks_by_orders = function()
+	H.fresh({units = {{general = true}}, features = {input = true, anim = true, wheel = true, mailbox = false}})
+	H.tap("F2") H.step(0.5)
+	H.down("W") H.step(0.6)
+	check(H.count("steer") == 0 and H.last("uc:goto_location"), "a move order")
+	H.up("W")
+end
+
 -- a regiment played whole: CA's walk speed scalar, after each order at the sprint (it resets with every order)
 T.a_unit_played_whole_sprints_half_again_as_fast = function()
-	general_on() H.step(0.5)
+	whole_on() H.step(0.5)
 	H.down("W") H.step(0.6)
 	check(H.count("uc:change_current_walk_speed") == 0, "running: no scalar")
 	H.down("Shift") H.step(0.6)
@@ -5068,8 +5198,8 @@ end
 
 -- an order waiting for its gap when third person ends is not sent in the next session
 T.an_order_waiting_at_f2_is_not_sent_later = function()
-	H.fresh({units = {{general = true, men = 1, slots = {[42] = true}}}, enemies = {{x = 3, z = 3, men = 10}}})
-	H.tap("F2") H.step(0.6)
+	whole_on({type = "wh_test_melee", men = 21, slots = {[42] = true}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.step(0.6)
 	H.down("W") H.step(0.6) H.up("W") H.step(1 / 60)
 	H.tap("Left mouse") H.tap("F2") H.step(0.1)
 	H.tap("F2") H.step(1)

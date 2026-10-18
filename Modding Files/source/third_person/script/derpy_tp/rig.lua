@@ -4,6 +4,10 @@
 -- return function(E) -> R. Reads E.S at every call, since settings are re-read at each toggle.
 local K_POS, LOOK_H, AHEAD = 20, 1.8, 6 -- the lag, height and aiming distance are settings (S.lag, S.height, S.aim_back)
 local OTS_SIDE, OTS_HEIGHT, OTS_AHEAD, OTS_RATE = 1.0, 2.0, 30, 4 -- OTS_RATE also eases the melee distance in and out
+-- the shoulder set to top (the author, 2026-10-17: "shoulder either left right or top on options"): over his head, his
+-- head just under the crosshair. The view is about 16 degrees each way up and down (measured 2026-10-18 off a shoulder
+-- screenshot); at 3.0 a rider (zoom 2) was out of the bottom of it, at 2.3 a man's head sits ~9 degrees under the centre
+local OTS_TOP = 2.3
 local PITCH_MIN, PITCH_MAX, ZOOM_MIN, ZOOM_MAX = -0.25, 1.1, 0.6, 6
 -- m the eye keeps over the ground: the engine's own floor even at change_height_range(0, 100) (measured 2026-10-15:
 -- asked 0.53 and 1.09, it put the eye at 1.58 and 1.52, lifting the whole view)
@@ -25,7 +29,7 @@ return function(E)
 
 	function R.start(now, x, y, z, yaw, zoom, ranged)
 		R.samples, R.sx, R.sy, R.sz = {{now, x, y, z}}, x, y, z
-		R.yaw, R.pitch, R.zoom, R.ots, R.close = yaw, 0, zoom, ranged and 1 or 0, 0
+		R.yaw, R.pitch, R.zoom, R.ots, R.close, R.centre = yaw, 0, zoom, ranged and 1 or 0, 0, ranged and 0 or 1
 		R.want_yaw, R.want_pitch = yaw, 0
 		R.ey, R.ey1, R.ey2, R.boom, R.cap = nil, nil, nil, 1, nil
 		-- no eye until this session's first frame: the aim's "no eye yet" reads R.ex, and the last session's x with this
@@ -53,10 +57,13 @@ return function(E)
 		local dist = S.distance + (math.min(S.melee_distance, S.distance) - S.distance) * R.close
 		local back, lift = dist * zm * math.cos(R.pitch), dist * zm * math.sin(R.pitch)
 		local ex, ey, ez = R.sx - fx * back, R.sy + S.height * zm + lift, R.sz - fz * back
-		local lx, ly, lz = R.sx + fx * AHEAD * zm, R.sy + LOOK_H * zm, R.sz + fz * AHEAD * zm
+		-- centred as far as R.centre, it looks at him (the author, 2026-10-17: "center when melee")
+		local ahead = AHEAD * zm * (1 - R.centre)
+		local lx, ly, lz = R.sx + fx * ahead, R.sy + LOOK_H * zm, R.sz + fz * ahead
 		if R.ots > 0.001 then
 			local rx, rz = fz * S.shoulder, -fx * S.shoulder
-			local ox, oy, oz = R.sx + (rx * OTS_SIDE - fx * S.aim_back) * zm, R.sy + OTS_HEIGHT * zm, R.sz + (rz * OTS_SIDE - fz * S.aim_back) * zm
+			local up = S.shoulder == 0 and OTS_TOP or OTS_HEIGHT
+			local ox, oy, oz = R.sx + (rx * OTS_SIDE - fx * S.aim_back) * zm, R.sy + up * zm, R.sz + (rz * OTS_SIDE - fz * S.aim_back) * zm
 			local c, sn = math.cos(R.pitch), math.sin(R.pitch)
 			local ax, ay, az = ox + fx * c * OTS_AHEAD, oy - sn * OTS_AHEAD, oz + fz * c * OTS_AHEAD
 			local k = R.ots
@@ -89,8 +96,8 @@ return function(E)
 	end
 
 	-- melee: his unit fights hand to hand, and the camera comes in to S.melee_distance (the author, 2026-10-15)
-	-- height: first person, out of a man that tall; nil, behind him
-	function R.update(now, dt, x, y, z, ranged, melee, got_y, height)
+	-- height: first person, out of a man that tall; nil, behind him. centre: it looks at him, not ahead
+	function R.update(now, dt, x, y, z, ranged, melee, got_y, height, centre)
 		local S, Q = E.S, R.samples
 		R.first = height ~= nil
 		if not R.first and R.want_pitch < PITCH_MIN then R.want_pitch = PITCH_MIN end
@@ -127,6 +134,7 @@ return function(E)
 		end
 		R.close = R.close + ((melee and 1 or 0) - R.close) * math.min(1, OTS_RATE * dt)
 		R.ots = R.ots + ((ranged and 1 or 0) - R.ots) * math.min(1, OTS_RATE * dt)
+		R.centre = R.centre + ((centre and 1 or 0) - R.centre) * math.min(1, OTS_RATE * dt)
 		local ex, ey, ez, lx, ly, lz = behind(R.zoom)
 		-- got_y: where the engine put an eye of the last frames, against where they were asked. It reports two frames
 		-- late (measured 2026-10-15, probes/zz_tp_recorder.lua: on open ground it gave the y asked two frames before), so
