@@ -2,6 +2,7 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
+	-- the army at the cast is its new form, played on as soon as it is there (the author, 2026-10-17: "seems to
 	-- deactivate f2 when changing ammo"; measured: Deithland's mortar was back 0.2 s after the cast, under a ui id of
 	-- its own). Waited for in battle time, a wind-up included (CA's dragon forms wind up 5 s), and for its unit card: it
 	-- came a frame after the unit, and taken over before it the HUD had no context (portrait and slots off for good)
@@ -79,13 +80,16 @@ S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
 		capabilities(F.model or P.models(unit)[1])
 		F.lock, F.next_charge, F.next_jump, F.charging, F.charge_at = nil, 0, 0, false, nil
 		F.native_attack = nil
-		F.ranged = E.can_shoot() and not F.arty
+		-- artillery too: its click is the gun's attack (combat.lua C.attack), the mode key CA's Manual fire (the author, 2026-10-18: "I am
+		-- only controlling the gunners, not the artillery piece itself")
+		F.ranged = E.can_shoot()
 		-- a reload under way when he was last let go still counts (ready_by, by unit)
 		F.firing, F.want_shot, F.shot, F.next_swing, F.swings, F.shot_n = false, false, nil, 0, 0, 0
 		F.ready_at = ready_by[unit:unique_ui_id()] or 0
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
+		F.lead = nil -- his steering point at its full distance (move.lua)
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
 		local x, y, z
 		if F.model then x, y, z = P.model_pos(F.model) else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
@@ -222,6 +226,9 @@ local LEAD, REFRESH, STEER_DEG, STEER_GAP = 15, 6, 12, 0.5 -- m ahead; re-order 
 -- and a monster played as one man sprinted no faster than he ran: Spawn of Tzeentch 3.4 m/s of 6.3, 6.7 at 15 m;
 -- Champions of Slaanesh 2.0, 10.4 (2026-10-18, real keys, probes/zz_tp_watch_sprint.lua). Infantry the same either way
 local STEER_LEAD = 15
+-- a point the engine finds no path to ends his walk (P.walk_ended): the next is nearer, halved down to LEAD_MIN m, tried
+-- again there every LEAD_RETRY s; LEAD_BACK s with none ended, and it is STEER_LEAD again
+local LEAD_MIN, LEAD_RETRY, LEAD_BACK = 1.5, 0.5, 2
 local TOOK = 2 -- m between the engine's ordered position and ours: further, the order was dropped
 local WALK_1, UNLATCH_GAP = 42, 0.3 -- 9.0 slot id; s between two walking clips
 
@@ -280,7 +287,7 @@ return function(E)
 		-- which turned him at a quarter to half the rate, in steps; a 0.05 s cap halved it under 20 fps (round 25)
 		local dt = F.dt or 0
 		if dx == 0 and dz == 0 then
-			F.man_hold = F.man_hold or {x, z}
+			F.man_hold, F.lead = F.man_hold or {x, z}, nil
 			-- standing past a swing's hold, its clip still playing: no facing written over the clip's turn (the author,
 			-- 2026-10-15: "still looking at the right ... at the last part of the animation")
 			local sw = F.swung
@@ -295,6 +302,18 @@ return function(E)
 			F.face_yaw = face
 			dx, dz = math.sin(face), math.cos(face)
 			F.man_hold = nil
+			-- the author, 2026-10-18: in sieges "the unit cannot move normally forward, as if theres a barrier", "everywhere".
+			-- Measured in a dwarf hold (probes/zz_tp_siege_walk.lua): his point 15 m ahead inside a building, the walk ended and
+			-- stood there, still his (west 0.2 m in 4 s; 8.7 m with the point 3 m ahead). Stopped, the next steer builds anew
+			local lead = F.lead or STEER_LEAD
+			if P.walk_ended(m) then
+				if lead > LEAD_MIN or now >= (F.lead_retry or 0) then
+					P.hold(m, x, z, F.face_yaw)
+					F.lead, F.lead_end, F.lead_retry = math.max(LEAD_MIN, lead / 2), now, now + LEAD_RETRY
+				end
+				return
+			end
+			if F.lead and now - F.lead_end >= LEAD_BACK then F.lead, lead = nil, STEER_LEAD end
 			-- A clip whose shot was dropped (a step out of a reload, the mode key) stays latched when the walk replaces
 			-- its command, and he slides in its pose; WALK_1 with mask 0 ends it, the same frame (measured 2026-10-14,
 			-- probes/zz_tp_unclip.lua). Spaced so a clip the engine keeps reporting is not queued every frame.
@@ -302,7 +321,7 @@ return function(E)
 				P.play(m, WALK_1, 0)
 				F.unlatch_at = now + UNLATCH_GAP
 			end
-			P.steer(m, x + dx * STEER_LEAD, z + dz * STEER_LEAD, run, F.face_yaw, speed)
+			P.steer(m, x + dx * lead, z + dz * lead, run, F.face_yaw, speed)
 		end
 	end
 

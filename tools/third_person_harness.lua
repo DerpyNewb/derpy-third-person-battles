@@ -384,10 +384,12 @@ local function fake_platform()
 	end
 	function P.hold(m, x, z, yaw) rec("hold", m.id, x, z, yaw) end
 	function P.command(m) return m.command or "walk" end
+	function P.walk_ended(m) return m.walk_ended == true end -- a test plays the engine ending his walk
 	function P.guard(m) rec("guard", m and m.id) return false end
 	function P.disarm(m) rec("disarm", m and m.id) end
 	function P.arm(m) rec("arm", m and m.id) end
 	function P.gate(on) rec("gate", on) return true end
+	function P.terrain_floor(on) rec("terrain_floor", on) return true end
 	function P.anim_slot(m)
 		if m.anim_end and H.model_ms() >= m.anim_end and not H.anim_hold then m.anim_slot = nil end
 		-- H.report_ms: the engine reports a new clip late (measured 2026-10-15: 0.19-0.31 s in a busy battle)

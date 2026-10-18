@@ -149,6 +149,14 @@ S["/script/derpy_tp/platform"] = (S["/script/derpy_tp/platform"] or "") .. [==[
 		mr.write(block, MB.near, mr.uint8((x - mx) ^ 2 + (z - mz) ^ 2 <= 0.01 and 1 or 0))
 		post(m, "walk", 2)
 	end
+	-- his own walk ended itself (measured 2026-10-18, a dwarf hold): to a point the pathfinder finds no way to,
+	-- exe+3077009 sets his path state (+0x710) to 7 and his walk's update (exe+3262850), with no path of its own, sets the
+	-- walk's done byte (+0x10 of it, +0x340 of him). The walk stays on him, and written in place it moves him no more
+	function P.walk_ended(m)
+		if not P.features.steer then return false end
+		m = P.mount(m) or m
+		return mr.eq(mr.read_pointer(m, 0x330), walk_b) and mr.read_uint8(m, 0x340) ~= 0
+	end
 	-- what he is doing, for the log: "walk" under our walk or the engine's, else "other" (a fight, a stand, a clip)
 	function P.command(m)
 		if not P.features.steer then return nil end

@@ -8,7 +8,7 @@ NEVER = "a_swing_that_never_plays_gives_him_back_after_lock_max"
 MUTANTS = [
     # the horse's steering point
     (V, "local STEER_LEAD = 15", "local STEER_LEAD = 3", HORSE),
-    (V, "P.steer(m, x + dx * STEER_LEAD, z + dz * STEER_LEAD,", "P.steer(m, x + dx * 3, z + dz * 3,", "one_man_walks_alone"),
+    (V, "P.steer(m, x + dx * lead, z + dz * lead,", "P.steer(m, x + dx * 3, z + dz * 3,", "one_man_walks_alone"),
     # the shot's lead timed from the raise's send
     (C, "now >= shot.sent + len - AIM_LEAD then", "now >= shot.at + len - AIM_LEAD then", SHOT),
     # a swing held back past its lock

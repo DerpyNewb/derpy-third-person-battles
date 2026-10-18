@@ -2,6 +2,15 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
+		if F.held_fire then F.uc:fire_at_will(false) end -- shooting over: no shot he did not ask for
+		F.uc:halt()
+		F.uc:release_control()
+		F.last_order = bm:time_elapsed_ms() / 1000 -- an order: the next click's fire waits STEER_GAP (round 25)
+	end
+
+	-- a click commits to one shot: the order stays until the shot is out and the clip it left in is over, or until
+	-- FIRE_COMMIT past a whole reload and the time his fire clip lets it go (data.lua shots and fires); held, it stays;
+	-- a move key ends it (main.lua). The author, 2026-10-18: "Kugath cant use his ranged attack ... why cant the full
 	-- animation play" - measured: the throw started 7 s after the order (his reload; base 10 s) and the nurgling left
 	-- 3.8 s into its 5.8 s clip, and a halt 4 s from the click stopped every one before it began
 	function C.ground(now, clicked, held)
@@ -326,8 +335,11 @@ S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
 		if C.locked(now) then return end
 		if clicked and F.charging and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
 		if F.ranged then
-			if F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
-		elseif clicked then -- an artillery crew swings too (the author, 2026-10-15: a mortar team had no melee)
+			-- a gun's click is its attack on the enemy nearest the crosshair, out to its range: ground fire drove a flame
+			-- cannon toward the point and fired nothing (measured 2026-10-18, probes/zz_tp_arty_order.lua)
+			if F.arty then if clicked then order(true, F.unit:missile_range()) end
+			elseif F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
+		elseif clicked and not F.arty then -- a gun out of shot is nothing: its crew never swing (the author, 2026-10-18)
 			C.melee(now, true)
 		end
 	end
@@ -341,27 +353,5 @@ S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
 		first = first and (P.mount(first) or first)
 		local function has(list)
 			local out = {}
-			if first and P.features.anim and F.men_ok then for _, s in ipairs(list) do if P.has_slot(first, s) then out[#out + 1] = s end end end
-			return out
-		end
-		local clips = has(SLOTS_CHEER)
-		if #clips == 0 then clips = has(SLOTS_TAUNT) end
-		if #clips == 0 then return end -- neither (F.can_cheer false, the HUD shows no button), or animation off
-		local k = turn[SLOTS_CHEER] or 0
-		turn[SLOTS_CHEER] = k + 1
-		local slot = clips[k % #clips + 1]
-		act(now)
-		F.lock = {from = now, till = now + LOCK_MAX, yaw = E.rig.yaw, turns = true} -- its clip turns him, as a swing's
-		each(function(m)
-			m = P.mount(m) or m
-			if P.has_slot(m, slot) then
-				P.play(m, slot)
-				if not F.lock.m then F.lock.m, F.lock.slot, F.swung = m, slot, {m, slot} end
-			end
-		end)
-		E.log("cheer " .. slot)
-	end
-
-	-- the jump attack (the author, 2026-10-15: E): JUMPING_ATTACK_1-5 as a swing, on its own cooldown. A unit whose men
 ]==]
 return "part 3 of 12"

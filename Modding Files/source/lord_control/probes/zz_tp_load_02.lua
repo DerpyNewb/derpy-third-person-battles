@@ -145,9 +145,10 @@ return function(E)
 		return at(first_enemy(R.ex, R.ey, R.ez, dx, dy, dz, t) or t)
 	end
 
-	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and AIM_RANGE, or AIM_CLOSE any
-	-- way; distance weighted by how far off the aim it is
-	local function pick_target()
+	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and reach (AIM_RANGE, a gun's its range), or
+	-- AIM_CLOSE any way; distance weighted by how far off the aim it is
+	local function pick_target(reach)
+		reach = reach or AIM_RANGE
 		local q = F.unit:position()
 		local qx, qz = q:get_x(), q:get_z()
 		local fx, fz = math.sin(E.rig.yaw), math.cos(E.rig.yaw)
@@ -162,7 +163,7 @@ return function(E)
 					local dx, dz = p:get_x() - qx, p:get_z() - qz
 					local d = math.sqrt(dx * dx + dz * dz)
 					local c = (dx * fx + dz * fz) / math.max(d, 0.01)
-					if d < AIM_CLOSE or (c > AIM_COS and d < AIM_RANGE) then
+					if d < AIM_CLOSE or (c > AIM_COS and d < reach) then
 						local score = d * (2 - c)
 						if not best_score or score < best_score then best, best_score = e, score end
 					end
@@ -190,9 +191,9 @@ return function(E)
 
 	-- CA's attack order on the enemy nearest the aim: a unit played whole with no clip to swing charges it. Never for one
 	-- man of a regiment: it is his regiment's order (the author, 2026-10-15: one man gives it no orders)
-	local function order(primary)
+	local function order(primary, reach)
 		if F.model then return end
-		local target = pick_target()
+		local target = pick_target(reach)
 		if not target then return end
 		send(function()
 			F.uc:attack_unit(target, primary, F.running)
@@ -308,9 +309,20 @@ return function(E)
 
 	-- ground fire at the aim (single entities and regiments without a one-man shot): turned first when
 	-- the aim is outside FIRE_ARC; re-aimed when the point moves FIRE_REAIM, no faster than STEER_GAP
+	-- a shooting clip on him or on his body
+	local function in_shot()
+		local first = F.model or P.models(F.unit)[1]
+		local body = first and P.mount(first)
+		return shooting(first and P.anim_slot(first)) or shooting(body and P.anim_slot(body))
+	end
+
 	local function fire(now)
 		local ax, ay, az = C.aim_point(F.unit:missile_range())
 		if not ax then return end
+		-- a shot under way is not re-aimed or turned: a new order starts the engine's aim again (the author, 2026-10-18:
+		-- "moving the mouse and aiming for fire, it keeps repeating the aim animation and never firing" - the Necrofex
+		-- Colossus, 13 orders in 14 s, his FIRE_LEVEL letting the shot go 2.66 s into 9.5)
+		if F.fire_at and in_shot() then return end
 		local q = F.unit:position()
 		local want = math.deg(math.atan2(ax - q:get_x(), az - q:get_z())) % 360
 		if math.abs((want - F.unit:bearing() + 540) % 360 - 180) > FIRE_ARC then
@@ -338,14 +350,5 @@ return function(E)
 
 	function C.stop_fire()
 		F.firing, F.fire_at, F.turn_to, F.fire_order_t = false, nil, nil, nil
-		if F.held_fire then F.uc:fire_at_will(false) end -- shooting over: no shot he did not ask for
-		F.uc:halt()
-		F.uc:release_control()
-		F.last_order = bm:time_elapsed_ms() / 1000 -- an order: the next click's fire waits STEER_GAP (round 25)
-	end
-
-	-- a click commits to one shot: the order stays until the shot is out and the clip it left in is over, or until
-	-- FIRE_COMMIT past a whole reload and the time his fire clip lets it go (data.lua shots and fires); held, it stays;
-	-- a move key ends it (main.lua). The author, 2026-10-18: "Kugath cant use his ranged attack ... why cant the full
 ]==]
 return "part 2 of 12"

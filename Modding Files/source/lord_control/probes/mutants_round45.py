@@ -26,7 +26,7 @@ MUTANTS = [
     (MAIN, "\t\tif P.features.steer and not P.features.mailbox then",
      "\t\tif S.one_man and P.features.steer and not P.features.mailbox then", "a_single_entity_is_steered_with_one_man_off"),
     (MAIN, "\t\t\tand not unit:is_war_machine()\n", "\n", "a_war_machine_of_one_walks_by_orders"),
-    (M, "P.steer(m, x + dx * STEER_LEAD, z + dz * STEER_LEAD,", "P.steer(m, x + dx * 3, z + dz * 3,", ONE),
+    (M, "P.steer(m, x + dx * lead, z + dz * lead,", "P.steer(m, x + dx * 3, z + dz * 3,", ONE),
     (M, "if F.model or F.single then man_drive(now, dx, dz, run, speed) return end",
      "if F.model then man_drive(now, dx, dz, run, speed) return end", ONE),
     (M, "\t\tlocal man = F.model or F.single\n\t\tif man and P.alive(F.unit, man) then",

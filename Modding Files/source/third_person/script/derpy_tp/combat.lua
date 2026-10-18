@@ -141,9 +141,10 @@ return function(E)
 		return at(first_enemy(R.ex, R.ey, R.ez, dx, dy, dz, t) or t)
 	end
 
-	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and AIM_RANGE, or AIM_CLOSE any
-	-- way; distance weighted by how far off the aim it is
-	local function pick_target()
+	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and reach (AIM_RANGE, a gun's its range), or
+	-- AIM_CLOSE any way; distance weighted by how far off the aim it is
+	local function pick_target(reach)
+		reach = reach or AIM_RANGE
 		local q = F.unit:position()
 		local qx, qz = q:get_x(), q:get_z()
 		local fx, fz = math.sin(E.rig.yaw), math.cos(E.rig.yaw)
@@ -158,7 +159,7 @@ return function(E)
 					local dx, dz = p:get_x() - qx, p:get_z() - qz
 					local d = math.sqrt(dx * dx + dz * dz)
 					local c = (dx * fx + dz * fz) / math.max(d, 0.01)
-					if d < AIM_CLOSE or (c > AIM_COS and d < AIM_RANGE) then
+					if d < AIM_CLOSE or (c > AIM_COS and d < reach) then
 						local score = d * (2 - c)
 						if not best_score or score < best_score then best, best_score = e, score end
 					end
@@ -186,9 +187,9 @@ return function(E)
 
 	-- CA's attack order on the enemy nearest the aim: a unit played whole with no clip to swing charges it. Never for one
 	-- man of a regiment: it is his regiment's order (the author, 2026-10-15: one man gives it no orders)
-	local function order(primary)
+	local function order(primary, reach)
 		if F.model then return end
-		local target = pick_target()
+		local target = pick_target(reach)
 		if not target then return end
 		send(function()
 			F.uc:attack_unit(target, primary, F.running)
@@ -678,8 +679,11 @@ return function(E)
 		if C.locked(now) then return end
 		if clicked and F.charging and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
 		if F.ranged then
-			if F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
-		elseif clicked then -- an artillery crew swings too (the author, 2026-10-15: a mortar team had no melee)
+			-- a gun's click is its attack on the enemy nearest the crosshair, out to its range: ground fire drove a flame
+			-- cannon toward the point and fired nothing (measured 2026-10-18, probes/zz_tp_arty_order.lua)
+			if F.arty then if clicked then order(true, F.unit:missile_range()) end
+			elseif F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
+		elseif clicked and not F.arty then -- a gun out of shot is nothing: its crew never swing (the author, 2026-10-18)
 			C.melee(now, true)
 		end
 	end
@@ -738,7 +742,7 @@ return function(E)
 		first = first and (P.mount(first) or first)
 		local air = F.unit:is_currently_flying()
 		local clip = air and FLY_CHARGE or CHARGE
-		local on = want and first and P.has_slot(first, clip) and P.features.anim and F.men_ok
+		local on = want and first and not F.arty and P.has_slot(first, clip) and P.features.anim and F.men_ok
 		local playing = on and P.anim_slot(first) == clip
 		if playing then F.charge_seen = true end
 		if F.lock then -- the charge attack, thrown on the run: neither clip over it

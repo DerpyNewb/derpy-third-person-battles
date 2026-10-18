@@ -13,7 +13,8 @@ local PITCH_MIN, PITCH_MAX, ZOOM_MIN, ZOOM_MAX = -0.25, 1.1, 0.6, 6
 -- asked 0.53 and 1.09, it put the eye at 1.58 and 1.52, lifting the whole view)
 local CLEAR = 1.6
 -- the engine's floor also counts a roof, which bm:get_terrain_height does not (the author, 2026-10-15: "when near the
--- buidling, it should ignore terrain and buildings", the view on a roof) and nothing turns it off: lifted more than
+-- buidling, it should ignore terrain and buildings", the view on a roof); platform.lua P.terrain_floor takes it out, and on a
+-- build it does not know: lifted more than
 -- LIFT_TOL m, the eye comes in along its boom at BOOM_IN of it a second, down to BOOM_MIN. It goes back out, at BOOM_OUT a
 -- second, only once he has moved MOVED m or the camera turned TURNED rad since the last lift: trying the roof again
 -- from the same place would pop the view over it every time

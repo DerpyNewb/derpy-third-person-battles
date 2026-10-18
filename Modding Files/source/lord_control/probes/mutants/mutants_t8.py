@@ -14,7 +14,7 @@ MUTANTS = [
     ("script/derpy_tp/main.lua", "bm:register_phase_change_callback(\"Complete\", function() pcall(M.stop, \"battle over\") E.disabled = true end)", "bm:register_phase_change_callback(\"Complete\", function() pcall(M.stop, \"battle over\") end)", "battle_end_stops_and_locks"),
     ("script/derpy_tp/move.lua", "if #ms < 2 then return nil end", "if #ms < 1 then return nil end", "walking_orders_a_single_entity"),
     ("script/derpy_tp/move.lua", "local score = -(dx * fx + dz * fz) + math.abs(dx * fz - dz * fx) * 0.5", "local score = (dx * fx + dz * fz) - math.abs(dx * fz - dz * fx) * 0.5", "one_man_walks_alone"),
-    ("script/derpy_tp/move.lua", "F.man_hold = F.man_hold or {x, z}", "F.man_hold = {x + 1, z}", "one_man_walks_alone"),
+    ("script/derpy_tp/move.lua", "F.man_hold, F.lead = F.man_hold or {x, z}, nil", "F.man_hold, F.lead = {x + 1, z}, nil", "one_man_walks_alone"),
     ("script/derpy_tp/move.lua", "or run ~= F.run", "", "walking_orders_a_single_entity"),
     ("script/battle/mod/derpy_third_person.lua", "if not E.P.features.input then", "if false then", "input_unreadable_says_memreader"),
 ]

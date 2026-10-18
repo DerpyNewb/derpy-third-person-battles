@@ -82,7 +82,8 @@ return function(E)
 			if m then for s = a, a + 4 do if P.has_slot(m, s) and not blank[s] then return true end end end
 			return false
 		end
-		F.can_charge, F.can_jump = any(484), any(489)
+		-- an artillery crew has no melee of its own here: the gun is what is played (the author, 2026-10-18)
+		F.can_charge, F.can_jump = not F.arty and any(484), not F.arty and any(489)
 		F.can_cheer = any(1094) or any(1099) or any(1104) or any(1109)
 	end
 
@@ -351,6 +352,5 @@ return function(E)
 	end
 
 	-- a transformation replaces the unit (abilities.lua ends third person before it goes off): the unit that was not in
-	-- the army at the cast is its new form, played on as soon as it is there (the author, 2026-10-17: "seems to
 ]==]
 return "part 8 of 12"

@@ -139,9 +139,9 @@ return function(E)
 			end
 			if on then text("slot_" .. n .. "_key", E.S.names["ability_" .. n] or "") end
 		end
-		-- the action buttons: walk, sprint and attack always, fire for a shooter (artillery aims in Manual fire), jump when
-		-- his men have the clips; each with its key
-		local can = {walk = true, sprint = true, attack = true, fire = F.unit:missile_range() > 0 and not F.arty
+		-- the action buttons: walk and sprint always, attack but for a gun, fire for a shooter, artillery too (its click
+		-- fires the gun), jump when his men have the clips; each with its key
+		local can = {walk = true, sprint = true, attack = not F.arty, fire = F.unit:missile_range() > 0
 			and not F.cannot_shoot, jump = F.can_jump, fly = F.unit:can_fly(), cheer = F.can_cheer}
 		local key_of = {walk = "walk", sprint = "sprint", attack = "attack", fire = "attack", jump = "jump", fly = "fly",
 			cheer = "cheer"}

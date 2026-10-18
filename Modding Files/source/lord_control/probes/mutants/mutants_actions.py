@@ -12,7 +12,7 @@ SHOWS, COUNTS, CHG, RELOAD, EMPTY = ("the_action_bar_shows_what_the_unit_can_do"
 TEAM = "a_weapon_team_man_fires_alone_and_reloads_on_the_clock"
 MUTANTS = [
     # the three bugs of the morning
-    (C, "elseif clicked then -- an artillery crew swings too", "elseif clicked and not F.arty then --", "an_artillery_crew_swings_on_a_click"),
+    (C, "elseif clicked and not F.arty then", "elseif clicked then", "an_artillery_crew_never_swings"),
     # a weapon team's man shoots alone, his reload on the clock
     (M, "P.features.anim and F.fire_slot ~= nil\n", "P.features.anim and F.reload_slot ~= nil and F.fire_slot ~= nil\n", TEAM),
     (C, "F.ready_at, F.shot = now + E.D.shots[F.utype][2] * E.S.reload_factor, nil", "F.ready_at, F.shot = now, nil", TEAM),
@@ -21,7 +21,7 @@ MUTANTS = [
     # the charge
     (C, "swing(SLOTS_RUN, true, now, nil", "swing(SLOTS_JUMP, true, now, nil", "a_click_in_the_charge_throws_the_charge_attack"),
     (C, "local on = want and F.can_charge and", "local on = want and", NOQ),
-    (M, "F.can_charge, F.can_jump = any(484), any(489)", "F.can_charge, F.can_jump = true, any(489)", NOQ),
+    (M, "F.can_charge, F.can_jump = not F.arty and any(484), not F.arty and any(489)", "F.can_charge, F.can_jump = true, not F.arty and any(489)", NOQ),
     # the jump
     (C, "if C.locked(now) or not F.can_jump or now < F.next_jump or", "if C.locked(now) or now < F.next_jump or",
      "e_does_nothing_for_a_whole_unit_without_the_clip"),
@@ -35,7 +35,7 @@ MUTANTS = [
     (C, "local LOCK_MAX, LOCK_WAIT = 3, 1", "local LOCK_MAX, LOCK_WAIT = 30, 1", CAP),
     (C, "\t\t\t\t\tF.lock.m, F.lock.slot = carrier, played\n", "", "the_lock_ends_with_the_clip"),
     # the HUD
-    (U, "fire = F.unit:missile_range() > 0 and not F.arty\n\t\t\tand not F.cannot_shoot,", "fire = true,", SHOWS),
+    (U, "fire = F.unit:missile_range() > 0\n\t\t\tand not F.cannot_shoot,", "fire = true,", SHOWS),
     (U, 'sprint = "sprint", attack = "attack"', 'sprint = "attack", attack = "attack"', SHOWS),
     (U, 'show("attack", F.next_swing - now)', "", COUNTS),
     (U, 'show("jump", F.next_jump - now)', "", COUNTS),

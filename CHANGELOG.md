@@ -2,6 +2,9 @@
 
 ## 2026-10-18
 
+- Sieges: walking into a wall, gate or building no longer stops the man dead; his steering point comes in nearer.
+- Artillery: a click fires the gun at the enemy in range nearest the crosshair; the crew never swing, charge or jump.
+- The camera stays with him beside buildings and under gatehouses instead of rising over the roof.
 - Lords, heroes and monsters sprint faster: a unit of one is steered like the man you play.
 - Flying units play their flying charge in the air, not the ground charge run; no charge attack in the air.
 - Melee mode centres the camera on him; aiming an ability looks ahead again.

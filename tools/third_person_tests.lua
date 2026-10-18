@@ -357,9 +357,11 @@ T.the_camera_floor_is_lowered_only_while_on = function()
 	general_on()
 	local c = H.last("camera_height_range")
 	check(c and c[2] == 0 and c[3] == 100, "on: the cutscene floor, (0, 100)")
+	check(H.last("terrain_floor") and H.last("terrain_floor")[2] == true, "on: the floor counts the terrain alone")
 	H.tap("F2")
 	c = H.last("camera_height_range")
 	check(c and c[2] == -1 and c[3] == -1, "off: the game's own range back")
+	check(H.last("terrain_floor")[2] == false, "off: buildings count again")
 end
 
 -- with the floor gone, a hill behind him would bury the camera: it comes in along its boom instead of up
@@ -1412,7 +1414,7 @@ end
 
 T.artillery_mode_opens_manual_fire = function()
 	local u = a_battery()
-	check(not H.E.F.ranged, "artillery does not start in ranged mode")
+	check(H.E.F.ranged, "artillery starts in ranged mode: the click fires the gun")
 	H.tap("Right mouse")
 	check(not H.E.F.on, "control steps aside")
 	check(H.last("select_in_ui")[2] == u._id, "the battery is selected, so the HUD carries its button")
@@ -2450,6 +2452,26 @@ T.a_steer_posts_the_walk_builders_block = function()
 	check(posted(P, M, mr, "walk") == nil, "no speed, no request")
 end
 
+-- measured 2026-10-18 (probes/zz_tp_siege_walk.lua, a Vault Sweeper on open floor in a dwarf hold): his walk to a point
+-- the pathfinder finds no way to ends itself and stays on him. exe+3077009 sets his path state (+0x710) to 7, and his
+-- walk's update (exe+3262850), having no path of its own (+0x88 of it, null in every walk built from our block), sets
+-- its done byte (+0x10): 1 at +0x340 in every stuck sample, 0 in every moving one
+T.an_ended_walk_is_read_off_his_own_walk = function()
+	local P, mr, put, BASE = patched_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x330, BASE + 0x3ae2400, 8)
+	check(not P.walk_ended(m), "his walk, going")
+	put(m.addr + 0x340, 1, 1)
+	check(P.walk_ended(m), "his walk, ended")
+	put(m.addr + 0x330, BASE + 0x3919350, 8)
+	check(not P.walk_ended(m), "the regiment's walk is not his to rebuild")
+	put(m.addr + 0x2e0, horse, 8)
+	put(horse + 0x330, BASE + 0x3ae2400, 8)
+	check(not P.walk_ended(m), "a rider: his horse's walk, going")
+	put(horse + 0x340, 1, 1)
+	check(P.walk_ended(m), "a rider: his horse's walk, ended")
+end
+
 T.a_horse_is_steered_held_and_guarded = function()
 	local P, mr, put, BASE, M = patched_platform()
 	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
@@ -2545,13 +2567,16 @@ end
 -- action update instead, 10 and 10. memreader's patch writes only over the bytes it expects
 local GATE_AT = 0x3087378
 local GATE = {0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09, 0x44, 0x38, 0xbf, 0, 0x06, 0, 0, 0x75, 0x5c}
-local function gate_platform(jump, stamp)
+-- the camera's raycast height (exe+2ee841c) and the terrain's (exe+2ec2710), and the raycast's first five bytes
+local FLOOR_AT, FLOOR_TO, PROLOGUE = 0x2ee841c, 0x2ec2710, {0x48, 0x8b, 0xc4, 0x48, 0x89}
+local function gate_platform(jump, stamp, floor)
 	H.real_platform = true
 	local M = assert(loadfile("/script/derpy_tp/platform"))()
 	H.real_platform = false
 	local mr, put, BASE = fake_image(stamp or 0x6acec6f4)
 	for i, b in ipairs(GATE) do put(BASE + GATE_AT + i - 1, b, 1) end
 	if jump then put(BASE + GATE_AT + #GATE - 1, jump, 1) end
+	for i, b in ipairs(floor or PROLOGUE) do put(BASE + FLOOR_AT + i - 1, b, 1) end
 	local function bytes(a, n) local s = {} for i = 0, n - 1 do s[#s + 1] = mr.read_uint8(mr.base, a - BASE + i) end return s end
 	mr.patches = {}
 	function mr.patch(p, expected, new)
@@ -2563,7 +2588,44 @@ local function gate_platform(jump, stamp)
 		for i = 1, #new do put(p.addr + i - 1, new:byte(i), 1) end
 		return expected
 	end
-	return M.build(mr), mr, BASE, function() return bytes(BASE + GATE_AT, #GATE) end
+	return M.build(mr), mr, BASE, function() return bytes(BASE + GATE_AT, #GATE) end,
+		function() return bytes(BASE + FLOOR_AT, #PROLOGUE) end
+end
+
+-- where the raycast's entry goes now: its own code, or the rel32 jump's target
+local function floor_target(b)
+	if b[1] ~= 0xe9 then return FLOOR_AT end
+	local rel = b[2] + b[3] * 256 + b[4] * 65536 + b[5] * 16777216
+	return FLOOR_AT + 5 + (rel >= 2 ^ 31 and rel - 2 ^ 32 or rel)
+end
+
+-- the camera's floor lifts the eye over a raycast height that counts a roof: under a gatehouse an eye asked 2 m over the
+-- road went 18-24 m up (measured 2026-10-18, probes/zz_tp_cam_sweep.lua); the raycast's entry jumped to the terrain's: 2.0
+T.the_camera_floor_counts_the_terrain_alone_while_on = function()
+	local P, mr, BASE, _, floor = gate_platform()
+	check(floor_target(floor()) == FLOOR_AT, "the raycast's own entry while nobody is played")
+	check(P.terrain_floor(true) and floor_target(floor()) == FLOOR_TO,
+		"on: a jump to the terrain's height, got " .. string.format("%x", floor_target(floor())))
+	check(P.terrain_floor(true) and floor_target(floor()) == FLOOR_TO, "twice is harmless")
+	check(P.terrain_floor(false), "off")
+	for i, b in ipairs(PROLOGUE) do check(floor()[i] == b, "byte " .. i .. " of the raycast's entry back") end
+	check(P.terrain_floor(false), "twice is harmless")
+end
+
+T.a_battle_left_with_the_terrain_floor_on_finds_it_off = function()
+	local P, mr, BASE, _, floor = gate_platform()
+	P.terrain_floor(true)
+	local jumped = floor()
+	P, mr, BASE, _, floor = gate_platform(nil, nil, jumped)
+	check(jumped[1] == 0xe9 and floor_target(floor()) == FLOOR_AT, "the platform puts the raycast's entry back as it loads")
+end
+
+T.the_terrain_floor_is_left_alone_where_it_is_not_the_raycast = function()
+	local other = {0x40, 0x53, 0x48, 0x83, 0xec} -- a patch moved the code
+	local P, mr, BASE, _, floor = gate_platform(nil, nil, other)
+	check(not P.terrain_floor(true) and floor()[1] == 0x40, "nothing written over code it does not know")
+	P, mr, BASE, _, floor = gate_platform(nil, 0x6ac6d907)
+	check(not P.terrain_floor(true) and floor_target(floor()) == FLOOR_AT, "no floor on a build that has none")
 end
 
 T.a_queued_swing_beats_the_ticks_order = function()
@@ -3688,11 +3750,44 @@ T.a_weapon_team_man_fires_alone_and_reloads_on_the_clock = function()
 	check(H.count("launch") == 2, "20 s on, the next: " .. H.count("launch"))
 end
 
-T.an_artillery_crew_swings_on_a_click = function()
-	playing({type = "wh_test_mortar", men = 6, arty = true, x = 40})
+-- the author, 2026-10-18: "I was only controlling the gunners, and they acted as if they had left the artillery piece and
+-- turned into melee infantry. When I clicked the mouse, all the gunners uniformly started slashing" (Cathay's grand
+-- cannon, "all types of artillery"). The gun is what is played: a click is its attack on the enemy nearest the crosshair,
+-- out to its own range. Not ground fire: measured 2026-10-18 (probes/zz_tp_arty_order.lua, a flame cannon in a dwarf
+-- hold, fire at will off) attack_location on open ground 59 m ahead fired nothing in 15 s and drove the battery toward
+-- the point, as it drove it 30 m toward an enemy out of range
+T.an_artillery_click_fires_the_gun_at_the_crosshair = function()
+	playing({type = "wh_test_mortar", men = 6, arty = true, x = 40, range = 400, ammo = 20,
+		slots = {[454] = true, [489] = true}}, {{x = 40, z = 300, men = 10}})
+	H.step(0.5) -- clear of the start's halt
 	H.tap("Left mouse") H.step(1 / 60)
-	local p = H.last("play")
-	check(p and p[3] == 454, "the crew swing ATTACK_1: " .. tostring(p and p[3]))
+	local a = H.last("uc:attack_unit")
+	check(a and H.count("uc:attack_unit") == 1, "a click is the gun's attack, 300 m out: " .. H.count("uc:attack_unit"))
+	check(H.count("uc:attack_location") == 0, "not ground fire, which drives a battery to the point")
+	check(H.count("play") == 0, "and no crewman swings: " .. H.count("play"))
+end
+
+T.an_artillery_crew_never_swings = function()
+	playing({type = "wh_test_mortar", men = 6, arty = true, x = 40, range = 400, ammo = 0,
+		slots = {[135] = true, [454] = true, [484] = true, [489] = true}})
+	H.step(0.5)
+	H.tap("Left mouse") H.step(1 / 60)
+	check(H.count("play") == 0 and H.count("uc:attack_unit") == 0, "out of shot, a click is nothing, not a crew swing")
+	H.tap("E") H.step(1 / 60)
+	check(H.count("play") == 0, "nor a jump attack")
+	H.down("Shift") H.down("W") H.step(0.5) H.tap("Left mouse") H.step(1 / 60) H.up("W") H.up("Shift")
+	local n = 0 for _, c in ipairs(H.all("play")) do if c[3] == 135 or c[3] >= 484 and c[3] <= 488 then n = n + 1 end end
+	check(n == 0, "nor the charge's run or its attack: " .. n)
+end
+
+-- a war machine's crewman, whose parent is his vehicle, swings his own clip when the vehicle has none (measured
+-- 2026-10-15: the Greybeard tank's crew have ATTACK_1-5); a gun's crew never swing (an_artillery_crew_never_swings)
+T.a_war_machine_crew_keep_their_own_melee_clip = function()
+	local u = playing({type = "wh_test_tank", men = 4, war_machine = true, slots = {[42] = true, [454] = true}})
+	for _, m in ipairs(u._models) do m.mount = {id = 999, slots = {[42] = true}} end
+	H.tap("Left mouse")
+	check(H.count("play") == 4 and H.last("play")[3] == 454 and H.last("play")[2] ~= 999,
+		"a crewman's vehicle parent does not take his melee attack")
 end
 
 -- the author, 2026-10-15: "q for charge animation when running", "the animation being triggered with q is not the
@@ -5515,6 +5610,46 @@ end
 -- engine's run speed, 7.8 m/s, and the horse moved 1.25 m/s, sprinting 1.31 - never faster than it could stop in the 3 m
 -- to its steering point (the author: "horse speed mismatch; running but still staying at walking speed"). The point 15 m
 -- ahead: 7.35 m/s, sprinting 8.89 of 9.36. A man on foot has 15 m too since 2026-10-18 (one_man_walks_alone)
+-- the author, 2026-10-18: in sieges "the unit cannot move normally forward, as if theres a barrier", "everywhere in
+-- sieges", fine on field maps. Measured (probes/zz_tp_siege_walk.lua, a Vault Sweeper on open floor in a dwarf hold, 4 s
+-- a heading): with his point 15 m ahead west moved 0.19-0.36 m and east 3.2-4.2 m before stopping, his walk ended by the
+-- engine (no path to a point inside a building); with it 3 m ahead, 8.7 and 7.2 m. An ended walk is stopped, so the next
+-- steer builds a new one, nearer each time it ends; 2 s with none ended, or the keys let go, and the point is 15 m again
+local function lead() local s, man = H.last("steer"), H.E.F.model return s[4] - man.z end
+T.a_walk_the_engine_ends_is_built_again_nearer = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local man = H.E.F.model
+	H.down("W") H.step(0.5)
+	check(near(lead(), 15), "15 m ahead to begin with: " .. lead())
+	man.walk_ended = true
+	local holds, steers = H.count("hold"), H.count("steer")
+	H.step(1 / 60)
+	check(H.count("hold") == holds + 1 and H.count("steer") == steers, "the ended walk is stopped, nothing steered over it")
+	man.walk_ended = false -- the stop replaced it
+	H.step(1 / 60)
+	check(near(lead(), 7.5), "a new walk, its point nearer: " .. lead())
+	for _, want in ipairs({3.75, 1.875}) do
+		man.walk_ended = true H.step(1 / 60) man.walk_ended = false H.step(1 / 60)
+		check(near(lead(), want), "nearer again: " .. lead())
+	end
+	man.walk_ended = true H.step(1 / 60) man.walk_ended = false H.step(1 / 60)
+	check(near(lead(), 1.5), "no nearer than 1.5 m: " .. lead())
+	-- at the nearest, a wall right ahead: tried again only every half second, not every frame
+	man.walk_ended = true
+	holds = H.count("hold")
+	H.step(0.25)
+	check(H.count("hold") == holds, "an end at 1.5 m is not stopped again at once: " .. H.count("hold") - holds)
+	H.step(0.3)
+	check(H.count("hold") == holds + 1, "half a second on, it is")
+	man.walk_ended = false
+	H.step(2.1)
+	check(near(lead(), 15), "2 s with no walk ended: 15 m again: " .. lead())
+	man.walk_ended = true H.step(1 / 60) man.walk_ended = false H.step(1 / 60)
+	check(near(lead(), 7.5), "and nearer again on the next end: " .. lead())
+	H.up("W") H.step(0.1) H.down("W") H.step(0.1)
+	check(near(lead(), 15), "the keys let go: 15 m on the next press: " .. lead())
+end
+
 T.a_horses_steering_point_is_far_enough_to_run = function()
 	local u = playing({type = "wh_test_mount", men = 2})
 	for i, m in ipairs(u._models) do m.mount = {id = 990 + i, x = m.x, y = m.y, z = m.z, hp = 100, hp_max = 100} end
@@ -5652,14 +5787,6 @@ T.switching_to_ranged_cancels_a_native_melee_attack = function()
 	check(H.E.F.native_attack, "the clipless melee click uses a native attack")
 	H.tap("Right mouse")
 	check(H.E.F.ranged and not H.E.F.native_attack, "ranged mode restores the guard against the old melee order")
-end
-
-T.artillery_crew_keep_their_own_melee_clip = function()
-	local u = playing({type = "wh_test_artillery", men = 4, arty = true, slots = {[42] = true, [454] = true}})
-	for _, m in ipairs(u._models) do m.mount = {id = 999, slots = {[42] = true}} end
-	H.tap("Left mouse")
-	check(H.count("play") == 4 and H.last("play")[3] == 454 and H.last("play")[2] ~= 999,
-		"a crewman's gun parent does not take his melee attack")
 end
 
 T.men_check_reads_the_mounts_steering_copies = function()

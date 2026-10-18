@@ -78,7 +78,8 @@ return function(E)
 			if m then for s = a, a + 4 do if P.has_slot(m, s) and not blank[s] then return true end end end
 			return false
 		end
-		F.can_charge, F.can_jump = any(484), any(489)
+		-- an artillery crew has no melee of its own here: the gun is what is played (the author, 2026-10-18)
+		F.can_charge, F.can_jump = not F.arty and any(484), not F.arty and any(489)
 		F.can_cheer = any(1094) or any(1099) or any(1104) or any(1109)
 	end
 
@@ -425,13 +426,16 @@ return function(E)
 		capabilities(F.model or P.models(unit)[1])
 		F.lock, F.next_charge, F.next_jump, F.charging, F.charge_at = nil, 0, 0, false, nil
 		F.native_attack = nil
-		F.ranged = E.can_shoot() and not F.arty
+		-- artillery too: its click is the gun's attack (combat.lua C.attack), the mode key CA's Manual fire (the author, 2026-10-18: "I am
+		-- only controlling the gunners, not the artillery piece itself")
+		F.ranged = E.can_shoot()
 		-- a reload under way when he was last let go still counts (ready_by, by unit)
 		F.firing, F.want_shot, F.shot, F.next_swing, F.swings, F.shot_n = false, false, nil, 0, 0, 0
 		F.ready_at = ready_by[unit:unique_ui_id()] or 0
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
+		F.lead = nil -- his steering point at its full distance (move.lua)
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
 		local x, y, z
 		if F.model then x, y, z = P.model_pos(F.model) else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
@@ -467,6 +471,9 @@ return function(E)
 		bm.battle:suppress_unit_voices(true) -- each start and stop of his walk is a state the game voices, as in CA's cutscenes
 		cam:enable_functionality("CAMERA_ALL_FUNCTIONS", false)
 		cam:change_height_range(0, 100) -- as CA's cutscenes: the default floor lifts him out of shot with the terrain
+		-- and the floor counts the terrain alone: a roof or a gatehouse lifted the eye 18-24 m (platform.lua P.terrain_floor)
+		F.floored = P.terrain_floor(true)
+		if not F.floored then E.once("floor", "the camera rises over buildings: no terrain floor on build " .. tostring(P.build)) end
 		unit:select_in_ui()
 		hud(false)
 		E.hud.show(true)
@@ -515,6 +522,7 @@ return function(E)
 		try(function() bm.battle:suppress_unit_voices(false) end)
 		try(function() cam:enable_functionality("CAMERA_ALL_FUNCTIONS", true) end)
 		try(function() cam:change_height_range(-1, -1) end)
+		if F.floored then F.floored = nil try(function() P.terrain_floor(false) end) end
 		E.log("off: " .. tostring(why))
 	end
 

@@ -14,7 +14,7 @@ MUTANTS = [
     (C, "(P.has_slot(first, s) or mount and P.has_slot(mount, s))", "true", ROT),
     (C, "local k = turn[slots] or 0", "local k = F.swings", ROT),
     (C, "turn[slots], F.swings = k + 1, F.swings + 1", "F.swings = F.swings + 1", ROT),
-    (M, "F.can_charge, F.can_jump = any(484), any(489)", "F.can_charge, F.can_jump = any(484), first ~= nil and P.has_slot(first, 489)", ROT),
+    (M, "F.can_charge, F.can_jump = not F.arty and any(484), not F.arty and any(489)", "F.can_charge, F.can_jump = not F.arty and any(484), not F.arty and first ~= nil and P.has_slot(first, 489)", ROT),
     # the thrown bomb
     (C, "(F.thrown and THROW_MS or SHOT_DELAY_MS)", "SHOT_DELAY_MS", THROW),
     (M, 'F.thrown = ok and kind == "explosives"', "F.thrown = false", THROW),

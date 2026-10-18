@@ -2,6 +2,28 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
+			if first and P.features.anim and F.men_ok then for _, s in ipairs(list) do if P.has_slot(first, s) then out[#out + 1] = s end end end
+			return out
+		end
+		local clips = has(SLOTS_CHEER)
+		if #clips == 0 then clips = has(SLOTS_TAUNT) end
+		if #clips == 0 then return end -- neither (F.can_cheer false, the HUD shows no button), or animation off
+		local k = turn[SLOTS_CHEER] or 0
+		turn[SLOTS_CHEER] = k + 1
+		local slot = clips[k % #clips + 1]
+		act(now)
+		F.lock = {from = now, till = now + LOCK_MAX, yaw = E.rig.yaw, turns = true} -- its clip turns him, as a swing's
+		each(function(m)
+			m = P.mount(m) or m
+			if P.has_slot(m, slot) then
+				P.play(m, slot)
+				if not F.lock.m then F.lock.m, F.lock.slot, F.swung = m, slot, {m, slot} end
+			end
+		end)
+		E.log("cheer " .. slot)
+	end
+
+	-- the jump attack (the author, 2026-10-15: E): JUMPING_ATTACK_1-5 as a swing, on its own cooldown. A unit whose men
 	-- have none does nothing - no attack order in its place (F.can_jump, read off his men at the start). None in the air:
 	-- a ground clip, as the charge attack's
 	function C.jump(now)
@@ -25,7 +47,7 @@ S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
 		first = first and (P.mount(first) or first)
 		local air = F.unit:is_currently_flying()
 		local clip = air and FLY_CHARGE or CHARGE
-		local on = want and first and P.has_slot(first, clip) and P.features.anim and F.men_ok
+		local on = want and first and not F.arty and P.has_slot(first, clip) and P.features.anim and F.men_ok
 		local playing = on and P.anim_slot(first) == clip
 		if playing then F.charge_seen = true end
 		if F.lock then -- the charge attack, thrown on the run: neither clip over it
@@ -94,113 +116,47 @@ S["/script/derpy_tp/data"] = (S["/script/derpy_tp/data"] or "") .. [==[
 --   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)
 return {
 	shots = {
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {"wh2_dlc09_tmb_stalker_gaze_ror", 10, 1},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {"wh2_tmb_ushabti_bolt", 11, 1, "Battle_Individual_Small_Arms_Large_Bow_Release"},
-		["wh2_dlc11_cst_cav_deck_droppers_ror_0"] = {"wh2_dlc11_cst_bomb_deck_droppers_ror", 14, 1},
-		["wh2_dlc11_cst_inf_deck_gunners_ror_0"] = {"wh2_cst_rifle_deck_gunner_bullet_ror", 11, 1, "Battle_Individual_Small_Arms_Deck_Gun_RoR_Fire"},
-		["wh2_dlc11_cst_mon_necrofex_colossus_0"] = {"wh2_cst_necrofex_colossus_cannon_ball", 12, 4},
-		["wh2_dlc11_cst_mon_necrofex_colossus_ror_0"] = {"wh2_cst_necrofex_colossus_flame", 8, 1},
+		["derpy_dwf_vault_sweepers"] = {"derpy_dwf_repeaters_shotgun_bullet", 14, 8, "Battle_Individual_Small_Arms_Repeater_Rifle_Fire"},
 	},
 	abilities = {
 	},
 	fires = {
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {{0.094, 0, 2.492, 0}},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {{0.051, 0, 3.541, -0}},
-		["wh2_dlc11_cst_cav_deck_droppers_ror_0"] = {{1.757, -0.008, 0.51, 0.906}},
-		["wh2_dlc11_cst_inf_deck_gunners_ror_0"] = {{0.148, 0.114, 1.516, 1.55}},
-		["wh2_dlc11_cst_mon_necrofex_colossus_0"] = {{1.157, -0.141, 0.586, 1.452}},
-		["wh2_dlc11_cst_mon_necrofex_colossus_ror_0"] = {{1.157, -0.141, 0.586, 1.452}},
+		["derpy_dwf_vault_sweepers"] = {{0.1, 0.217, 1.027, 1.157}, {0.9, 0.217, 1.027, 1.157}, {1.98, 0.217, 1.027, 1.157}, {2.98, 0.217, 1.027, 1.157}},
 	},
 	fires_low = {
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {{0.087, -0.045, 2.081, 0.318}},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {{0.133, 0.358, 2.803, 0.729}},
-		["wh2_dlc11_cst_cav_deck_droppers_ror_0"] = {{1.757, -0.008, 0.51, 0.906}},
+		["derpy_dwf_vault_sweepers"] = {{0.1, 0.31, 0.52, 0.929}, {1.2, 0.31, 0.52, 0.929}},
 	},
 	fires_high = {
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {{0.086, 0.173, 3.475, 0.066}},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {{0.051, 0, 3.541, -0}},
-		["wh2_dlc11_cst_cav_deck_droppers_ror_0"] = {{1.757, -0.008, 0.51, 0.906}},
+		["derpy_dwf_vault_sweepers"] = {{0.1, 0.217, 1.421, 0.897}, {1.16, 0.217, 1.358, 0.904}},
 	},
 	raises = {
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {2.3, 2.3, 2.3},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {2.2, 2.2, 2.2},
-		["wh2_dlc11_cst_inf_deck_gunners_ror_0"] = {0, 1.7, 0},
+		["derpy_dwf_vault_sweepers"] = {1.5, 1.5, 1.5},
 	},
 	runs = {
-		["wh2_dlc09_tmb_cav_necropolis_knights_0"] = 1.7,
-		["wh2_dlc09_tmb_mon_necrosphinx_ror"] = 3.4,
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = 1.7,
-		["wh2_dlc09_tmb_mon_ushabti_1"] = 3.4,
-		["wh2_dlc11_cst_inf_depth_guard_0"] = 1.8,
-		["wh2_main_skv_cha_warlord_0"] = 3.2,
-		["wh2_main_skv_inf_clanrat_spearmen_0"] = 3.2,
-		["wh2_main_skv_inf_clanrats_0"] = 2.9,
-		["wh2_main_skv_inf_skavenslave_spearmen_0"] = 3.2,
-		["wh2_main_skv_inf_stormvermin_0"] = 4.3,
-		["wh3_dlc29_vmp_cha_necromancer_undeath"] = 1.9,
-		["wh3_dlc29_vmp_inf_lahmian_handmaidens_shadow"] = 2.7,
-		["wh_dlc02_vmp_cav_blood_knights_0"] = 1.9,
+		["derpy_dwf_vault_sweepers"] = 2.3,
+		["derpy_gp_dwf_great_mortar"] = 2.3,
+		["dwf_gp_quarrelstorm_01"] = 2.3,
+		["wh_main_dwf_art_flame_cannon"] = 2.3,
+		["wh_main_dwf_inf_hammerers"] = 2.4,
 	},
 	charges = {
-		["wh2_dlc09_tmb_cav_necropolis_knights_0"] = {0.8, 0},
-		["wh2_dlc09_tmb_inf_tomb_guard_ror"] = {0.6, 0},
-		["wh2_dlc09_tmb_mon_necrosphinx_ror"] = {0.9, 0},
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {0.8, 0},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {0.9, 0},
-		["wh2_dlc11_cst_inf_deck_gunners_ror_0"] = {0.8, 0},
-		["wh2_dlc11_cst_inf_depth_guard_0"] = {0.6, 0},
-		["wh2_dlc11_cst_mon_mournguls_ror_0"] = {1.1, 0},
-		["wh2_dlc11_cst_mon_necrofex_colossus_0"] = {1.4, 0},
-		["wh2_dlc11_cst_mon_necrofex_colossus_ror_0"] = {1.4, 0},
-		["wh2_main_skv_cha_warlord_0"] = {0.5, 0},
-		["wh2_main_skv_inf_clanrat_spearmen_0"] = {0.5, 0},
-		["wh2_main_skv_inf_clanrats_0"] = {0.5, 0},
-		["wh2_main_skv_inf_skavenslave_spearmen_0"] = {0.5, 0},
-		["wh2_main_skv_inf_stormvermin_0"] = {0.5, 0},
-		["wh3_dlc29_tmb_mon_khemric_titan"] = {1.2, 0},
-		["wh3_dlc29_tmb_mon_khemric_titan_ror"] = {1.2, 0},
-		["wh3_dlc29_vmp_cha_nagash"] = {4, 0},
-		["wh3_dlc29_vmp_cha_necromancer_undeath"] = {0.6, 0},
-		["wh3_dlc29_vmp_inf_lahmian_handmaidens_shadow"] = {0.6, 0},
-		["wh3_dlc29_vmp_mon_morghast_archai_ror"] = {1.1, 1.1},
-		["wh_dlc02_vmp_cav_blood_knights_0"] = {0.7, 0},
-		["wh_main_vmp_mon_terrorgheist"] = {1.6, 6},
+		["derpy_dwf_vault_sweepers"] = {0.6, 0},
+		["derpy_gp_dwf_great_mortar"] = {0.6, 0},
+		["dwf_gp_quarrelstorm_01"] = {0.6, 0},
+		["wh_main_dwf_art_flame_cannon"] = {0.6, 0},
+		["wh_main_dwf_inf_hammerers"] = {0.6, 0},
 	},
 	blanks = {
 	},
 	speeds = {
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = 100,
-		["wh2_dlc09_tmb_mon_ushabti_1"] = 70,
-		["wh2_dlc11_cst_cav_deck_droppers_ror_0"] = 28,
-		["wh2_dlc11_cst_inf_deck_gunners_ror_0"] = 100,
-		["wh2_dlc11_cst_mon_necrofex_colossus_0"] = 110,
-		["wh2_dlc11_cst_mon_necrofex_colossus_ror_0"] = 54,
+		["derpy_dwf_vault_sweepers"] = 200,
 	},
 	bodies = {
-		["wh2_dlc09_tmb_cav_necropolis_knights_0"] = {1.35, 4.6},
-		["wh2_dlc09_tmb_inf_tomb_guard_ror"] = {0.6, 1.8},
-		["wh2_dlc09_tmb_mon_necrosphinx_ror"] = {4, 6.75},
-		["wh2_dlc09_tmb_mon_sepulchral_stalkers_ror"] = {1.35, 3.2},
-		["wh2_dlc09_tmb_mon_ushabti_1"] = {1, 3.2},
-		["wh2_dlc11_cst_cav_deck_droppers_ror_0"] = {1.3, 3.35},
-		["wh2_dlc11_cst_inf_deck_gunners_ror_0"] = {1.3, 1.6},
-		["wh2_dlc11_cst_inf_depth_guard_0"] = {0.77, 2},
-		["wh2_dlc11_cst_mon_mournguls_ror_0"] = {1.65, 2.8},
-		["wh2_dlc11_cst_mon_necrofex_colossus_0"] = {2.5, 16.5},
-		["wh2_dlc11_cst_mon_necrofex_colossus_ror_0"] = {2.5, 16.5},
-		["wh2_main_skv_cha_warlord_0"] = {0.7, 1.9},
-		["wh2_main_skv_inf_clanrat_spearmen_0"] = {0.65, 1.5},
-		["wh2_main_skv_inf_clanrats_0"] = {0.65, 1.5},
-		["wh2_main_skv_inf_skavenslave_spearmen_0"] = {0.55, 1.3},
-		["wh2_main_skv_inf_stormvermin_0"] = {0.7, 1.6},
-		["wh3_dlc29_tmb_mon_khemric_titan"] = {7.5, 8},
-		["wh3_dlc29_tmb_mon_khemric_titan_ror"] = {7.5, 8},
-		["wh3_dlc29_vmp_cha_nagash"] = {1.4, 6.5},
-		["wh3_dlc29_vmp_cha_necromancer_undeath"] = {0.7, 2.2},
-		["wh3_dlc29_vmp_inf_lahmian_handmaidens_shadow"] = {0.7, 2.2},
-		["wh3_dlc29_vmp_mon_morghast_archai_ror"] = {1.4, 4.5},
-		["wh_dlc02_vmp_cav_blood_knights_0"] = {1.4, 3},
-		["wh_main_vmp_mon_terrorgheist"] = {3.5, 3.5},
+		["derpy_dwf_vault_sweepers"] = {0.5, 1.35},
+		["derpy_gp_dwf_great_mortar"] = {0.5, 1.35},
+		["dwf_gp_quarrelstorm_01"] = {0.5, 1.35},
+		["wh_main_dwf_art_flame_cannon"] = {0.5, 1.4},
+		["wh_main_dwf_inf_hammerers"] = {0.5, 1.35},
 	},
 }
 ]==]

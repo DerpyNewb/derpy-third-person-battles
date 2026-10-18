@@ -12,7 +12,8 @@ engine, and the design record.
 ## What it does
 
 - **A follow camera.** It trails the unit a moment behind, sits over the right, left or top
-  shoulder in ranged mode, centres on him in melee mode, and keeps out of the ground. V, or zooming
+  shoulder in ranged mode, centres on him in melee mode, and keeps out of the ground. Beside a
+  building or under a gatehouse it stays with him instead of rising over the roof. V, or zooming
   in all the way, goes first person.
 - **One man of a regiment.** In a regiment you play the front man. He walks, turns, swings and
   shoots alone while the rest hold their ground. A unit of one, such as a lord or a monster, is
@@ -30,8 +31,9 @@ engine, and the design record.
 - **Shooting.** A click fires one shot from the man himself: the raise, the shot and the reload.
   Hold the button and he keeps firing. Thrown bombs leave the hand late in the throw, as the
   animation does. A lord or monster fires at the crosshair through the game's own ground fire,
-  waits out his reload, and plays his whole firing animation. Artillery hands over to the game's
-  own Manual fire view.
+  waits out his reload, and plays his whole firing animation. A click on a gun fires it at the
+  enemy in range nearest the crosshair, and its crew never swing; the mode key hands over to the
+  game's own Manual fire view.
 - **A HUD of its own.** It shows the portrait, health, men, ammo and reload, plus a ten-slot
   ability hotbar with cooldowns and an action bar for run, attack, fire, charge and jump. It uses
   the game's own fonts and art, by path.
@@ -50,9 +52,9 @@ behind it, never the whole mod.
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 3,000 lines of Lua), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 412 tests, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 418 tests, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 365 probe scripts run against the live game, and 65 mutation sets (795 mutants) |
+| `Modding Files/source/lord_control/probes/` | 378 probe scripts run against the live game, and 67 mutation sets (815 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs and the core plan |
 | `docs/history/` | the handoffs written as each part was measured in game, and the working ledger |
 
@@ -73,11 +75,11 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 412 tests.
+  frame by frame and asserts on the commands the modules sent: 418 tests.
 - **Every rule is proven to be caught.** `probes/tp_mutate.py` plants one plausible mistake at a
   time in the shipped Lua, runs the suite, and restores the file byte for byte. It might be a
   guard dropped, a constant changed, or a branch inverted. A mutant the tests do not catch is a
-  finding, and so is an anchor that no longer matches the code. 795 mutants in 65 sets; 15 of
+  finding, and so is an anchor that no longer matches the code. 815 mutants in 67 sets; 15 of
   the oldest sets still carry stale anchors from code that was rewritten since.
 - **Measured, not assumed.** Animation slot ids, clip lengths, the camera's floor and the
   projectile release point were each read from the running game through the probes, or from

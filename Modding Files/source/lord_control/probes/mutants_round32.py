@@ -21,7 +21,7 @@ MUTANTS = [
      "tyrion_swings_through_his_mount_without_rider_attack_one"),
     (C, "P.play(mount, chosen, mask) return mount, chosen", "P.play(mount, 454, mask) return mount, 454",
      "a_riders_jump_plays_the_mounts_jump"),
-    (C, "local on = want and first and P.has_slot(first, clip) and P.features.anim and F.men_ok",
+    (C, "local on = want and first and not F.arty and P.has_slot(first, clip) and P.features.anim and F.men_ok",
      "local on = want and F.can_charge and P.features.anim and F.men_ok", "a_mount_can_sprint_without_a_moving_attack"),
     (C, "first = first and (P.mount(first) or first)\n\t\tlocal function has(list)",
      "local function has(list)", "a_riders_cheer_plays_the_mounts_celebration"),
@@ -38,7 +38,7 @@ MUTANTS = [
     (C, "function C.stand_down(now)\n\t\tF.native_attack = nil", "function C.stand_down(now)",
      "switching_to_ranged_cancels_a_native_melee_attack"),
     (C, "if P.has_slot(m, slot) then P.play(m, slot, mask) return m, slot end -- an artillery crewman's parent is his gun",
-     "-- no crew fallback", "artillery_crew_keep_their_own_melee_clip"),
+     "-- no crew fallback", "a_war_machine_crew_keep_their_own_melee_clip"),
     (P, "local tx, tz = mr.read_float(body, f[1]), mr.read_float(body, f[2])",
      "local tx, tz = mr.read_float(m, f[1]), mr.read_float(m, f[2])", "men_check_reads_the_mounts_steering_copies"),
 ]
