@@ -55,8 +55,12 @@ return function(E)
 
 	local function capabilities(m)
 		m = m and (P.mount(m) or m)
+		-- a slot whose every clip is an empty file is none (data.lua blanks): the Great Unclean One's jump is in his
+		-- fragment, and "clip 489 never played" four times in the author's log, 2026-10-18
+		local blank = {}
+		for _, s in ipairs(E.D.blanks and E.D.blanks[F.utype] or {}) do blank[s] = true end
 		local function any(a)
-			if m then for s = a, a + 4 do if P.has_slot(m, s) then return true end end end
+			if m then for s = a, a + 4 do if P.has_slot(m, s) and not blank[s] then return true end end end
 			return false
 		end
 		F.can_charge, F.can_jump = any(484), any(489)
@@ -253,6 +257,8 @@ return function(E)
 				elseif F.swallow then
 					F.swallow = held or nil -- the click that cast is no shot: fighting waits for the button to come up
 				else
+					-- a move key ends a clicked ground-fire shot, as it drops one man's: it holds his walk, and waits out a reload
+					if F.firing and not held and (kf ~= 0 or kr ~= 0) then E.combat.stop_fire() end
 					E.combat.attack(gnow, F.dragging and clicked, F.dragging and held)
 				end
 				for n = 1, 10 do

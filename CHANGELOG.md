@@ -12,6 +12,10 @@
 - A swing after a turn order is no longer cut by the next click or the charge run.
 - One man of a regiment sprints at full speed: monsters (Spawn of Tzeentch, Champions of Slaanesh) ran no faster than their run.
 - Flyers without a mount (Be'lakor) swing their flying attacks in the air; no jump attack in the air.
+- Ranged lords and monsters (Ku'gath): a click's shot waits for the reload and plays its whole throw.
+- A move key cancels a shot still waiting to fire.
+- The sprint's charge run plays each full cycle before it repeats.
+- No jump for units whose jump animation is an empty file (Great Unclean One).
 
 ## 2026-10-17
 

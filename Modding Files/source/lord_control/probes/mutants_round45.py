@@ -15,7 +15,7 @@ NONE = "a_flyer_with_no_fly_charge_plays_no_charge_in_the_air"
 ONE = "a_single_entity_is_steered_alone_and_sprints"
 MUTANTS = [
     # the fly charge
-    (C, "local clip = F.unit:is_currently_flying() and FLY_CHARGE or CHARGE", "local clip = CHARGE", AIR),
+    (C, "local clip = air and FLY_CHARGE or CHARGE", "local clip = CHARGE", AIR),
     (C, "if P.has_slot(m, clip) then P.play(m, clip, 6) end", "if P.has_slot(m, CHARGE) then P.play(m, CHARGE, 6) end", AIR),
     (C, "and P.has_slot(first, clip) and P.features.anim", "and P.has_slot(first, CHARGE) and P.features.anim", NONE),
     (C, "and now >= F.next_charge and not F.unit:is_currently_flying() then", "and now >= F.next_charge then", AIR),

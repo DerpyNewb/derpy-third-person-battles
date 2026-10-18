@@ -24,9 +24,10 @@ MUTANTS = [
     (U, 'key_of = {walk = "walk",', 'key_of = {walk = "attack",', TOGGLE),
     # Shift held (2026-10-16: was Q held on the run; held on the move now, from a walk too)
     (M, "P.held(S.keys.sprint) and F.dragging", "P.pressed(S.keys.sprint) and F.dragging", QHELD),
-    (C, "F.charge_at = now + CHARGE_GAP", "F.charge_at = now + 60", QHELD),
+    (C, "F.charge_at, F.charge_seen = now + (len > CHARGE_LEAD and len - CHARGE_LEAD or LOCK_MAX), false",
+        "F.charge_at, F.charge_seen = now + 60, false", QHELD),
     (C, "P.play(m, clip, 6)", "P.play(m, clip, 0)", QHELD),
-    (C, "local CHARGE, CHARGE_GAP, WALK_1 = 135,", "local CHARGE, CHARGE_GAP, WALK_1 = 136,", QHELD),
+    (C, "local CHARGE, CHARGE_LEAD, WALK_1 = 135,", "local CHARGE, CHARGE_LEAD, WALK_1 = 136,", QHELD),
     (C, "\t\t\teach(function(m) if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end)\n", "", "a_lord_charges_too_and_the_charge_ends_on_release"),
     (V, "if P.anim_slot(m) and not F.charging and not F.lock and now", "if P.anim_slot(m) and not F.lock and now", QHELD),
     # (2026-10-16: charge_run's own lock check went; C.sprint's is mutants_round28's)

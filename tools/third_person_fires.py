@@ -42,6 +42,9 @@ RAISES = (1553, 1554, 1555)
 # MOVING_ATTACK_1-2, the charge attack (the only two any unit has): steered, the engine never reports its end, so
 # combat.lua ends it at its length (measured 2026-10-16)
 RUNS = (484, 485)
+# CHARGE, FLY_CHARGE_AIR_TO_AIR: the sprint's clip. It does not loop (measured 2026-10-18: Harald's 0.8 s), so combat.lua
+# sends it again at its length; a fixed 0.6 s cut every longer one mid-stride, the Great Unclean One's 1.9 s at a third
+CHARGES = (135, 102)
 BIN = "animations/database/battle/bin/"
 CA_ANIM = ("anim2.pack", "anim.pack", "anim_3.pack")
 # CA's own packs in data/: everything but these prefixes is a mod
@@ -152,16 +155,39 @@ class Files:
             f.seek(off)
             return unpack(f.read(size), comp)
 
+    def size(self, path):
+        """Its byte count, None when no pack read here holds it; only a tiny entry is unpacked to count it."""
+        v = self.at.get(path.replace("\\", "/").lower())
+        if v is None or isinstance(v, bytes):
+            return None if v is None else len(v)
+        return len(self.get(path)) if v[2] < 64 else v[2]
 
-def lands(packs):
-    """land unit key -> row, a mod's row over CA's."""
+
+def blank_slots(files, man_animation):
+    """The slots of his bin whose every clip is an empty file: the slot is in his fragment, so P.has_slot finds it, and the
+    engine plays nothing (measured 2026-10-18: CA's Great Unclean One's JUMPING_ATTACK_1, hu09b_sw_jump_attack_01.anim,
+    0 bytes - "clip 489 never played" four times in the author's log; the only one of 1,899 bins). A clip no pack read
+    here holds is not counted: it may be in one these do not read."""
+    b = files.get(BIN + man_animation + ".bin")
+    if not b:
+        return None
+    try:
+        _h, rows = RA.read_bin(b)
+    except (ValueError, struct.error):
+        return None
+    out = sorted({r["slot"] for r in rows if r["anims"] and all(files.size(a) == 0 for a, _m, _s in r["anims"])})
+    return out or None
+
+
+def lands(packs, table="land_units"):
+    """land unit key -> row, a mod's row over CA's (or another table's key -> row)."""
     out = {}
     for p in packs + [DB_PACK]:
         try:
-            for _p, _v, rows in load(p, "land_units_tables"):
+            for _p, _v, rows in load(p, table + "_tables"):
                 for r in rows:
                     out.setdefault(r["key"], r)
-        except Exception:  # a pack with no land_units, or a table version RPFM's schema does not know
+        except Exception:  # a pack with no such table, or a table version RPFM's schema does not know
             pass
     return out
 
@@ -183,20 +209,32 @@ def times_of(files, man_animation, slots=(FIRE, GRENADIER, RIDER_FIRE)):
     return None
 
 
-def build(*specs, raises=None, runs=None):
+def build(*specs, raises=None, runs=None, charges=None, blanks=None):
     """land unit key -> FIRE_POS times, for every unit with a missile weapon whose fire clip carries any. specs: the
     slot lists to read, each in order of preference (default FIRE_LEVEL, else GRENADIER, else RIDER_FIRE); one dict per spec, or the
     one dict when given none or one. raises: a dict to fill with each such unit's raise_lengths. runs: one to fill with
-    every land unit's longest charge attack, s."""
+    every land unit's longest charge attack, s. charges: one to fill with every land unit's (CHARGE, FLY_CHARGE) lengths,
+    s, the longest of each, 0 for none; blanks: one with its blank_slots. Both off the body combat.lua plays them on: his
+    mount's bin (mounts.animation) when he rides one, else his own."""
     specs = specs or ((FIRE, GRENADIER, RIDER_FIRE),)
     mods = mod_packs()
     files = Files(mods + [os.path.join(DATA, n) for n in CA_ANIM])
+    mounts = lands(mods, "mounts") if charges is not None or blanks is not None else {}
     outs = [{} for _ in specs]
     for key, r in lands(mods).items():
         if runs is not None and r.get("man_animation"):
             t = raise_lengths(files, r["man_animation"], RUNS, max)
             if t:
                 runs[key] = max(t)
+        body = (mounts.get(r.get("mount")) or {}).get("animation") or r.get("man_animation")
+        if charges is not None and body:
+            t = raise_lengths(files, body, CHARGES, max)
+            if t:
+                charges[key] = t
+        if blanks is not None and body:
+            t = blank_slots(files, body)
+            if t:
+                blanks[key] = t
         if r.get("primary_missile_weapon") and r.get("man_animation"):
             for out, slots in zip(outs, specs):
                 t = times_of(files, r["man_animation"], slots)
@@ -221,6 +259,17 @@ def _selftest():
     f = Files.__new__(Files)
     f.at = {"animations/x/a.anm.meta": ev(2.3)}
     assert f.get("animations\\X\\a.anm.meta") == ev(2.3), "a backslashed, upper-case meta path is found"
+    assert f.size("animations/x/A.anm.meta") == len(ev(2.3)) and f.size("animations/none.anim") is None
+    f.at["animations/x/empty.anim"], f.at["animations/x/full.anim"] = b"", head
+    # a bin of two rows: a slot whose only clip is empty, and one with an empty and a full variant
+    f.get = lambda p: {BIN + "b.bin": "bin"}.get(p) or Files.get(f, p)
+    RA.read_bin, real = (lambda b: (None, [{"slot": 489, "anims": [("animations/x/empty.anim", None, None)]},
+                                           {"slot": 454, "anims": [("animations/x/empty.anim", None, None),
+                                                                   ("animations/x/full.anim", None, None)]}])), RA.read_bin
+    try:
+        assert blank_slots(f, "b") == [489], "only a slot with nothing but empty clips: %s" % blank_slots(f, "b")
+    finally:
+        RA.read_bin = real
     print("selftest ok")
 
 

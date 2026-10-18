@@ -10,6 +10,9 @@ local LOCK_MAX, LOCK_WAIT = 3, 1
 local TURN_DEG, TURN_WAIT_MS, MAX_MODELS = 25, 350, 160
 local AIM_COS, AIM_RANGE, AIM_CLOSE = 0.707, 150, 8 -- a melee target: inside 45 deg and 150 m, or 8 m any way
 local AIM_STEP, FIRE_REAIM, FIRE_ARC, FIRE_COMMIT, STEER_GAP = 2, 5, 20, 4, 0.5 -- AIM_STEP: m a march step of the view
+-- s a ground-fire shot's clip may run on past the shot leaving before it is halted anyway: a fire clip runs to 5.7 s
+-- (Ku'gath's throw, 2.1 s of it after the nurgling leaves; a rocket barrage spawns 1.0 to 5.25 s in)
+local FIRE_TAIL = 6
 -- m from a regiment's centre its men can stand: a wide line of 160 is ~40 m across
 local SPREAD = 30
 -- 9.0 ids (AssetEditor's dlc24 list + 2): SHOOT_READY_TO_AIM_LEVEL, FIRE_LEVEL; the reload slot comes from the
@@ -31,8 +34,9 @@ local SHOT_DELAY_MS, SHOT_H, SHOT_FWD = 300, 1.5, 1.5 -- anim to release; m up; 
 local SHOT_CLEAR = 1.1
 -- a thrown bomb's release (measured 2026-10-15 in anim2.pack: both blasting-charge throws carry FIRE_POS at 2.2 and 2.3 s)
 local THROW_MS = 2200
--- the charge run: CHARGE, sent again inside its cycle (measured 2026-10-15: under 1 s, mask 6 only, he keeps his speed)
-local CHARGE, CHARGE_GAP, WALK_1 = 135, 0.6, 42
+-- the charge run: CHARGE at mask 6 (measured 2026-10-15: he keeps his speed under it), sent again CHARGE_LEAD s before
+-- its own end - a model tick, so the next starts as it ends (ponytail: a guess until measured in game)
+local CHARGE, CHARGE_LEAD, WALK_1 = 135, 0.1, 42
 local FLY_CHARGE = 102 -- FLY_CHARGE_AIR_TO_AIR
 -- the exe's body-mask enum (exe+3926238, read 2026-10-16): 0 NONE (the clip's own metadata), 1 TORSO_AND_ARMS,
 -- 2 SPINE_AND_CHILDREN, 3 NECK_AND_CHILDREN, 4 LEFT_ARM, 5 RIGHT_ARM, 6 FULL_BODY
@@ -330,16 +334,30 @@ return function(E)
 		F.last_order = bm:time_elapsed_ms() / 1000 -- an order: the next click's fire waits STEER_GAP (round 25)
 	end
 
-	-- a click commits to one shot: the order stays until ammo drops or FIRE_COMMIT passes; held, it stays
+	-- a click commits to one shot: the order stays until the shot is out and the clip it left in is over, or until
+	-- FIRE_COMMIT past a whole reload and the time his fire clip lets it go (data.lua shots and fires); held, it stays;
+	-- a move key ends it (main.lua). The author, 2026-10-18: "Kugath cant use his ranged attack ... why cant the full
+	-- animation play" - measured: the throw started 7 s after the order (his reload; base 10 s) and the nurgling left
+	-- 3.8 s into its 5.8 s clip, and a halt 4 s from the click stopped every one before it began
 	function C.ground(now, clicked, held)
 		if clicked and not F.firing and E.can_shoot() then
 			-- the commit counts from the click: a turn that never ends does not keep him firing (round 25)
-			F.firing, F.fire_ammo, F.fire_order_t = true, F.unit:ammo_left(), now
+			F.firing, F.fire_ammo, F.fire_order_t, F.fire_clip = true, F.unit:ammo_left(), now, nil
 		end
 		if not F.firing then return end
-		local shot = F.unit:ammo_left() < F.fire_ammo
-		local expired = F.fire_order_t and now - F.fire_order_t > FIRE_COMMIT
-		if not E.can_shoot() or (not held and (shot or expired)) then C.stop_fire() else fire(now) end
+		local first = F.model or P.models(F.unit)[1]
+		local clip = first and P.anim_slot(first)
+		local ammo = F.unit:ammo_left()
+		if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip = ammo, {clip, now} end -- a shot out, and the clip it left in
+		local can, last = E.can_shoot(), F.fire_clip
+		if last then
+			local over = not last[1] or clip ~= last[1] or now - last[2] > FIRE_TAIL
+			if (not held or not can) and over then C.stop_fire() elseif held and can then fire(now) end
+			return
+		end
+		local fires, shot = E.D.fires[F.utype], E.D.shots[F.utype]
+		local wait = FIRE_COMMIT + (fires and fires[1] and fires[1][1] or 0) + (shot and shot[2] or 0)
+		if not can or (not held and now - F.fire_order_t > wait) then C.stop_fire() else fire(now) end
 	end
 
 	-- A queued request is not an animation start; idle and hit reactions cannot complete a reload. Aim and
@@ -689,20 +707,29 @@ return function(E)
 	-- the charge (the author, 2026-10-15: "charging running should be triggered with q as a continuious press"): the
 	-- sprint plays CHARGE for as long as it lasts; over, WALK_1 at mask 0 ends it (move.lua's unlatch). In the air, his
 	-- FLY_CHARGE_AIR_TO_AIR, else none (the author, 2026-10-18: "charging belakors triggers his land charge run"; 86 of the
-	-- 123 skeletons that fly have one, read 2026-10-18), and no charge attack: that is a ground clip
+	-- 123 skeletons that fly have one, read 2026-10-18), and no charge attack: that is a ground clip.
+	-- The clip does not loop: it goes again at its own end - its length off its .anim (data.lua charges), and at once if
+	-- the engine reports it over first; a length unknown, only then (LOCK_MAX at most). A fixed 0.6 s cut every one
+	-- mid-stride (the author, 2026-10-18: "looks like its not looping but being cut off mid animation"; Harald's is 0.8 s,
+	-- the Great Unclean One's 1.9)
 	function C.charge_run(now, want)
 		local first = F.model or P.models(F.unit)[1]
 		first = first and (P.mount(first) or first)
-		local clip = F.unit:is_currently_flying() and FLY_CHARGE or CHARGE
+		local air = F.unit:is_currently_flying()
+		local clip = air and FLY_CHARGE or CHARGE
 		local on = want and first and P.has_slot(first, clip) and P.features.anim and F.men_ok
+		local playing = on and P.anim_slot(first) == clip
+		if playing then F.charge_seen = true end
 		if F.lock then -- the charge attack, thrown on the run: neither clip over it
-		elseif on and now >= (F.charge_at or 0) then
+		elseif on and (now >= (F.charge_at or 0) or F.charge_seen and not playing) then
 			each(function(m) m = P.mount(m) or m if P.has_slot(m, clip) then P.play(m, clip, 6) end end)
-			F.charge_at = now + CHARGE_GAP
+			local len = E.D.charges and E.D.charges[F.utype]
+			len = len and len[air and 2 or 1] or 0
+			F.charge_at, F.charge_seen = now + (len > CHARGE_LEAD and len - CHARGE_LEAD or LOCK_MAX), false
 		elseif not on and F.charging then
 			each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end)
 		end
-		if not on then F.charge_at = nil end
+		if not on then F.charge_at, F.charge_seen = nil, nil end
 		F.charging = on
 	end
 

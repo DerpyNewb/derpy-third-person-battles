@@ -25,7 +25,7 @@ MUTANTS = [
     (C, "if C.locked(now) or now < F.next_swing then return end", "if now < F.next_swing then return end",
      "a_right_click_waits_for_a_jump"),
     # ground fire: the commit from the click; the gap from any order, the walk's halt included
-    (C, "F.firing, F.fire_ammo, F.fire_order_t = true, F.unit:ammo_left(), now", "F.firing, F.fire_ammo = true, F.unit:ammo_left()",
+    (C, "(not held and now - F.fire_order_t > wait)", "(not held and false)",
      "ground_fire_that_cannot_turn_gives_up_after_its_commit"),
     (V, "F.driving, F.last_order = false, bm:time_elapsed_ms() / 1000", "F.driving = false",
      "a_ground_fire_click_just_after_stopping_is_not_dropped"),

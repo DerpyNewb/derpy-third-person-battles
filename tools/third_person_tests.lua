@@ -894,6 +894,52 @@ T.ground_fire_stops_on_focus_loss = function()
 	check(H.count("uc:halt") == halts + 1, "unfocused with a shot gone: halted")
 end
 
+-- the author, 2026-10-18: "Kugath cant use his ranged attack ... why cant the full animation play". His only fire clips are
+-- a rider's (RIDER_FIRE_FORWARD/LEFT/RIGHT_LEVEL, 2105/2108/2111), 5.7 s, the nurgling leaving 3.6 s in (data.lua fires,
+-- off its FIRE_POS). A click held the order 4 s and halted. Measured in game (probes/zz_tp_ground_fire_free.lua, the
+-- order sent and nothing halting it): the throw began 7.0 s after the order - his reload, base 10 s - and the nurgling
+-- left at 10.8 s, the clip over at 12.8. Halted at 4 s, none ever began
+T.a_late_throw_is_held_to_its_release_and_plays_out = function()
+	local u = playing({type = "wh3_main_nur_cha_ku_gath_plaguefather_0", men = 1, range = 100, ammo = 10})
+	H.step(0.5) -- clear of the start's halt
+	local halts, man = H.count("uc:halt"), u._models[1]
+	H.tap("Left mouse")
+	check(H.count("uc:attack_location") == 1, "a click orders ground fire")
+	H.step(7) man.anim_slot = 2105 -- the engine's throw, once he has reloaded
+	H.step(3.7)
+	check(H.count("uc:halt") == halts, "10.7 s from the click, the nurgling not out yet: the order stays")
+	u._ammo = 9 H.step(1)
+	check(H.count("uc:halt") == halts, "out, and the throw still playing: not halted")
+	man.anim_slot = nil H.step(1 / 60)
+	check(H.count("uc:halt") == halts + 1, "the throw over: halted")
+end
+
+-- clicked just after a shot: a whole reload (his base 10 s), then 3.8 s more to the release - past 4 s and the reload
+T.a_click_just_after_a_shot_waits_the_whole_reload_and_the_release = function()
+	local u = playing({type = "wh3_main_nur_cha_ku_gath_plaguefather_0", men = 1, range = 100, ammo = 10})
+	H.step(0.5)
+	local halts, man = H.count("uc:halt"), u._models[1]
+	H.tap("Left mouse")
+	H.step(10.3) man.anim_slot = 2105
+	H.step(3.85)
+	check(H.count("uc:halt") == halts, "14.15 s from the click, the nurgling not out yet: the order stays")
+	u._ammo = 9 man.anim_slot = nil H.step(1 / 60)
+	check(H.count("uc:halt") == halts + 1, "out: halted")
+end
+
+-- that wait holds his walk (main.lua drives no walk while he fires): a move key ends it, as it drops one man's shot
+T.a_move_key_ends_a_ground_fire_shot_still_to_come = function()
+	local u = playing({type = "wh3_main_nur_cha_ku_gath_plaguefather_0", men = 1, range = 100, ammo = 10})
+	H.step(0.5)
+	H.tap("Left mouse") H.step(2)
+	local halts, walks = H.count("uc:halt"), H.count("steer")
+	check(H.E.F.firing, "the click's shot waits")
+	H.down("W") H.step(1)
+	check(not H.E.F.firing and H.count("uc:halt") == halts + 1, "W: the shot is dropped")
+	check(H.count("steer") > walks, "and he walks: " .. (H.count("steer") - walks))
+	H.up("W")
+end
+
 T.mode_switches_melee_and_ranged = function()
 	playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
 	H.tap("Right mouse")
@@ -3543,7 +3589,7 @@ end
 -- the author, 2026-10-15: "q for charge animation when running", "the animation being triggered with q is not the
 -- attack", then "charging running should be triggered with q as a continuious press"; 2026-10-16: "shift button as the
 -- charge or sprint button". Shift held on the move is the charge:
--- CHARGE (135) at mask 6, sent again inside its sub-second cycle (measured: he keeps his speed under it); a left click
+-- CHARGE (135) at mask 6, sent again at its end (measured: he keeps his speed under it); a left click
 -- in the charge throws the charge attack, MOVING_ATTACK_1-2 (484-485, the only two any unit has, measured)
 local function runs() local n = 0 for _, c in ipairs(H.all("play")) do if c[3] >= 484 and c[3] <= 488 then n = n + 1 end end return n end
 local function plays_of(slot) local n = 0 for _, c in ipairs(H.all("play")) do if c[3] == slot then n = n + 1 end end return n end
@@ -3557,7 +3603,8 @@ T.shift_held_on_the_move_charges_for_as_long_as_it_is_held = function()
 	H.down("W") H.step(0.3)
 	local walks = plays_of(42)
 	H.down("Shift") H.step(5)
-	check(charges() >= 6, "5 s held: still charging: " .. charges())
+	-- a clip of no known length the harness's steer latches: sent again at LOCK_MAX, 3 s
+	check(H.E.F.charging and charges() == 2, "5 s held: still charging: " .. charges())
 	check(plays_of(42) == walks, "the walk does not cut the charge clip")
 	H.up("Shift") H.step(0.1)
 	local p = H.last("play")
@@ -3642,6 +3689,52 @@ T.a_lord_charges_too_and_the_charge_ends_on_release = function()
 	local p = H.last("play")
 	check(p and p[3] == 42 and p[4] == 0, "let go: the clip ends")
 	H.up("W")
+end
+
+-- the author, 2026-10-18: "looping charging animation is not good and looks like its not looping but being cut off mid
+-- animation". CHARGE does not loop (Harald's 0.8 s, measured 2026-10-18) and was sent again every 0.6 s whatever its
+-- length: the Great Unclean One's 1.9 s cut at a third. It goes again at its own length (data.lua charges)
+local function sends_of(slot, id) local n = 0 for _, c in ipairs(H.all("play")) do if c[3] == slot and c[2] == id then n = n + 1 end end return n end
+T.the_charge_clip_plays_its_whole_cycle_before_it_goes_again = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, clip_ms = {[135] = 1900}}}})
+	H.E.D.charges = {wh_test_melee = {1.9, 0}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	local id = H.E.F.model.id
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(0.1)
+	check(sends_of(CHARGE, id) == 1, "the charge starts: " .. sends_of(CHARGE, id))
+	H.step(1.65)
+	check(sends_of(CHARGE, id) == 1, "1.75 s into a 1.9 s cycle: not sent again: " .. sends_of(CHARGE, id))
+	H.step(0.2)
+	check(sends_of(CHARGE, id) == 2, "at its end: again, " .. sends_of(CHARGE, id))
+	H.up("Shift") H.up("W")
+end
+
+-- a clip data.lua has no length for (a mod not installed where the pack was built) goes again once it is seen over,
+-- never cut on a guess
+T.a_charge_of_no_known_length_goes_again_when_it_ends = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	local man = H.E.F.model
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(1.2)
+	check(sends_of(CHARGE, man.id) == 1, "1.2 s in, still playing: once, " .. sends_of(CHARGE, man.id))
+	man.anim_slot = nil H.step(0.1) -- the engine reports it over (the harness's steer latches a clip for good)
+	check(sends_of(CHARGE, man.id) == 2, "over: again, " .. sends_of(CHARGE, man.id))
+	H.up("Shift") H.up("W")
+end
+
+-- the author's log, 2026-10-18: the Great Unclean One's jump "never played", 4 times. CA ships its JUMPING_ATTACK_1
+-- (hu09b_sw_jump_attack_01.anim) as an empty file - the slot is in his fragment and the engine has nothing to play
+-- (data.lua blanks; the only one of 1,899 bins)
+T.a_jump_whose_clip_is_an_empty_file_is_no_jump = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.E.D.blanks = {wh_test_melee = {489, 490, 491, 492, 493}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	check(H.E.F.can_jump == false, "no jump: " .. tostring(H.E.F.can_jump))
+	check(H.E.F.can_charge, "the rest stays")
+	H.tap("E") H.step(0.1)
+	check(plays_of(489) == 0, "E plays nothing")
 end
 
 -- the author, 2026-10-15: "e doesnt work effectively, it should let its animation play without being overrided with

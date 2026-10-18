@@ -121,7 +121,7 @@ start or command `3918e90`, chosen by its fragment's `+0x127c` bit 2.
 | `3919350` | the regiment's walk | the pack's guard stops it |
 | `39199f8`, `3ae1928` | the engine's moves | guard stops |
 | `3ad24b8` | the engine's melee attack | guard stops |
-| `3ad2d18` | the engine's charge | measured 2026-10-18 (`probes/zz_tp_charge_gait.lua`, Harald on CA's `attack_unit` from 45 m): his own walk for 0.4 s, then this for 5.4 s at 4.0 m/s against his run's 3.3, **no forced clip on him** (the charge cycle is his locomotion and loops), then MOVING_ATTACK_2 (485) at contact. The walk's gait byte `+0x3ae` stayed 0 throughout. The pack's sprint fakes it with the CHARGE clip (135), 0.8 s and not looping on Harald, re-sent every 0.6 s |
+| `3ad2d18` | the engine's charge | measured 2026-10-18 (`probes/zz_tp_charge_gait.lua`, Harald on CA's `attack_unit` from 45 m): his own walk for 0.4 s, then this for 5.4 s at 4.0 m/s against his run's 3.3, **no forced clip on him** (the charge cycle is his locomotion and loops), then MOVING_ATTACK_2 (485) at contact. The walk's gait byte `+0x3ae` stayed 0 throughout. The pack's sprint fakes it with the CHARGE clip (135), 0.8 s and not looping on Harald; re-sent every 0.6 s until 2026-10-18, now at its own length (data.lua `charges`) |
 | `39126f0` | stand in his state | what `walk_stop` `exe+306edd4` leaves |
 | `3919b28` | idle | |
 | `3ae2de8` | defend (block) | order kind 18 under it, measured |
