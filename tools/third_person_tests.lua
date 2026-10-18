@@ -1003,6 +1003,32 @@ T.a_crews_shot_waits_for_every_shooting_clip_and_no_idle = function()
 	check(H.count("uc:halt") == halts + 1, "the body in an idle: halted as his clip ends")
 end
 
+-- the author, 2026-10-18: "theres a bug when moving the mouse and aiming for fire, it keeps repeating the aim animation and
+-- never firing". Their log, the Necrofex Colossus: a new fire order every 0.6 s as the crosshair moved, 13 in 14 s, and his
+-- FIRE_LEVEL is one 9.5 s clip, aim to fire, the shot leaving 2.66 s in. A shot under way is not re-aimed; between shots it is
+T.a_shot_under_way_is_not_re_aimed = function()
+	local u = crew_on_one_body()
+	H.step(0.5)
+	local body = u._models[1].mount
+	H.tap("Left mouse")
+	local orders = H.count("uc:attack_location")
+	H.step(0.6) body.anim_slot = 1557 -- the colossus aims
+	for _ = 1, 4 do H.mouse = {20, 0} H.step(1 / 60) H.step(0.7) end
+	check(H.count("uc:attack_location") == orders, "the crosshair moved, his clip under way: no new order, "
+		.. (H.count("uc:attack_location") - orders))
+	body.anim_slot = nil H.step(0.1)
+	check(H.count("uc:attack_location") == orders + 1, "his clip over: aimed again, " .. (H.count("uc:attack_location") - orders))
+end
+
+-- the click's own order is never held back: clicked while his last shot's reload plays, it goes at once
+T.a_click_in_a_shooting_clip_still_orders_at_once = function()
+	local u = crew_on_one_body()
+	H.step(0.5)
+	u._models[1].mount.anim_slot = 1564 -- RELOAD_1
+	H.tap("Left mouse")
+	check(H.count("uc:attack_location") == 1, "the click's order: " .. H.count("uc:attack_location"))
+end
+
 -- a swing plays once, on the colossus: not once for each of the five men riding him
 T.a_crew_on_one_body_swings_once = function()
 	local u = crew_on_one_body()

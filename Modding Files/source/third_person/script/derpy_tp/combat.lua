@@ -304,9 +304,20 @@ return function(E)
 
 	-- ground fire at the aim (single entities and regiments without a one-man shot): turned first when
 	-- the aim is outside FIRE_ARC; re-aimed when the point moves FIRE_REAIM, no faster than STEER_GAP
+	-- a shooting clip on him or on his body
+	local function in_shot()
+		local first = F.model or P.models(F.unit)[1]
+		local body = first and P.mount(first)
+		return shooting(first and P.anim_slot(first)) or shooting(body and P.anim_slot(body))
+	end
+
 	local function fire(now)
 		local ax, ay, az = C.aim_point(F.unit:missile_range())
 		if not ax then return end
+		-- a shot under way is not re-aimed or turned: a new order starts the engine's aim again (the author, 2026-10-18:
+		-- "moving the mouse and aiming for fire, it keeps repeating the aim animation and never firing" - the Necrofex
+		-- Colossus, 13 orders in 14 s, his FIRE_LEVEL letting the shot go 2.66 s into 9.5)
+		if F.fire_at and in_shot() then return end
 		local q = F.unit:position()
 		local want = math.deg(math.atan2(ax - q:get_x(), az - q:get_z())) % 360
 		if math.abs((want - F.unit:bearing() + 540) % 360 - 180) > FIRE_ARC then

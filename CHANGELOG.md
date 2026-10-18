@@ -18,6 +18,7 @@
 - No jump for units whose jump animation is an empty file (Great Unclean One).
 - Crewed monsters (Necrofex Colossus, Warsphinx) are played as one body: ranged fire, swings and the walk work.
 - A crewed monster's shot plays its whole firing animation.
+- Moving the mouse during a shot no longer restarts the aim: the shot fires.
 
 ## 2026-10-17
 

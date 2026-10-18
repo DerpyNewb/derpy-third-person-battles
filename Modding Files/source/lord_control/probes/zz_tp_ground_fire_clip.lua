@@ -26,8 +26,11 @@ bm:repeat_real_callback(function()
 			E.combat.attack(now, true, false)
 			note("click at " .. now)
 		end
-		-- _G.TP_GF_NUDGE: deg the view turns every 1.5 s while the shot waits, as a player's camera does (re-aims past 5 m)
-		if _G.TP_GF_NUDGE and T.n > 10 and T.n % 15 == 0 and E.F.firing then
+		-- _G.TP_GF_NUDGE: deg the view turns every _G.TP_GF_EVERY ticks (1.5 s) while the shot waits, as a player's camera
+		-- does (re-aims past 5 m); the sign flips each time, so the view swings about the first aim
+		if _G.TP_GF_NUDGE and T.n > 10 and T.n % (_G.TP_GF_EVERY or 15) == 0 and E.F.firing then
+			T.sign = -(T.sign or -1)
+			_G.TP_GF_NUDGE = math.abs(_G.TP_GF_NUDGE) * T.sign
 			E.rig.yaw = E.rig.yaw + math.rad(_G.TP_GF_NUDGE)
 			note(math.floor(now * 10 + 0.5) / 10 .. " nudge")
 		end
