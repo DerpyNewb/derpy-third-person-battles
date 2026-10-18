@@ -16,9 +16,9 @@ MUTANTS = [
     (C, "local wait = FIRE_COMMIT + (fires and fires[1] and fires[1][1] or 0)", "local wait = FIRE_COMMIT",
         "a_click_just_after_a_shot_waits_the_whole_reload_and_the_release"),
     # after the shot: the clip it left in plays out
-    (C, "local over = not last[1] or clip ~= last[1] or now - last[2] > FIRE_TAIL", "local over = true", THROW),
-    (C, "if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip = ammo, {clip, now} end",
-        "if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip = ammo, {nil, now} end", THROW),
+    (C, "local over = (not last[1] or mine ~= last[1]) and (not last[2] or its ~= last[2]) or now - last[3] > FIRE_TAIL",
+        "local over = true", THROW),
+    (C, "F.fire_clip = ammo, {shooting(mine) and mine, shooting(its) and its, now}", "F.fire_clip = ammo, {nil, nil, now}", THROW),
     # a move key ends it
     (M, "if F.firing and not held and (kf ~= 0 or kr ~= 0) then E.combat.stop_fire() end", "", MOVE),
     # the charge at its own length, and at once when seen over

@@ -2,6 +2,19 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
+	-- deactivate f2 when changing ammo"; measured: Deithland's mortar was back 0.2 s after the cast, under a ui id of
+	-- its own). Waited for in battle time, a wind-up included (CA's dragon forms wind up 5 s), and for its unit card: it
+	-- came a frame after the unit, and taken over before it the HUD had no context (portrait and slots off for good)
+	local SWAP_WAIT = 10
+	function M.follow()
+		local army, before = bm:get_player_army(), {}
+		for i = 1, army:units():count() do before[army:units():item(i):unique_ui_id()] = true end
+		swap = {before = before, till = bm:time_elapsed_ms() / 1000 + SWAP_WAIT}
+	end
+	local function follow_swap(gnow)
+		if gnow > swap.till then swap = nil return end
+		local army = bm:get_player_army()
+		for i = 1, army:units():count() do
 			local u = army:units():item(i)
 			if not swap.before[u:unique_ui_id()] and u:number_of_men_alive() > 0
 				and find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id())) then M.start(u) return end
@@ -43,8 +56,9 @@ S["/script/derpy_tp/main"] = (S["/script/derpy_tp/main"] or "") .. [==[
 		-- one man of a regiment, flyers too (the author, 2026-10-17: "flying units still controls the whole battalion as well
 		-- when moving"; measured that day, probes/zz_tp_fly_one.lua: a Birdman steered alone in the air and landed. On
 		-- 2026-10-15's steering a gyro gunship's crew steered nothing, and flyers were played whole)
+		F.crew = men_ok and P.features.steer and crewed(unit)
 		F.model = S.one_man and men_ok and P.features.steer and P.features.mailbox and not F.arty and not unit:is_war_machine()
-			and E.move.front_man(unit) or nil
+			and not F.crew and E.move.front_man(unit) or nil
 		-- a unit of one walks steered alone too, his sprint in the steer (the author, 2026-10-18; CA's walk speed scalar
 		-- leaves a single entity's speed alone, measured that day): main.lua's frame keeps F.single, his model
 		F.single_steer = not F.model and men_ok and P.features.steer and P.features.mailbox and not F.arty

@@ -2,12 +2,25 @@
 _G.DERPY_TP_SRC = _G.DERPY_TP_SRC or {}
 local S = _G.DERPY_TP_SRC
 S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
-		local clip = first and P.anim_slot(first)
+	-- animation play" - measured: the throw started 7 s after the order (his reload; base 10 s) and the nurgling left
+	-- 3.8 s into its 5.8 s clip, and a halt 4 s from the click stopped every one before it began
+	function C.ground(now, clicked, held)
+		if clicked and not F.firing and E.can_shoot() then
+			-- the commit counts from the click: a turn that never ends does not keep him firing (round 25)
+			F.firing, F.fire_ammo, F.fire_order_t, F.fire_clip = true, F.unit:ammo_left(), now, nil
+		end
+		if not F.firing then return end
+		-- his clip and his body's: Ku'gath's throw is his own (a rider's 2105); the Necrofex Colossus's shot is the colossus's
+		-- FIRE_LEVEL, 9.5 s, and his crewman's RIDER_FIRE beside it ended 6 s sooner (read live 2026-10-18)
+		local first = F.model or P.models(F.unit)[1]
+		local body = first and P.mount(first)
+		local mine, its = first and P.anim_slot(first), body and P.anim_slot(body)
 		local ammo = F.unit:ammo_left()
-		if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip = ammo, {clip, now} end -- a shot out, and the clip it left in
+		-- a shot out, and the shooting clips it left in
+		if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip = ammo, {shooting(mine) and mine, shooting(its) and its, now} end
 		local can, last = E.can_shoot(), F.fire_clip
 		if last then
-			local over = not last[1] or clip ~= last[1] or now - last[2] > FIRE_TAIL
+			local over = (not last[1] or mine ~= last[1]) and (not last[2] or its ~= last[2]) or now - last[3] > FIRE_TAIL
 			if (not held or not can) and over then C.stop_fire() elseif held and can then fire(now) end
 			return
 		end
@@ -350,20 +363,5 @@ S["/script/derpy_tp/combat"] = (S["/script/derpy_tp/combat"] or "") .. [==[
 	end
 
 	-- the jump attack (the author, 2026-10-15: E): JUMPING_ATTACK_1-5 as a swing, on its own cooldown. A unit whose men
-	-- have none does nothing - no attack order in its place (F.can_jump, read off his men at the start). None in the air:
-	-- a ground clip, as the charge attack's
-	function C.jump(now)
-		if C.locked(now) or not F.can_jump or now < F.next_jump or not (P.features.anim and F.men_ok)
-			or F.unit:is_currently_flying() then return end
-		F.next_jump = now + E.S.jump_cooldown
-		E.log("jump attack")
-		swing(SLOTS_JUMP, true, now)
-	end
-
-	-- the charge (the author, 2026-10-15: "charging running should be triggered with q as a continuious press"): the
-	-- sprint plays CHARGE for as long as it lasts; over, WALK_1 at mask 0 ends it (move.lua's unlatch). In the air, his
-	-- FLY_CHARGE_AIR_TO_AIR, else none (the author, 2026-10-18: "charging belakors triggers his land charge run"; 86 of the
-	-- 123 skeletons that fly have one, read 2026-10-18), and no charge attack: that is a ground clip.
-	-- The clip does not loop: it goes again at its own end - its length off its .anim (data.lua charges), and at once if
 ]==]
 return "part 3 of 12"

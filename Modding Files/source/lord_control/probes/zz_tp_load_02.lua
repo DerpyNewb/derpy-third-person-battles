@@ -14,9 +14,13 @@ local LOCK_MAX, LOCK_WAIT = 3, 1
 local TURN_DEG, TURN_WAIT_MS, MAX_MODELS = 25, 350, 160
 local AIM_COS, AIM_RANGE, AIM_CLOSE = 0.707, 150, 8 -- a melee target: inside 45 deg and 150 m, or 8 m any way
 local AIM_STEP, FIRE_REAIM, FIRE_ARC, FIRE_COMMIT, STEER_GAP = 2, 5, 20, 4, 0.5 -- AIM_STEP: m a march step of the view
--- s a ground-fire shot's clip may run on past the shot leaving before it is halted anyway: a fire clip runs to 5.7 s
--- (Ku'gath's throw, 2.1 s of it after the nurgling leaves; a rocket barrage spawns 1.0 to 5.25 s in)
-local FIRE_TAIL = 6
+-- s a ground-fire shot's clip may run on past the shot leaving before it is halted anyway: a fire clip runs to 9.5 s
+-- (the Necrofex Colossus's flame, 6.8 s of it after the flame leaves; Ku'gath's throw 5.7)
+local FIRE_TAIL = 10
+-- the clips a shot plays (9.0 ids): AIM_ to KNEEL_ (1547-1599: raise, aim, fire, reload, moving fire, a pilum, the crenels),
+-- GRENADIER and the throws (949-952), RIDER_FIRE_ and RIDER_THROW_PILUM (2104-2116). An idle is none of them: one on his
+-- body as the shot leaves must not hold the order for its 9 s
+local function shooting(s) return s and (s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116) or nil end
 -- m from a regiment's centre its men can stand: a wide line of 160 is ~40 m across
 local SPREAD = 30
 -- 9.0 ids (AssetEditor's dlc24 list + 2): SHOOT_READY_TO_AIM_LEVEL, FIRE_LEVEL; the reload slot comes from the
@@ -60,9 +64,11 @@ return function(E)
 	local aim_len = {} -- unit type and raise slot -> s the raise runs, measured on the first whole one
 	local turn = {} -- slot list -> the next in its rotation
 
-	-- his models: the one man, or every man of the unit up to MAX_MODELS
+	-- his models: the one man, a unit of one's (a crew's first man: the rest ride the same body), or every man of the
+	-- unit up to MAX_MODELS
 	local function each(fn)
-		local ms = F.model and {F.model} or P.models(F.unit)
+		local one = F.model or F.single
+		local ms = one and {one} or P.models(F.unit)
 		for i = 1, math.min(#ms, MAX_MODELS) do fn(ms[i]) end
 	end
 
@@ -341,14 +347,5 @@ return function(E)
 	-- a click commits to one shot: the order stays until the shot is out and the clip it left in is over, or until
 	-- FIRE_COMMIT past a whole reload and the time his fire clip lets it go (data.lua shots and fires); held, it stays;
 	-- a move key ends it (main.lua). The author, 2026-10-18: "Kugath cant use his ranged attack ... why cant the full
-	-- animation play" - measured: the throw started 7 s after the order (his reload; base 10 s) and the nurgling left
-	-- 3.8 s into its 5.8 s clip, and a halt 4 s from the click stopped every one before it began
-	function C.ground(now, clicked, held)
-		if clicked and not F.firing and E.can_shoot() then
-			-- the commit counts from the click: a turn that never ends does not keep him firing (round 25)
-			F.firing, F.fire_ammo, F.fire_order_t, F.fire_clip = true, F.unit:ammo_left(), now, nil
-		end
-		if not F.firing then return end
-		local first = F.model or P.models(F.unit)[1]
 ]==]
 return "part 2 of 12"

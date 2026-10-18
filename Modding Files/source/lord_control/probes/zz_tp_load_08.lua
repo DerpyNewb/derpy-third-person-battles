@@ -57,6 +57,21 @@ return function(E)
 		for _, s in ipairs({1557, 949, 2105}) do if P.has_slot(m, s) then return s end end
 	end
 
+	-- a crew on one body (the author, 2026-10-18: "cannot fire range mode using necrofex"): the Necrofex Colossus's five men
+	-- are his crew, all riding the one colossus (read live). One of them is no man to play alone: his rider clips went to
+	-- the crew's first man (sent to the front man 15 times, seen only on the first), and the colossus is what walks. Such a
+	-- unit is played as a unit of one, on its first man; platform.lua steers, holds, guards and faces his mount
+	local function crewed(unit)
+		local ms = P.models(unit)
+		local body = #ms > 1 and P.mount(ms[1])
+		if not body then return false end
+		for i = 2, #ms do
+			local b = P.mount(ms[i])
+			if not (b and P.same(b, body)) then return false end
+		end
+		return true
+	end
+
 	local function capabilities(m)
 		m = m and (P.mount(m) or m)
 		-- a slot whose every clip is an empty file is none (data.lua blanks): the Great Unclean One's jump is in his
@@ -197,7 +212,7 @@ return function(E)
 		F.dt = dt -- real time: the model clock steps in 100 ms ticks (move.lua's turn)
 		hud(false)
 		if unit:number_of_men_alive() == 0 or unit:is_routing() then M.stop("unit lost") return end
-		local single = not F.model and unit:number_of_men_alive() == 1 and P.models(unit)[1]
+		local single = not F.model and (unit:number_of_men_alive() == 1 or F.crew) and P.models(unit)[1]
 		if single and P.model_hp(single) <= 0 then M.stop("unit lost") return end
 		F.single = F.single_steer and single or nil
 		-- orders are off, selection is not: a click on another unit or on the ground would take the portrait
@@ -337,18 +352,5 @@ return function(E)
 
 	-- a transformation replaces the unit (abilities.lua ends third person before it goes off): the unit that was not in
 	-- the army at the cast is its new form, played on as soon as it is there (the author, 2026-10-17: "seems to
-	-- deactivate f2 when changing ammo"; measured: Deithland's mortar was back 0.2 s after the cast, under a ui id of
-	-- its own). Waited for in battle time, a wind-up included (CA's dragon forms wind up 5 s), and for its unit card: it
-	-- came a frame after the unit, and taken over before it the HUD had no context (portrait and slots off for good)
-	local SWAP_WAIT = 10
-	function M.follow()
-		local army, before = bm:get_player_army(), {}
-		for i = 1, army:units():count() do before[army:units():item(i):unique_ui_id()] = true end
-		swap = {before = before, till = bm:time_elapsed_ms() / 1000 + SWAP_WAIT}
-	end
-	local function follow_swap(gnow)
-		if gnow > swap.till then swap = nil return end
-		local army = bm:get_player_army()
-		for i = 1, army:units():count() do
 ]==]
 return "part 8 of 12"

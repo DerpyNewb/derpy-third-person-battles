@@ -16,6 +16,8 @@
 - A move key cancels a shot still waiting to fire.
 - The sprint's charge run plays each full cycle before it repeats.
 - No jump for units whose jump animation is an empty file (Great Unclean One).
+- Crewed monsters (Necrofex Colossus, Warsphinx) are played as one body: ranged fire, swings and the walk work.
+- A crewed monster's shot plays its whole firing animation.
 
 ## 2026-10-17
 

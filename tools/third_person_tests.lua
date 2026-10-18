@@ -940,6 +940,89 @@ T.a_move_key_ends_a_ground_fire_shot_still_to_come = function()
 	H.up("W")
 end
 
+-- the author, 2026-10-18: "cannot fire range mode using necrofex". The Necrofex Colossus's five men are his crew, all on
+-- the one colossus (read live: five models, one mount; his fire clip 2105 a rider's). Played as one man of them, the
+-- front man's fire clip was sent 15 times and never seen on him - it showed on the crew's first man - and nothing left.
+-- A crew on one body is played as a unit of one, on its first man: the colossus walks, and the shot is the engine's
+local NECROFEX = "wh2_dlc11_cst_mon_necrofex_colossus_ror_0"
+local function crew_on_one_body()
+	H.fresh({units = {{general = true}, {type = NECROFEX, men = 5, range = 54, ammo = 60}}})
+	local u = H.units[2]
+	local body = {id = 999, x = u._x, y = 0, z = u._z, hp = 100, hp_max = 100}
+	for _, m in ipairs(u._models) do m.mount = body end
+	H.select(u) H.tap("F2") H.step(0.1)
+	return u
+end
+T.a_crew_on_one_body_is_played_as_a_unit_of_one = function()
+	local u = crew_on_one_body()
+	check(H.E.F.model == nil and H.E.F.single == u._models[1], "no one man of the crew: his first man, as a unit of one")
+	H.step(0.5)
+	H.tap("Left mouse")
+	check(H.count("uc:attack_location") == 1, "the click is the engine's ground fire: " .. H.count("uc:attack_location"))
+	check(H.count("play") == 0, "no fire clip of ours on a crewman: " .. H.count("play"))
+	H.step(0.5)
+	local steers = H.count("steer")
+	H.down("W") H.step(1)
+	check(H.count("steer") > steers and H.last("steer")[2] == u._models[1].mount.id, "W steers the colossus: "
+		.. tostring(H.last("steer") and H.last("steer")[2]))
+	H.up("W")
+end
+
+-- his shot is the colossus's own clip (FIRE_LEVEL 1557, 9.5 s, the flame leaving 2.66 s in), his crewman reporting none
+-- (read live 2026-10-18): released as the flame left, 6 s of it were cut
+T.a_crews_shot_plays_out_on_the_body = function()
+	local u = crew_on_one_body()
+	H.step(0.5)
+	local halts, body = H.count("uc:halt"), u._models[1].mount
+	H.tap("Left mouse")
+	H.step(2.4) body.anim_slot = 1557
+	H.step(2.7) u._ammo = 59 H.step(6.5)
+	check(H.count("uc:halt") == halts, "the flame out, the colossus's clip still playing: not halted")
+	body.anim_slot = nil H.step(1 / 60)
+	check(H.count("uc:halt") == halts + 1, "his clip over: halted")
+end
+
+-- both fire (read live, the Necrofex's flame): the colossus's FIRE_LEVEL from 735.2, his crewman's own RIDER_FIRE 737.0 to
+-- 739.2, the flame out at 738.2 - released as the crewman's ended, the colossus's was cut at 4 s of 9.5. And an idle on
+-- the body as the shot leaves holds nothing
+T.a_crews_shot_waits_for_every_shooting_clip_and_no_idle = function()
+	local u = crew_on_one_body()
+	H.step(0.5)
+	local halts, man, body = H.count("uc:halt"), u._models[1], u._models[1].mount
+	H.tap("Left mouse")
+	H.step(0.6) body.anim_slot = 1557
+	H.step(1.8) man.anim_slot = 2105
+	H.step(1.2) u._ammo = 59 H.step(1) man.anim_slot = nil H.step(0.5)
+	check(H.count("uc:halt") == halts, "his clip over, the colossus's still playing: not halted")
+	body.anim_slot = nil H.step(1 / 60)
+	check(H.count("uc:halt") == halts + 1, "both over: halted")
+	H.step(9) halts = H.count("uc:halt")
+	H.tap("Left mouse")
+	H.step(1) man.anim_slot, body.anim_slot = 2105, 1440 -- SHOOT_STAND_IDLE_3 on the colossus
+	H.step(1) u._ammo = 58 H.step(0.2) man.anim_slot = nil H.step(1 / 60)
+	check(H.count("uc:halt") == halts + 1, "the body in an idle: halted as his clip ends")
+end
+
+-- a swing plays once, on the colossus: not once for each of the five men riding him
+T.a_crew_on_one_body_swings_once = function()
+	local u = crew_on_one_body()
+	u._models[1].mount.slots = {[454] = true}
+	H.step(0.5)
+	H.tap("Right mouse") H.step(0.1) -- out of ranged mode
+	H.tap("Left mouse") H.step(0.1)
+	local p = H.all("play")
+	check(#p == 1 and p[1][2] == 999 and p[1][3] == 454, "one ATTACK_1 on the colossus: " .. #p)
+end
+
+-- men on mounts of their own (cavalry) stay one man of a regiment
+T.riders_on_mounts_of_their_own_are_still_one_man = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 5}}})
+	local u = H.units[2]
+	for i, m in ipairs(u._models) do m.mount = {id = 990 + i, x = m.x, y = m.y, z = m.z, hp = 100, hp_max = 100} end
+	H.select(u) H.tap("F2") H.step(0.1)
+	check(H.E.F.model ~= nil, "one man of the regiment")
+end
+
 T.mode_switches_melee_and_ranged = function()
 	playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
 	H.tap("Right mouse")
