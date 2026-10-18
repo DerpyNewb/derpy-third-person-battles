@@ -80,7 +80,7 @@ Offsets on the model object (the man; for a rider, his mount is a model too, at 
 | `+0x128` | an object whose `+0x78` check also sends him to the gate (null in every melee frame measured) | live |
 | `+0x194/+0x198`, `+0x1e0/+0x1e8` | steering point copies x, z | live |
 | `+0x278` | current animation slot, u16; valid while `+0x898` is set or `+0x284` is not 0 | live |
-| `+0x2e0` | mount parent (rider -> horse); null on foot | live |
+| `+0x2e0` | mount parent (rider -> horse); null on foot. A crew shares one: all 5 of a Necrofex Colossus's men and all 4 of a Warsphinx's point at the same body, and a clip sent to any of them shows on the first | live, 2026-10-18 |
 | `+0x2e8` | his unit | live |
 | `+0x308` | animation fragment: u16 clip index per slot from `+0x50`, `0xffff` none, shared per regiment and skeleton | live |
 | `+0x324` | **the kind of order issued to him this tick** (section 7); `3075e7c` zeroes it | live / code |
@@ -126,6 +126,17 @@ start or command `3918e90`, chosen by its fragment's `+0x127c` bit 2.
 | `3919b28` | idle | |
 | `3ae2de8` | defend (block) | order kind 18 under it, measured |
 | `3ae2a08`, `3912820`, `3ae2b38` | fight states | kind 14 under `3ae2b38`, measured |
+
+**Ground fire, from script** (`uc:attack_location`; measured 2026-10-18, `probes/zz_tp_ground_fire_free.lua` and
+`zz_tp_reaim_free.lua`, no pack logic after the order). The unit waits out its reload, then plays its fire clip, and
+the shot leaves at the clip's FIRE_POS: Ku'gath's RIDER_FIRE 3.6 s into 5.7, the Necrofex Colossus's own FIRE_LEVEL
+2.66 s into 9.5 (on the RoR the crewman plays RIDER_FIRE beside it). **A new `attack_location` while the clip plays
+restarts it**: re-sent 10 m to either side every 0.6 s, the colossus started FIRE_LOW 1556 eleven times in 12 s, each
+cut 0.2 s in, and never fired. Re-sent during the reload it did not visibly delay the shot.
+
+**A blank clip** is CA data, not the engine: `hu09b_sw_jump_attack_01.anim` (the Great Unclean One's JUMPING_ATTACK
+489) is a 0-byte file, so the slot is in his fragment and nothing plays. It is the only such slot the pack plays across
+1,899 bins; data.lua `blanks` lists them.
 
 ## 6. Actions: the two slots, the runner, the play command
 

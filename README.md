@@ -11,25 +11,31 @@ engine, and the design record.
 
 ## What it does
 
-- **A follow camera.** It trails the unit a moment behind, sits over the shoulder in ranged mode,
-  comes in close while the unit is in melee, and keeps out of the ground.
+- **A follow camera.** It trails the unit a moment behind, sits over the right, left or top
+  shoulder in ranged mode, centres on him in melee mode, and keeps out of the ground. V, or zooming
+  in all the way, goes first person.
 - **One man of a regiment.** In a regiment you play the front man. He walks, turns, swings and
-  shoots alone while the rest hold their ground. A single entity, such as a lord or a monster, is
-  played whole. So are flying units, war machines, and any regiment whose men cannot shoot alone.
+  shoots alone while the rest hold their ground. A unit of one, such as a lord or a monster, is
+  steered the same way, and so is a crew on one body (the Necrofex Colossus, the Warsphinx).
+  Artillery, war machines and any regiment whose men cannot shoot alone are played whole.
 - **Fighting.**
-  - Left click swings, cycling only through the attacks the man actually has.
-  - Hold Q while running to charge, and click during the charge to throw the charge attack.
+  - Left click swings, cycling only through the attacks the man actually has. A flyer in the air
+    swings his flying attacks.
+  - Hold Shift while moving to sprint and charge, and click during the charge to throw the charge
+    attack. A flyer in the air plays his flying charge.
   - E is the jump attack.
   - In a melee a click swings at once, even with the enemy pressing in, and the man you play
     never swings on his own.
   - Each move plays out its whole animation, and the HUD counts its cooldown down.
 - **Shooting.** A click fires one shot from the man himself: the raise, the shot and the reload.
   Hold the button and he keeps firing. Thrown bombs leave the hand late in the throw, as the
-  animation does. Artillery hands over to the game's own Manual fire view.
+  animation does. A lord or monster fires at the crosshair through the game's own ground fire,
+  waits out his reload, and plays his whole firing animation. Artillery hands over to the game's
+  own Manual fire view.
 - **A HUD of its own.** It shows the portrait, health, men, ammo and reload, plus a ten-slot
   ability hotbar with cooldowns and an action bar for run, attack, fire, charge and jump. It uses
   the game's own fonts and art, by path.
-- **Every key and setting in the Mod Configuration Tool.** That covers 24 keys, the camera's
+- **Every key and setting in the Mod Configuration Tool.** That covers 28 keys, the camera's
   distance, height, lag and melee distance, turning speed, hold or toggle to run, cooldowns,
   reload time and volley scatter.
 - **Single player only.** It does nothing in multiplayer or replays.
