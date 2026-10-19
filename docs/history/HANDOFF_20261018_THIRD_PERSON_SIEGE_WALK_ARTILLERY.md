@@ -401,7 +401,7 @@ tools/preview_third_person_hud.py --bars` draws the three sides at three health 
 
 Open: the author's eyes on the bars (colour, size at the third-person distance), and an allied army's colour.
 
-## 14. 2026-10-19 evening: the markers on Alt, bars only near him (deployed 16:45, not uploaded)
+## 14. 2026-10-19 evening: the markers on Alt, bars only near him (uploaded 17:17)
 
 - **The markers on a key** (the author: "show the ally/enemy guide while holding/ toggle Alt, configurable using mct").
   New action `guide`, default Alt (`keys.lua`, 29 actions); `F.guide` follows the key held, or a press switches it
@@ -430,5 +430,14 @@ Open: the author's eyes on the bars (colour, size at the third-person distance),
 436 tests (`a_bar_shows_only_near_the_man_played_and_with_the_guide_setting_only_with_the_markers` new); round 57
 31/31, round 56 21/21. Build `adeef3b0` in the Workshop folder. Earlier builds are in `Modding Files/Backup/`: 15:41's
 `8001998f` as `derpy_third_person_20261019_162116.pack`, and 16:21's `24b8f129` (the one with the bug) as
-`..._164530.pack`. The game is still running on the test preferences:
-run `py tools/wh3_test_prefs.py --revert` once it is shut.
+`..._164530.pack`. Test preferences reverted once the game was shut.
+
+**The author tested it in game ("works") and asked for the upload.** `adeef3b0` went up at 17:17 through the steamworks
+binding (`updateItem` with the content folder and change note only): Steam log "Uploaded new content ( ManifestID
+6286053446665096809 )" then OK; `GetPublishedFileDetails` reads `file_size` 2461631, the pack plus its preview, tags
+unchanged. All 32 derpy Workshop packs hashed the same before and right after (Steam's re-sync comes at its next poll,
+so that is not yet proof). Change note: `PATCH_NOTES_20261019_THIRD_PERSON.md`. Public repo pushed as `8b8671d`: the
+nine bar layouts let through beside `hud.twui.xml` (`OURS`, and the repo's `.gitignore`), the bridge's generated
+`zz_tp_load_N.lua` parts dropped from the manifest and the repo, the scope doc and both patch notes in `HISTORY`;
+README (it still said "not yet on the Steam Workshop") and CHANGELOG updated, 436 tests, 371 probe scripts, 72 sets /
+896 mutants.

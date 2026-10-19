@@ -1,8 +1,8 @@
 # Third-Person Battles patch notes, 2026-10-19 (Workshop 3822187184)
 
-Draft for the next upload, everything since `36c14c58` (2026-10-18 23:54). The build in the Workshop folder is
-`adeef3b0`, NOT uploaded. Save compatible: the pack is battle scripts and battle UI layouts only and keeps nothing in a
-campaign save; the MCT page gains four options, which start at their defaults.
+Change note sent with the upload of `adeef3b0` at 17:17 (manifest 6286053446665096809, `file_size` 2461631 read back =
+pack + preview), everything since `36c14c58` (2026-10-18 23:54). Save compatible: the pack is battle scripts and battle
+UI layouts only and keeps nothing in a campaign save; the MCT page gains four options, which start at their defaults.
 
 ```
 [list]
