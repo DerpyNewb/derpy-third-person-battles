@@ -230,3 +230,205 @@ to range is also inconsistent and the camera switches unit to unit".
   to another unit. Not reproduced.
 - **"Switching to range is inconsistent"**: Thunderers 6 of 6. The gun's mode key (Manual fire): 3 of 8 did nothing in
   one untraced run, 16 of 16 worked traced (`zz_tp_trace_mode.lua`). Not reproduced under trace.
+
+## 9. 2026-10-19 morning: invincibility frames, units of one (built, not yet live-tested)
+
+The author: "theres no invisibility frames on some animations (where the unit doesnt take damage after a certain". Asked
+which: the charge attack, the jump attack (E) and the "defense animation when being hit"; regiments: units of one only.
+
+- `combat.lua` `C.invincible(man)`, called each unpaused frame from `main.lua` with `single` (nil for one man of a regiment
+  or a regiment played whole). It turns on `F.uc:set_invincible(true)` while the lock carries `guard` (set by `C.jump` and
+  `C.charge_attack`, so from the key press to the lock's end), or while his body or mount shows one of the hit clips. The
+  hit clips (`reeling`, 9.0 ids from AssetEditor's `Warhammer3AnimationSlots_9_0.txt`, id = line - 1) are
+  HIT_REACTION_STAND and MELEE_BLOCK 368-387, DEFEND 474-483, FLY_DEFEND 504-513, HIT_REACTION_COMBAT_READY/SHOOT_STAND/SHOOT_READY
+  1217-1246, RIDER_DEFEND 1921-1930, RIDER_FLY_DEFEND 1951-1960 and RIDER_HIT_REACTION_STAND/SHOOT 2202-2221. KNOCKBACK,
+  KNOCKDOWN and the get-ups are left out.
+- Each switch is followed by `release_control`, as CA's `script_unit:set_invincible_for_time_proportion` does for a
+  player-controlled unit. An invincibility already on (`unit:is_invulnerable()`) when a window opens is not ours and is
+  left alone. `M.stop` turns ours off.
+- The whole-unit switch is why regiments are out: on one man it would cover all his men.
+- Tests: 8 new, 426 pass (5 failed before the code). `mutants_round53.py` 19/19. Build `8e1ea16e` in Modpacks, verified
+  14 files; it differs from the Workshop copy only in `combat.lua` and `main.lua`. The game was running (started by the
+  author at 08:21), so the deploy waits for it to close: backup to `Modding Files/Backup/pre_tp_iframes_20261019/`, then
+  the copy and the loadfast cache.
+- **Unmeasured:** whether `is_invulnerable()` reports a `set_invincible` (if not, a battle script's own invincibility would
+  be switched off at a window's end); whether HP holds still or only death is prevented; which of these clips a lord or
+  monster actually plays when hit; and how much of a long melee a lord ends up covered (DEFEND plays on every blocked
+  blow).
+
+## 10. 2026-10-19: one man no longer holds his regiment's fire (built, not yet live-tested)
+
+The author: "controlling a ranged unit disables the rest of the battalions ranged option too". The logs (07:22-07:59,
+four battles, many "one man, shooting alone" sessions, no errors) do not record fire at will, so they could not show it;
+the code did: `M.start` called `F.uc:fire_at_will(false)` on the whole unit for every unit with a missile range, one man
+of a regiment included - a regiment-wide order, against the 2026-10-15 ruling that one man gives his regiment no orders.
+
+- `main.lua` `hold_fire(unit)`: a unit played whole holds its fire (and gets the player's setting back at the end, as
+  before); with `F.model` set it does nothing. Called at the start and when the regiment drops to its last man (played
+  whole from there).
+- Tests: `one_man_leaves_his_regiments_fire_setting_alone` (no `uc:fire_at_will` at all through his shot; played whole
+  still holds); `one_man_regiment_with_shots_holds_fire` deleted (it pinned the bug); `stop_restores_past_a_failing_step`
+  moved to a regiment played whole; three checks reworded. 426 pass. `mutants_round54.py` 6/6. Build `9c58104c`.
+- **Unmeasured, and the first thing to check in game:** whether the man played now fires on his own when his regiment
+  fires at will. Nothing per-man stops it: `P.guard` stops four commands (walk_a, walk_b, a move, the melee attack) and
+  `P.disarm` blanks melee attack slots only (`is_attack`: 454-463, 484-500, 1901-1950), not the fire clips. If he does,
+  the per-man route is to blank his fire slots in the disarmed fragment copy too and arm him for his own shot.
+
+## 11. 2026-10-19 noon: live checks (Grand Cathay vs Skaven custom battle, fort map)
+
+Launched from the mod list on the deployed `9c58104c`; the fixed source then loaded with `build_third_person.py --bridge`
+(`6acec6f4`). The author was at the desktop (Firefox, then Steam in front), so after one real-key run lost the front,
+every start, swing, jump and charge went through the pack's own functions over the bridge (`E.main.start`,
+`E.combat.melee`, `.jump`, `.charge_attack`), with no keys. Game closed and test settings reverted afterwards.
+
+**Setup lessons.** A controller's `halt` or `attack_unit` on an AI unit does nothing lasting: every Skaven unit was in the
+fort within a minute. `uc:take_control()` first (as CA's intro battles do) held all 20 (`probes/zz_tp_fire_setup.lua`,
+`zz_tp_engage.lua` both fixed). The getter `unit:is_behaviour_active("fire_at_will")` exists and lags one tick.
+
+**Section 10 was not the fix.** On `9c58104c`, one man of the Dragon Guard Crossbowmen: `held` false, yet the regiment's
+fire at will read false from the first frame and its ammo stood still for 25 s (50 bolts per 10 s before); it stayed off
+after the stop. Bisected with third person off: `uc:fire_at_will(true)` then `uc:halt()` - off a tick later, silent;
+`change_behaviour_active("defend", true)` - left on, still firing. `M.start`'s `F.uc:halt()` (and its defend) ran for
+one man too. **Fixed:** both only when `not F.model`. The harness's `halt` now turns fire at will off as the engine does;
+`one_man_leaves_his_regiments_fire_setting_alone` failed on the old code, now also asserts no halt or stance;
+`solo_start_cancels_the_existing_attack_order` deleted (it pinned the breach); `f2_cancels_existing_movement...` keeps
+its regiment as a regiment played whole. 425 pass. `mutants_round55.py` 4/4.
+Live on the fix: 108 bolts in 25 s with one man played, fire at will on throughout and after.
+**But the man played now fires on his own:** SHOOT_READY_TO_AIM_LEVEL 1554 / FIRE_LEVEL 1557 in 34 of 108 samples with
+no clip from the pack (the halt had silenced him with everyone). The author's call: ship as is, or first blank his fire
+slots in the disarmed fragment (section 10's route, unmeasured). **Not built or deployed.**
+
+**Section 9, invincibility, on Xian Longma (a mounted unit of one, `str_xian_longma`, in melee with two regiments):** the
+jump (x2) and charge attack windows opened (`ours` true, about 2 s each), `unit:is_invulnerable()` follows our switch one
+tick later, and his hit points held still through all three (24 samples, 0 lost; 136 outside lost 8%). **No hit-reaction
+window ever opened**: none of the `reeling` clips on him or his mount in 32 s, and across 341 men in melee about 2,400
+samples showed one (DEFEND_2); `P.anim_slot` reads COMBAT_IDLE_1-9 (439-447) nearly all the time. The "defense animation
+when being hit" trigger is close to inert as built; which clip the author means is the open question.
+
+**Player reports (Workshop comments, 2026-10-19), confirmed, not fixed** (the author: "confirm and verify first"):
+- "10 sets of combat animations ... left mouse cycles 4, right another 4, 2 sets cannot be triggered": `combat.lua`
+  `SLOTS_LMB` = ATTACK_1-4 (454-457), `SLOTS_RMB` = ATTACK_5-7 (458-460); ATTACK_8-10 (461-463) are never played, and
+  454-460 is hard-coded again in `swing()` (the air fallback, the mount and flying remaps). Right click is 3, not 4.
+  Live, Xian Longma (rider ATTACK_1-8 and 10, mount ATTACK_1-3): left played the mount's 1-3, right played ATTACK_1
+  four times of four - a mount without the slot falls back to 454 (line 258).
+- "turned the UI off mid transformation and the HUD stayed off for the rest of the match" (Yuan Bo): **not reproduced.**
+  The plain dragon-form cast through the pack works (off at the cast, the dragon taken over 7 s later, HUD and portrait
+  shown). Candidates: `hud.lua` counts part failures for the whole battle (`errors` is never reset, three turn the HUD
+  `off` "until this battle ends"; logs from 2026-10-17 show exactly that after a transform), and in the gap third person
+  is off, so P is the game's pause and K CA's own interface toggle. Needs real K and P presses during the 5 s wind-up.
+
+**Scope checks (SCOPE_20261019_THIRD_PERSON_UNIT_BARS section 6):** `unit:highlight(true)` drew nothing in the 3D
+scene; `unitcontroller:highlight(true)` draws a marker under every man, **red on an enemy, green on ours**, kept after
+`release_control()` (ours back to the player, the enemy back to the AI and moving). The banner and pin checks are
+UI-layer, which the in-game screenshot cannot show: still open.
+
+## 12. 2026-10-19 afternoon: "fix all" (deployed to the Workshop folder at 14:01, not uploaded)
+
+The author: "fix all" - the four findings of section 11. Built, live-checked in a second custom battle (Grand Cathay vs
+Skaven, test settings, fixed source over the bridge, real keys with the desktop idle), 431 pass, `mutants_round56.py`
+19/19 (and round 55 still 4/4), packed, read back and copied into `3822187184` (old copy in `Modding Files/Backup/`).
+
+- **One man's own fire.** `P.disarm(man, shots)`: one man of a regiment points at a copy of his fragment with his shot
+  slots blanked as well as his attacks (`platform.lua` `is_shot`: 1547-1599, 949-952, 2104-2116; one copy per kind, keyed
+  `+shots`). He is armed through his own shot (`F.shot` in main.lua's arm test), and `P.play` unpoints for a shot clip as
+  for a swing. A unit of one keeps his shot clips (the engine's own order fires him). Live: 1 of 63 samples showed a shot
+  clip, the first, taken mid-volley; his own click played 1554/1548/1557.
+- **Attacks 8-10.** One list, ATTACK_1-10; the clips he has are halved in order, left button first (ten: 1-5 and 6-10;
+  seven: 1-4 and 5-7; five: 1-3 and 4-5; two: 1 and 2; one: both play it), each button on its own count. A mounted man's
+  list is his mount's when the mount has any attack clip (the engine plays mounted swings on the mount). The old fallback
+  to ATTACK_1 for a clip the mount lacked was dead once the mount gives the list, and is gone. Live: Yuan Bo left
+  454-457, right 458-460; Xian Longma flying left 494/495, right 496.
+- **The HUD after a transformation.** Not reproduced with real K mid wind-up or F2 in the gap. Fixed defensively:
+  `H.show(true)` resets the part-error count, so a session starts whole (three errors used to turn it off for the
+  battle); and a session begun before the unit's card exists looks for the card every `CCO_EVERY` and starts the HUD
+  over when it comes. Caveat: `Visible()` may not reflect CA's K layer, and the in-game screenshot shows no UI. F2
+  pressed during the wind-up takes over the OLD form; the new one is taken after.
+- **Hit-reaction invincibility.** The engine plays no DEFEND or hit reaction on a unit of one in melee (Yuan Bo: 9 blows
+  in 20 s, all under his swings or no clip; in third person he stands between orders). A blow on a unit of one standing
+  idle (no move key, no swing, shot or lock of ours) now plays his DEFEND_1-10 in turn (FLY_DEFEND in the air, else
+  HIT_REACTION_STAND), mask 6, on the body that carries his clips, at most once per `REACT_GAP` (6 s, a constant). The
+  existing window covers it. Live on Yuan Bo: DEFEND 474/475/476 at 7.2, 13.4, 22.4 s, about 2.8 s invincible each, 0
+  hit points lost inside the windows, 53 outside.
+
+Tests added: `one_man_points_at_a_fragment_with_no_shot_clips_either`,
+`one_man_is_kept_from_his_regiments_volleys_and_armed_for_his_own_shot`, `both_buttons_together_reach_every_attack_clip_he_has`
+(with a left/right interleave), `the_hud_comes_back_whole_with_the_next_session`,
+`a_new_form_taken_before_its_card_gets_its_hud_when_the_card_comes`, `a_blow_on_a_unit_of_one_standing_idle_plays_his_defend`.
+`mounted_swings_use_rider_slots` now gives the rider more clips than the mount (it passed with the mount's list removed).
+Probes: `zz_tp_watch_fire_guard.lua`, `zz_tp_hit_watch.lua`, `zz_tp_hud_watch.lua`.
+
+Open: the author's call on `REACT_GAP`, and whether DEFEND is the clip meant by "defense animation when being hit".
+
+## 13. 2026-10-19 late afternoon: ranged attacks on the left, unit bars and side markers (deployed 15:41, not uploaded)
+
+- **A ranged unit's attacks all on the left button** (the author: "ranged units can only use the left button"). The
+  right button is a shooter's mode key (`C.mode`), so the halving applies only while `E.can_shoot()` is false; out of
+  ammo the right button swings again and the clips are halved. `a_ranged_units_left_button_has_every_attack_clip`.
+- **A health bar over every other unit, in its side's colour** (option B of `SCOPE_20261019_THIRD_PERSON_UNIT_BARS.md`).
+  Nine generated layouts `ui/derpy_tp/bar_1..9.twui.xml` (`gen_third_person_hud.py` `BAR`, `build_bar`, `check_bar`):
+  CA's banner bar, 40x10, black edge and `#3B3B3B` well, the loss behind in `#AA0000` (`ContextFillBar` on
+  `DelayedHealthPercent`), the fill on `HealthPercent` coloured by `ContextColourSetter` on `AllianceColour`, the base
+  hidden by `ContextVisibilitySetter` on `IsVisible`, the pin `ContextWorldSpaceComponent` on `CcoBattleUnit.Position`
+  with `offset_y` = the lift (2.5 to 37 m: a unit takes the lowest at least its body height + 0.7, `data.lua` bodies).
+  hud.lua makes one per unit (8 a refresh, every 0.5 s) in `bars`, the HUD's FIRST part, so the panel draws over them;
+  hides the played unit's, a dead one's and one gone from its army's list. MCT "Health bars", on.
+- **CA's markers under every unit the player does not command** (option C): `unitcontroller:highlight(true)` then
+  `release_control()`, one cached controller per unit, an enemy only while `is_valid_target()`; never a controller on
+  a player's unit; all off with `H.show(false)` (third person off, or the interface hidden). MCT "Markers under enemies
+  and allies", on.
+
+**Live (Grand Cathay vs Skaven, fort map, 720p):**
+- **First run, a bug: one bar, at the screen's corner.** `_G.cco` is nil in battle. CA's context constructor
+  is a callable table in the script environment, `core:get_env()`, which every pack module runs in. hud.lua shadows
+  the name with its own `cco(expr)`, so it now takes `local context = cco` at file scope. The harness had passed
+  `_G` as the script environment, which is why the tests stayed green. It now passes `H.env`, which holds `cco`
+  while `_G` does not. Mutant round 57 has that exact bug, and it is killed.
+- **Bars, on the fixed source:**
+  - On-screen bars stand where the unit's lifted position projects, within 2 px (984,373 against 983,375). Later,
+    with units and the camera moving, the gap was up to about 25 px.
+  - The engine hides a bar whose unit is off screen or behind the camera, and does not refill a hidden one.
+  - Fill widths: 38 of 40 px at 95%, 34 at 85%.
+  - Not measurable: the drawn colour. `get_context_value` gives nil for a Colour value, and the screenshot has no
+    UI layer.
+- **Markers:** an A/B pair of in-game shots from one paused camera. A bright red marker sits under every man of the
+  enemy regiments in view, none under ours, and none after `H.show(false)`.
+- **Not seen:** a friendly AI ally's colour, either bar or marker. The battle had no ally.
+
+432 + 2 tests = 434 pass; round 57 16/16 (round 56 21/21 with the ranged pair). Preview: `py
+tools/preview_third_person_hud.py --bars` draws the three sides at three health levels from the shipped bar layout
+(`.skilltree_cache/ui_preview/tp_bars_<w>.png`), colours from CA's `ui_colours` (ours `#A2EC17`, ally `#68CEFF`, enemy
+`#FF2D2D`). Probe: `zz_tp_bars_read.lua` (each bar's box against the projection, fill against health).
+
+Open: the author's eyes on the bars (colour, size at the third-person distance), and an allied army's colour.
+
+## 14. 2026-10-19 evening: the markers on Alt, bars only near him (deployed 16:45, not uploaded)
+
+- **The markers on a key** (the author: "show the ally/enemy guide while holding/ toggle Alt, configurable using mct").
+  New action `guide`, default Alt (`keys.lua`, 29 actions); `F.guide` follows the key held, or a press switches it
+  (MCT "Hold to show enemies and allies", on). hud.lua answers a change at once, not at the next 0.5 s refresh. With
+  Alt as the guide key, CA's Alt shortcuts on the pack's keys are off while third person is on (`K.game_alt`, read
+  from `default_keys.xml`: Alt+M music, Alt+0 and Alt+1-6; Alt+X and Alt+K are on none of its keys).
+- **Bars only near him** (the author: "currently is clogging the scene ... by default only near the character ... on
+  all the time or activatable using alt"). MCT "Health bars": Always (default), With the markers key, Never; "Health
+  bar distance" 40 m (10 to 1000; 1000 is every unit). Measured from the man played when he plays one man of a
+  regiment, else from his unit.
+- **A bug the 15:41 build shipped, found live: the engine owns a pinned component's own visibility.** It re-shows it
+  every frame while it is on screen. A probe hid one pin and showed another, and both were back 2 s later. The
+  first live read of the distance limit showed bars on units 300-500 m off and none on the units beside him. So
+  section 13's hiding of the played unit's bar, a dead unit's, and the "Health bars" off switch never worked in game
+  either. The layout is now `root > derpy_tp_bar > pin > base`: hud.lua shows and hides the plain `derpy_tp_bar`, and
+  the callback sits on `pin`. `check_bar` refuses a callback on the top component (selftest break
+  `_pin_on_top`, the shipped shape). The harness now resets a pinned component's visibility every frame, as the
+  engine does; the two bar tests fail on the old layout and pass on the new.
+- **Live, on the fixed build:** bars on exactly the units within 40 m (5, 9, 11, 18 and 29 m), none at 41 m, none on
+  the played unit.
+- **Not done: Alt with real keys.** The first battle ended before the Alt test. In the second, someone was playing
+  (desktop idle 0 s, F2 and a dragon's jump attack in the log), so no keys were sent and the game was left running.
+  A 90 s passive watch saw no Alt press. Still open: Alt held and pressed in game, and whether Alt alone stalls the
+  windowed game.
+
+436 tests (`a_bar_shows_only_near_the_man_played_and_with_the_guide_setting_only_with_the_markers` new); round 57
+31/31, round 56 21/21. Build `adeef3b0` in the Workshop folder. Earlier builds are in `Modding Files/Backup/`: 15:41's
+`8001998f` as `derpy_third_person_20261019_162116.pack`, and 16:21's `24b8f129` (the one with the bug) as
+`..._164530.pack`. The game is still running on the test preferences:
+run `py tools/wh3_test_prefs.py --revert` once it is shut.

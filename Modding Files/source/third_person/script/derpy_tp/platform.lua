@@ -300,8 +300,13 @@ function M.build(mr)
 	-- a man's animation fragment, +0x308 (what P.has_slot reads): a u16 clip index per slot from +0x50, 0xffff for none,
 	-- one per regiment and skeleton. P.disarm points the man played alone at a copy with no attack clips
 	local FRAG, FRAG_COPY = 0x308, 0x50 + 6004 * 2 -- a fragment is 0x1284; a slot scan read 6000 slots past each safely
-	local function is_attack(s) return s >= 454 and s <= 463 or s >= 484 and s <= 500 or s >= 1901 and s <= 1950 end
-	local copy_of, orig_of = {}, {} -- by address: the regiment's fragment -> its copy, and back
+	-- ATTACK_1-10, MOVING_, JUMPING_ and FLY_ATTACK_1-10 (484-503: FLY_ATTACK_8-10 were left in until 2026-10-19), RIDER_ and
+	-- RIDER_FLY_ATTACK_1-10
+	local function is_attack(s) return s >= 454 and s <= 463 or s >= 484 and s <= 503 or s >= 1901 and s <= 1950 end
+	-- one man of a regiment: his regiment's volleys too (2026-10-19, its fire at will left alone: he aimed and fired with
+	-- it). The aim, fire and reload clips, as combat.lua's shooting()
+	local function is_shot(s) return s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116 end
+	local copy_of, orig_of, shots_of = {}, {}, {} -- by address: the fragment -> its copy (per kind), and back; a copy's kind
 	local function unpoint(x)
 		local o = orig_of[mr.tostring(mr.read_pointer(x, FRAG))]
 		if o then mr.write(x, FRAG, o) end
@@ -310,7 +315,7 @@ function M.build(mr)
 		if not P.features.anim then return false end
 		local b = battle_obj()
 		if not b or mr.read_uint8(b, A.gate_a) ~= 0 or mr.read_uint8(b, A.gate_b) ~= 0 then return false end
-		if is_attack(slot) then unpoint(m) end -- his own swing, on his own table: on the copy the engine finds no clip
+		if is_attack(slot) or is_shot(slot) then unpoint(m) end -- his own swing or shot, on his own table: on the copy the engine finds no clip
 		mr.write(cmd, 0, A.cmd_type)
 		mr.write(cmd, 8, m)
 		mr.write(cmd, 0x10, mr.uint16(slot))
@@ -558,26 +563,33 @@ function M.build(mr)
 	-- Copies are kept for the battle in a global: a man may still point at one once this module is gone (a dead man)
 	local keep = _G.DERPY_TP_FRAGS or {}
 	_G.DERPY_TP_FRAGS = keep
-	local function point(x)
+	local function point(x, shots)
+		shots = shots == true
 		local a = mr.read_pointer(x, FRAG)
-		if mr.is_null(a) or orig_of[mr.tostring(a)] then return end
-		local key = mr.tostring(a)
+		if mr.is_null(a) then return end
+		local on = mr.tostring(a)
+		if orig_of[on] then
+			if shots_of[on] == shots then return end
+			a = orig_of[on] -- on the other kind's copy
+		end
+		local key = mr.tostring(a) .. (shots and "+shots" or "")
 		local c = copy_of[key]
 		if not c then
 			local block = mr.alloc(FRAG_COPY)
 			keep[#keep + 1] = block
 			c = mr.add(block, 0) -- a plain pointer, written as the experiment wrote it
 			for off = 0, FRAG_COPY - 8, 8 do mr.write(c, off, mr.read_pointer(a, off)) end
-			for s = 454, 1950 do if is_attack(s) then mr.write(c, 0x50 + s * 2, mr.uint16(0xffff)) end end
-			copy_of[key], orig_of[mr.tostring(c)] = c, a
+			for s = 454, 2116 do if is_attack(s) or shots and is_shot(s) then mr.write(c, 0x50 + s * 2, mr.uint16(0xffff)) end end
+			copy_of[key], orig_of[mr.tostring(c)], shots_of[mr.tostring(c)] = c, a, shots
 		end
 		mr.write(x, FRAG, c)
 	end
-	function P.disarm(m) -- the horse's swings and the rider's
+	-- the horse's swings and the rider's; shots: his shot clips too (one man of a regiment)
+	function P.disarm(m, shots)
 		if not P.features.steer then return end
 		local body = P.mount(m)
-		if body then point(body) end
-		point(m)
+		if body then point(body, shots) end
+		point(m, shots)
 	end
 	function P.arm(m)
 		if not P.features.steer then return end

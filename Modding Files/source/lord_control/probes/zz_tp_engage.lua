@@ -35,6 +35,7 @@ local ok, res = pcall(function()
 	for k = 1, math.min(2, #cands) do
 		local c = cands[k].ar:create_unit_controller()
 		c:add_units(cands[k].e)
+		c:take_control() -- an order alone leaves the AI in charge (2026-10-19: neither came)
 		c:set_invincible(true)
 		local o = offs[k]
 		c:teleport_to_location(v(x + o[1], bm:get_terrain_height(x + o[1], z + o[2]), z + o[2]), o[3], 20)

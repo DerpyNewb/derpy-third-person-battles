@@ -293,7 +293,23 @@ def component(c):
     if kw.get("callbacks"):
         out += "\t\t\t<callbackwithcontextlist>\n"
         for cb in kw["callbacks"]:
-            out += '\t\t\t\t<callback_with_context callback_id="%s"/>\n' % _esc(cb)
+            if isinstance(cb, str):
+                out += '\t\t\t\t<callback_with_context callback_id="%s"/>\n' % _esc(cb)
+                continue
+            # (callback, context object, context function[, the callback's own properties]): CA's shape in
+            # template_3d_unit (example.twui.xml) and unit_banner.twui.xml
+            cid, obj, fn = cb[0], cb[1], cb[2]
+            props = cb[3] if len(cb) > 3 else {}
+            out += ('\t\t\t\t<callback_with_context\n\t\t\t\t\tcallback_id="%s"\n\t\t\t\t\tcontext_object_id="%s"\n'
+                    '\t\t\t\t\tcontext_function_id="%s"' % (_esc(cid), _esc(obj), _esc(fn)))
+            if not props:
+                out += "/>\n"
+                continue
+            out += ">\n\t\t\t\t\t<child_m_user_properties>\n"
+            for pname in sorted(props):
+                out += ('\t\t\t\t\t\t<property\n\t\t\t\t\t\t\tname="%s"\n\t\t\t\t\t\t\tvalue="%s"/>\n'
+                        % (_esc(pname), _esc(str(props[pname]))))
+            out += "\t\t\t\t\t</child_m_user_properties>\n\t\t\t\t</callback_with_context>\n"
         out += "\t\t\t</callbackwithcontextlist>\n"
 
     # The slider's travel. maxValue is how far the handle may run and min_size how small

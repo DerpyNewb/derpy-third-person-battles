@@ -4,7 +4,8 @@ return {
 	margin = 24,
 	probe = "slot_1_frame", -- the part whose drawn size against its design size gives the UI scale
 	slots = 10,
-	groups = {left = {386, 130}, bar = {762, 81}, right = {170, 64}, centre = {320, 28}, actions = {531, 81}, toggle = {146, 81}},
+	groups = {left = {386, 130}, bar = {762, 81}, right = {170, 64}, centre = {320, 28}, actions = {531, 81}, toggle = {146, 81}, screen = {1, 1}},
+	bar = {file = "ui/derpy_tp/bar_", lifts = {2.5, 3.5, 4.5, 6, 8, 11, 15, 22, 37}, clear = 0.7}, -- the unit bars: file .. n for lift n, m
 	actions = {"walk", "sprint", "attack", "fire", "jump", "fly", "cheer"}, -- in order; hud.lua packs the shown ones against the right edge
 	action_pitch = 77, -- one button and its gap
 	stack = 8, -- the actions' gap above the right plate
@@ -16,6 +17,7 @@ return {
 	lift = 23, -- design px the rows above a caster's winds bar drop for any other unit
 	lifted = {name = true, men_icon = true, men = true},
 	at = {
+		["bars"] = {"screen", 0, 0},
 		["portrait"] = {"left", 0, 0},
 		["plate_left"] = {"left", 66, 5},
 		["plate_left_short"] = {"left", 66, 28},
@@ -241,6 +243,7 @@ return {
 		["target_arrow"] = {"centre", 0, 0},
 	},
 	size = {
+		["bars"] = {1, 1},
 		["portrait"] = {60, 130},
 		["plate_left"] = {320, 125},
 		["plate_left_short"] = {320, 102},

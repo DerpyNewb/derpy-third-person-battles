@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-19
+
+- Lords and monsters can't be hurt during jump attacks, charge attacks and blocks.
+- A lord or monster standing still blocks a blow that lands on him.
+- Playing one man no longer stops his regiment shooting: no halt, defend or fire order on a regiment for one man.
+- The man you play no longer shoots on his own with his regiment's volleys.
+- All ten attack animations are playable, split between the two mouse buttons; a ranged unit has them all on the left.
+- The HUD starts whole each session, and comes back after a transformation whose card arrives late.
+- Health bars over nearby units in their side's colour (MCT: always, with the markers key, or never; distance, 40 m by
+  default). The engine owns a pinned component's own visibility, so the bar is shown and hidden through a plain parent.
+- Hold Alt (or press, in MCT) for the game's markers under enemies and allies; the game's Alt shortcuts on the mod's keys
+  are off while third person is on.
+- The repository no longer carries the bridge's generated `zz_tp_load_N.lua` parts.
+
 ## 2026-10-18
 
 - Sieges: walking into a wall, gate or building no longer stops the man dead; his steering point comes in nearer.

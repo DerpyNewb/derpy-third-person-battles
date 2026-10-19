@@ -5,6 +5,9 @@
 -- return function(E) -> H.
 local CCO_EVERY, MAX_ERRORS = 0.2, 3 -- s between unit-context reads (each is an expression the engine parses)
 local RELOAD_SCALE = 1 -- ReloadPercentMax is 0..1 (plan 2 Task 1 measures)
+-- CA's context constructor: in the script environment this file runs in, not in _G (measured 2026-10-19: _G.cco nil,
+-- the bare name a callable table, as CA's lib_battle_script_unit.lua uses it); taken before cco() below hides it
+local context = cco
 
 return function(E)
 	local F, L = E.F, E.load("hud_layout")
@@ -33,7 +36,7 @@ return function(E)
 		hp = {"hp", "hp_icon"}, winds = {"winds", "winds_icon", "winds_back", "winds_fill", "winds_frame"},
 		stamina = {"stamina", "stamina_icon", "stamina_back", "stamina_fill", "stamina_frame"},
 		men = {"men", "men_icon"}, ammo = {"ammo", "ammo_back", "ammo_fill", "ammo_frame"}, mode = {"mode"}, slots = {}, reload = {},
-		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}}
+		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}, bars = {"bars"}}
 	for _, a in ipairs(L.actions) do
 		for _, s in ipairs(ACT_PARTS) do GROUPS.actions[#GROUPS.actions + 1] = "act_" .. a .. "_" .. s end
 	end
@@ -81,7 +84,8 @@ return function(E)
 		local bar_w = g.bar[1] - (L.slots - shown) * (L.at.slot_2_frame[2] - L.at.slot_1_frame[2])
 		local o = {left = {m, sh - m - g.left[2] * s}, bar = {(sw - bar_w * s) / 2, sh - m - g.bar[2] * s},
 			right = {sw - m - g.right[1] * s, sh - m - g.right[2] * s},
-			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}, toggle = {sw - m - g.toggle[1] * s, m}}
+			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}, toggle = {sw - m - g.toggle[1] * s, m},
+			screen = {0, 0}}
 		-- the shown action buttons packed against the right edge, over the right plate
 		local aw = math.max(0, #acts * L.action_pitch - (L.action_pitch - L.size.act_attack_frame[1]))
 		o.actions = {sw - m - aw * s, sh - m - (g.right[2] + L.stack + g.actions[2]) * s}
@@ -245,8 +249,90 @@ return function(E)
 		return false
 	end
 
+	-- every unit in the battle, and whether it is an enemy
+	local function each_unit(fn)
+		for _, side in ipairs({{bm:get_player_alliance(), false}, {bm:get_non_player_alliance(), true}}) do
+			local armies = side[1]:armies()
+			for a = 1, armies:count() do
+				local units = armies:item(a):units()
+				for i = 1, units:count() do fn(units:item(i), side[2]) end
+			end
+		end
+	end
+
+	-- a health bar over every other unit, in its side's colour (players, 2026-10-19: "a health bar each unit and a ally or
+	-- enemy highlight"). The engine pins, fills, colours and hides each one (ui/derpy_tp/bar_*: CA's own callbacks, and
+	-- none while the player cannot see the unit); here one is made per unit at the lift over his men, and the played
+	-- unit's (the panel shows his) and a dead unit's are hidden. A few made a refresh, then kept for the battle
+	local BARS_EVERY, BARS_MADE = 0.5, 8
+	local pins, bars_at = {}, 0
+	local function lift(u)
+		local body = E.D.bodies and E.D.bodies[u:type()]
+		local want = (body and body[2] or 1.8) + L.bar.clear
+		for n, m in ipairs(L.bar.lifts) do if m >= want then return n end end
+		return #L.bar.lifts
+	end
+
+	-- CA's tracker chevrons under the men of every unit the player does not command (unitcontroller:highlight; measured
+	-- 2026-10-19: red under an enemy, kept after release_control, the enemy back to its own control and moving), an
+	-- enemy only while the player can see it, and only while F.guide (the guide key, main.lua). None under his own: no
+	-- controller touches a unit of his
+	local marked = {} -- unique_ui_id -> {uc, on}
+	local function mark(u, on)
+		local m = marked[u:unique_ui_id()]
+		if (m and m.on or false) == on then return end
+		if not m then m = {uc = create_unitcontroller(u)} marked[u:unique_ui_id()] = m end
+		m.on = on
+		m.uc:highlight(on)
+		m.uc:release_control()
+	end
+	local function unmark() for _, m in pairs(marked) do if m.on then m.on = false m.uc:highlight(false) m.uc:release_control() end end end
+
+	local guide_was = false
+	local function bars(now)
+		-- the guide key answers at once, not at the next refresh
+		if now < bars_at and (F.guide or false) == guide_was then return end
+		bars_at, guide_was = now + BARS_EVERY, F.guide or false
+		local holder = E.S.bars and part("bars")
+		if E.S.bars and not holder then error("no unit bar holder in the panel") end
+		local made, seen = 0, {}
+		-- near the unit he plays (the author, 2026-10-19: "currently is clogging the scene ... by default only near the
+		-- character"), always or with the markers key (MCT); 1000 m is every unit on the field
+		local show = E.S.bars == "always" or E.S.bars == "guide" and guide_was
+		local mx, mz
+		if F.model then local x, _, z = E.P.model_pos(F.model) mx, mz = x, z else local q = F.unit:position() mx, mz = q:get_x(), q:get_z() end
+		local reach = E.S.bars_range >= 1000 and math.huge or E.S.bars_range * E.S.bars_range
+		each_unit(function(u, enemy)
+			local alive = u:number_of_men_alive() > 0
+			if not u:is_player_controlled() then mark(u, guide_was and alive and (not enemy or u:is_valid_target())) end
+			if not holder then return end
+			local id = tostring(u:unique_ui_id())
+			seen[id] = true
+			local pin = pins[id]
+			if not pin and made < BARS_MADE then
+				made = made + 1
+				local file = L.bar.file .. lift(u)
+				local c = holder:CreateComponent("derpy_tp_bar_" .. id, file)
+				if not c then error("the unit bar's layout did not load: " .. file) end
+				pin = UIComponent(c)
+				pin:SetContextObject(context("CcoBattleUnit", id))
+				pins[id] = pin
+			end
+			if pin then
+				local p = u:position()
+				local near = (p:get_x() - mx) ^ 2 + (p:get_z() - mz) ^ 2 <= reach
+				put(pin, "bar." .. id, show and near and u ~= F.unit and alive, function(c, b) c:SetVisible(b) end)
+			end
+		end)
+		-- a unit gone from its army's list (a summoning that ended) keeps no bar where it was
+		for id, pin in pairs(pins) do if not seen[id] then put(pin, "bar." .. id, false, function(c, b) c:SetVisible(b) end) end end
+	end
+
 	function H.show(on)
-		if on and off then H.unit() return end -- no panel, but this unit's abilities still need its context
+		-- a session starts whole: three part errors turned it off until the battle ended (a player, 2026-10-19: "the HUD
+		-- stayed off for the rest of the match", after a transformation)
+		if on then off, errors = false, 0 end
+		if not on then pcall(unmark) end
 		if off then return end
 		if not on then if ui then ui:SetVisible(false) end return end
 		local root = core:get_ui_root()
@@ -257,6 +343,7 @@ return function(E)
 			if not made then
 				off = true
 				E.once("hud_layout", "the HUD's layout did not load: " .. L.file)
+				H.unit() -- no panel, but this unit's abilities still need its context
 				return
 			end
 			ui = UIComponent(made)
@@ -265,8 +352,9 @@ return function(E)
 				if c then c:SetCanResizeWidth(true) c:SetCanResizeHeight(true) end
 			end
 		end
-		last, dead, cco_at = {}, {}, 0
+		last, dead, cco_at, bars_at = {}, {}, 0, 0
 		ui:SetVisible(true)
+		vis("bars", E.S.bars ~= false)
 		H.target(nil) H.mark(nil)
 		H.unit() -- first: the bar centres on how many abilities he has
 		H.place()
@@ -321,9 +409,18 @@ return function(E)
 		return nil
 	end
 
+	local card_try = 0
 	function H.update(now)
+		-- taken over before his unit card was there (F2 on a new form in the gap of a transformation): no context, so the
+		-- portrait and slots went off; the card is looked for again, and the HUD starts over whole when it comes
+		if not cco_id and ui and now - card_try >= CCO_EVERY then
+			card_try = now
+			local card = find_uicomponent(core:get_ui_root(), "cards_panel", tostring(F.unit:unique_ui_id()))
+			if card and card:GetContextObjectId("CcoBattleUnit") then H.show(true) end
+		end
 		if off or not ui then return end
 		local u = F.unit
+		guard("bars", bars, now)
 		guard("health", function()
 			local cur, max = own_hp()
 			width("health_fill", cur and cur / max or u:unary_hitpoints())

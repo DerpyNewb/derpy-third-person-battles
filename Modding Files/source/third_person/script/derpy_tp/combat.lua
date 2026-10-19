@@ -1,6 +1,7 @@
 -- Fighting from third person (spec section 6): swings, ranged fire by unit kind, the crosshair, and the
 -- artillery hand-over to the game's Manual fire mode. return function(E) -> C.
-local SLOTS_LMB, SLOTS_RMB = {454, 455, 456, 457}, {458, 459, 460} -- ATTACK_1-4 and ATTACK_5-7
+-- ATTACK_1-10: the ones he has, halved between the two buttons (swing)
+local SLOTS_ATTACK = {454, 455, 456, 457, 458, 459, 460, 461, 462, 463}
 local SLOTS_JUMP, SLOTS_RUN = {489, 490, 491, 492, 493}, {484, 485, 486, 487, 488} -- JUMPING_ and MOVING_ATTACK_1-5
 local SLOTS_CHEER = {1094, 1095, 1096, 1097, 1098, 1099, 1100, 1101, 1102, 1103} -- CELEBRATE_1-10
 local SLOTS_TAUNT = {1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113} -- TAUNT_1-10
@@ -17,6 +18,14 @@ local FIRE_TAIL = 10
 -- GRENADIER and the throws (949-952), RIDER_FIRE_ and RIDER_THROW_PILUM (2104-2116). An idle is none of them: one on his
 -- body as the shot leaves must not hold the order for its 9 s
 local function shooting(s) return s and (s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116) or nil end
+-- the clips the engine plays on a man as he is hit, which a unit of one cannot be hurt through (C.invincible), 9.0 ids:
+-- HIT_REACTION_STAND_ and MELEE_BLOCK_1-10 (368-387), DEFEND_1-10 (474-483), FLY_DEFEND_1-10 (504-513),
+-- HIT_REACTION_COMBAT_READY_, _SHOOT_STAND_ and _SHOOT_READY_1-10 (1217-1246), RIDER_DEFEND_1-10 (1921-1930),
+-- RIDER_FLY_DEFEND_1-10 (1951-1960), RIDER_HIT_REACTION_STAND_ and _SHOOT_1-10 (2202-2221)
+local function reeling(s)
+	return s and (s >= 368 and s <= 387 or s >= 474 and s <= 483 or s >= 504 and s <= 513 or s >= 1217 and s <= 1246
+		or s >= 1921 and s <= 1930 or s >= 1951 and s <= 1960 or s >= 2202 and s <= 2221) or false
+end
 -- m from a regiment's centre its men can stand: a wide line of 160 is ~40 m across
 local SPREAD = 30
 -- 9.0 ids (AssetEditor's dlc24 list + 2): SHOOT_READY_TO_AIM_LEVEL, FIRE_LEVEL; the reload slot comes from the
@@ -221,17 +230,34 @@ return function(E)
 		-- what flies: his mount, or he on his own wings (the author, 2026-10-18: "flying units when using melee uses ground
 		-- melee attacks e.g belakor"; Be'lakor has no mount, ATTACK_1-5 and FLY_ATTACK_1-4, read live)
 		local flyer = mount or first
-		local air = flyer and F.unit:is_currently_flying() and (slots == SLOTS_LMB or slots == SLOTS_RMB)
+		local attack = slots == SLOTS_ATTACK
+		local air = flyer and F.unit:is_currently_flying() and attack
+		-- a mounted man's swing is his mount's, which the engine plays mounted (play below): a mount with attack clips of its
+		-- own gives the list (2026-10-19, str_xian_longma: rider ATTACK_1-8 and 10, mount 1-3 - the right button's 5-7 fell
+		-- back to ATTACK_1 every time)
+		local body
+		if attack and mount then for _, s in ipairs(slots) do if P.has_slot(mount, s) then body = mount break end end end
 		for _, s in ipairs(slots) do
 			if air then
 				if P.has_slot(flyer, s + 40) then has[#has + 1] = s end
+			elseif body then
+				if P.has_slot(body, s) then has[#has + 1] = s end
 			elseif first and (P.has_slot(first, s) or mount and P.has_slot(mount, s)) then has[#has + 1] = s end
 		end
-		if air and #has == 0 then for s = 454, 460 do if P.has_slot(flyer, s + 40) then has[#has + 1] = s end end end
 		if #has == 0 then has = slots end -- a rider's fallback clip, or the attack order
-		local k = turn[slots] or 0
+		-- the attack clips halved, in order, the left button's first (a player, 2026-10-19: "10 sets of combat animations
+		-- ... 2 sets cannot be triggered" - it was ATTACK_1-4 and 5-7 whatever he had). One clip: both buttons play it.
+		-- A unit that can shoot has its right button for the mode (C.mode), and the left has them all (the author,
+		-- 2026-10-19: "ranged units can only use the left button")
+		local key = slots
+		if attack then
+			local half, mine = E.can_shoot() and #has or math.ceil(#has / 2), {}
+			for i = 1, #has do if (i <= half) == (primary == true) or #has == 1 then mine[#mine + 1] = has[i] end end
+			has, key = mine, primary and "attack_left" or "attack_right"
+		end
+		local k = turn[key] or 0
 		local slot = has[k % #has + 1]
-		turn[slots], F.swings = k + 1, F.swings + 1
+		turn[key], F.swings = k + 1, F.swings + 1
 		act(now)
 		-- an action faces the camera as it starts and keeps that facing to its end (main.lua): left alone, the engine played
 		-- jump and charge attacks along the regiment's facing (the author, 2026-10-15). A swing's only until its clip plays:
@@ -244,15 +270,14 @@ return function(E)
 			local mount = P.mount(m)
 			if mount then
 				local chosen = slot
-				if F.unit:is_currently_flying() and slot >= 454 and slot <= 460 then
+				if F.unit:is_currently_flying() and slot >= 454 and slot <= 463 then
 					chosen = P.has_slot(mount, slot + 40) and slot + 40 or 494
 				end
-				if chosen == slot and slot >= 454 and slot <= 460 and not P.has_slot(mount, chosen) then chosen = 454 end
 				if P.has_slot(mount, chosen) then P.play(mount, chosen, mask) return mount, chosen end
 				if P.has_slot(m, slot) then P.play(m, slot, mask) return m, slot end -- an artillery crewman's parent is his gun
 				return
 			end
-			if F.unit:is_currently_flying() and slot >= 454 and slot <= 460 and P.has_slot(m, slot + 40) then
+			if F.unit:is_currently_flying() and slot >= 454 and slot <= 463 and P.has_slot(m, slot + 40) then
 				P.play(m, slot + 40, mask) return m, slot + 40 -- FLY_ATTACK_n, as a mount's
 			end
 			local rider = slot + 1447 -- ATTACK_1 -> RIDER_ATTACK_1
@@ -299,7 +324,7 @@ return function(E)
 		F.next_swing = now + E.S.swing_cooldown
 		-- held like an action, to the next swing at most: the walk waits (the author, 2026-10-15: "spamming left button while
 		-- walking does nothing, melee should be prioritized" - the walk and its unlatch's WALK_1 cut the swing off)
-		if P.features.anim and F.men_ok then swing(primary and SLOTS_LMB or SLOTS_RMB, primary, now, E.S.swing_cooldown) return end
+		if P.features.anim and F.men_ok then swing(SLOTS_ATTACK, primary, now, E.S.swing_cooldown) return end
 		order(primary)
 	end
 
@@ -727,6 +752,7 @@ return function(E)
 		F.next_jump = now + E.S.jump_cooldown
 		E.log("jump attack")
 		swing(SLOTS_JUMP, true, now)
+		if F.lock then F.lock.guard = true end -- he cannot be hurt through it (C.invincible)
 	end
 
 	-- the charge (the author, 2026-10-15: "charging running should be triggered with q as a continuious press"): the
@@ -783,9 +809,53 @@ return function(E)
 		-- longest MOVING_ATTACK off the .anim; a unit with none, at LOCK_MAX
 		local len = E.D.runs and E.D.runs[F.utype]
 		if F.lock then
-			F.lock.runs = true
+			F.lock.runs, F.lock.guard = true, true
 			if len then F.lock.till = math.min(F.lock.till, now + len + CLIP_START) end
 		end
+	end
+
+	-- the engine plays no defend clip on a unit of one in melee (measured 2026-10-19: Yuan Bo under two regiments, 9
+	-- blows in 20 s, all under his own swings or none; in third person he stands, the guard stopping each melee order):
+	-- a blow on him standing idle plays his defend, DEFEND_1-10 in turn (FLY_DEFEND in the air, else a hit reaction), on
+	-- the body that carries his clips. Forced on Yuan Bo it ran 3 s and he lost nothing through it; his next key cuts it
+	local REACT_GAP = 6 -- s from one to the next: at most half of a melee he stands in, with clips of about 3 s
+	local REACTS = {{474, 483}, {368, 377}} -- DEFEND_1-10, else HIT_REACTION_STAND_1-10
+	local FLY_REACTS = {{504, 513}} -- FLY_DEFEND_1-10
+	local function react(man)
+		local body = P.mount(man) or man
+		for _, r in ipairs(F.unit:is_currently_flying() and FLY_REACTS or REACTS) do
+			local has = {}
+			for s = r[1], r[2] do if P.has_slot(body, s) then has[#has + 1] = s end end
+			if #has > 0 then
+				local k = turn.react or 0
+				turn.react = k + 1
+				return P.play(body, has[k % #has + 1], 6)
+			end
+		end
+		return false
+	end
+
+	-- a unit of one cannot be hurt through his jump, his charge attack, or a block or hit reaction on him or his mount
+	-- (the author, 2026-10-19: "no invisibility frames"). man: his model, nil for one man of a regiment or a regiment
+	-- played whole - CA's switch is the whole unit's, and would cover all his men. Released at once, as CA's own use on a
+	-- unit the player controls (lib_battle_script_unit.lua). An invincibility the battle gave him is left alone, on and
+	-- off. idle: no move key held this frame
+	function C.invincible(man, now, idle)
+		if man then
+			local hp = P.model_hp(man)
+			local hit = F.hit_hp ~= nil and hp < F.hit_hp
+			F.hit_hp = hp
+			if hit and idle and now and now >= (F.next_react or 0)
+				and not (F.lock or F.swung or F.pending or F.shot or F.firing or F.native_attack) and react(man) then
+				F.next_react = now + REACT_GAP
+			end
+		end
+		local mount = man and P.mount(man)
+		local want = man and (F.lock and F.lock.guard or reeling(P.anim_slot(man)) or mount and reeling(P.anim_slot(mount))) or false
+		if want == (F.invincible or false) or want and F.unit:is_invulnerable() then return end
+		F.uc:set_invincible(want)
+		F.uc:release_control()
+		F.invincible = want or nil
 	end
 
 	return C

@@ -45,6 +45,9 @@ return function(mct, K)
 	S.jump_cooldown = get("combat_jump_cooldown", 100) / 10
 	S.spread = get("combat_spread", 15) / 10
 	S.one_man = get("combat_one_man", true) == true
+	S.bars = ({always = "always", guide = "guide", off = false})[get("display_bars_show", "always")]
+	S.bars_range = get("display_bars_range", 40)
+	S.guide_hold = get("display_guide_hold", true) == true
 	S.debug = get("debug_log", false) == true
 	return S
 end

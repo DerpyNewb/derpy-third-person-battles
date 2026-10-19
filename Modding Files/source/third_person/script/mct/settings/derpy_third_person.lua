@@ -85,5 +85,19 @@ checkbox("combat", "combat_one_man", "Play one man of a regiment",
 	"On, you play the regiment's front man: he walks, swings and shoots alone while the rest hold. Off, you move the "
 	.. "whole regiment as before.", true)
 
+m:add_new_section("display", "On the battlefield")
+local bars = m:add_new_option("display_bars_show", "dropdown")
+bars:set_text("Health bars")
+bars:set_tooltip_text("A health bar over each unit near you, in its side's colour. A unit you cannot see shows none.")
+bars:add_dropdown_values({{key = "always", text = "Always", tt = "", is_default = true},
+	{key = "guide", text = "With the markers key", tt = "Only while the markers are shown (Alt unless changed under Keys).",
+	is_default = false}, {key = "off", text = "Never", tt = "", is_default = false}})
+bars:set_assigned_section("display")
+slider("display", "display_bars_range", "Health bar distance",
+	"Metres from you within which a unit shows its health bar. 1000 shows every unit on the field.", 40, 10, 1000)
+checkbox("display", "display_guide_hold", "Hold to show enemies and allies",
+	"Coloured markers under the men of every unit you do not command, an enemy only while you can see it. On, they show "
+	.. "while the key is held (Alt unless changed under Keys). Off, a press shows or hides them.", true)
+
 m:add_new_section("debug", "Debug")
 checkbox("debug", "debug_log", "Write every order to the script log", "For bug reports. Off by default.", false)

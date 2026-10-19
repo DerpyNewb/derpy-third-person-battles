@@ -80,6 +80,8 @@ function UNIT:owned_non_passive_special_abilities() return self._abilities end
 function UNIT:can_perform_special_ability(key) return self._can[key] ~= false end
 function UNIT:unary_hitpoints() return self._hp end
 function UNIT:initial_number_of_men() return #self._models end
+function UNIT:is_invulnerable() return self._invulnerable == true end
+function UNIT:is_player_controlled() return not (self._enemy or self._ally) end
 
 local next_id = 0
 -- o: type, men, x, z, bearing, range, ammo, start_ammo, arty, general, abilities, can, men_ok, enemy, hp
@@ -90,7 +92,7 @@ function H.unit(o)
 		_range = o.range or 0, _ammo = o.ammo or 0, _start_ammo = o.start_ammo or o.ammo or 0, _arty = o.arty or false, _war_machine = o.war_machine or false,
 		_general = o.general or false, _abilities = o.abilities or {}, _can = o.can or {}, _routing = false,
 		_id = next_id, _models = {}, _men_ok = o.men_ok, _flying = o.flying or false, _can_fly = o.can_fly, _melee = o.melee, _prior_walk = o.prior_walk,
-		_hidden = o.hidden}, UNIT)
+		_hidden = o.hidden, _enemy = o.enemy, _ally = o.ally}, UNIT)
 	if o.hold_fire then u._faw = false end -- the player's own hold fire
 	u._defend = o.defend == true -- the player's own guard
 	local men = o.men or 1
@@ -100,7 +102,7 @@ function H.unit(o)
 			clip_ms = o.clip_ms}
 		if o.reload_slot == false then u._models[i].reload = false end
 	end
-	local list = o.enemy and H.enemies or H.units
+	local list = o.enemy and H.enemies or o.ally and H.allies or H.units
 	list[#list + 1] = u
 	return u
 end
@@ -128,7 +130,10 @@ UC.__index = function(self, name)
 		end
 		if name == "fire_at_will" then self._u._faw = (...) end
 		if name == "change_behaviour_active" then local b, on = ... if b == "defend" then self._u._defend = on end end
-		if name == "halt" then self._u._prior_walk = false end
+		-- CA's halt also turns fire at will off, and it stays off (measured 2026-10-19 on Dragon Guard Crossbowmen: firing,
+		-- halted, silent; defend left it on)
+		if name == "halt" then self._u._prior_walk = false self._u._faw = false end
+		if name == "set_invincible" then self._u._invulnerable = (...) end
 	end
 end
 function create_unitcontroller(u) return setmetatable({_u = u}, UC) end
@@ -164,7 +169,9 @@ local function make_bm()
 	function B:num_units_selected() local n = 0 for _ in pairs(H.sel) do n = n + 1 end return n end
 	function B:clear_selection() rec("clear_selection") H.select(nil) end
 	function B:get_player_army() return {units = function() return listof(H.units) end} end
-	function B:get_player_alliance() return {armies = function() return listof({B:get_player_army()}) end} end
+	function B:get_player_alliance()
+		return {armies = function() return listof({B:get_player_army(), {units = function() return listof(H.allies) end}}) end}
+	end
 	function B:get_non_player_alliance()
 		return {armies = function() return listof({{units = function() return listof(H.enemies) end}}) end}
 	end
@@ -194,10 +201,11 @@ H.comp = comp
 local function build_twui(c, rel)
 	local f = assert(io.open(ROOT .. "/" .. rel .. ".twui.xml", "rb"))
 	local t = f:read("*a") f:close()
-	local size = {}
+	local size, pinned = {}, {}
 	for gid, body in t:gmatch('\n\t\t<[%w_]+\n\t\t\tthis="([^"]+)"(.-)\n\t\t</') do
 		local w, h = body:match('width="(%d+)"%s+height="(%d+)"')
 		size[gid] = {tonumber(w), tonumber(h)}
+		pinned[gid] = body:find('callback_id="ContextWorldSpaceComponent"', 1, true) ~= nil
 	end
 	local tree = t:match("<hierarchy>(.-)</hierarchy>")
 	if tree:match("^%s*<([%w_]+)") ~= "root" then return false end
@@ -210,6 +218,7 @@ local function build_twui(c, rel)
 			if not parent then node = {kids = {}} -- <root>: dropped
 			elseif #stack == 1 then node = c -- root's child is the created component
 			else node = comp(name, parent) node.hud = true node.w, node.h = size[gid][1], size[gid][2] end
+			if pinned[gid] then H.pinned[#H.pinned + 1] = node end
 			if closed == "" then stack[#stack + 1] = node end
 		elseif line:match("^%s*</") then
 			stack[#stack] = nil
@@ -230,6 +239,9 @@ function COMP:CreateComponent(id, path)
 	elseif path == "ui/derpy_tp/hud" then
 		c.hud = true
 		if H.refuse_layout or not build_twui(c, path) then table.remove(self.kids) return nil end
+	elseif path:find("^ui/derpy_tp/bar_") then
+		c.layout = path
+		if H.refuse_bar or not build_twui(c, path) then table.remove(self.kids) return nil end
 	end
 	return c
 end
@@ -257,6 +269,7 @@ function COMP:Resize(w, h)
 end
 function COMP:SetImageRotation(i, a) rec("rot", self.id, i, a) self.rot = self.rot or {} self.rot[i] = a end
 function COMP:SetInteractive(b) self.interactive = b end
+function COMP:SetContextObject(o) self.context = o end
 function COMP:GetContextObjectId(kind) if kind == "CcoBattleUnit" then return self.cco end end
 function COMP:MoveTo(x, y) self.x, self.y = x, y end
 -- CA's uicomponent:Adopt(address, [index]): the child leaves its old parent; index 0-based, -1 or none the end
@@ -286,7 +299,10 @@ function find_uicomponent(root, ...)
 	for _, name in ipairs({...}) do c = c and find(c, name) end
 	return c
 end
-core = {get_env = function() return _G end, get_ui_root = function() return H.root end,
+-- CA's script environment, which the pack's files run in: _G's names, and CA's context constructor, which is in it
+-- and NOT in _G (measured 2026-10-19: _G.cco nil, the bare name a callable table)
+H.env = setmetatable({cco = function(kind, id) return {kind = kind, id = id} end}, {__index = _G, __newindex = _G})
+core = {get_env = function() return H.env end, get_ui_root = function() return H.root end,
 	get_screen_resolution = function() return H.screen[1], H.screen[2] end}
 function out(msg) H.log[#H.log + 1] = tostring(msg) end
 -- CA's unit context, by expression: H.cco[expr] is the value, or a function that returns it or throws
@@ -386,7 +402,7 @@ local function fake_platform()
 	function P.command(m) return m.command or "walk" end
 	function P.walk_ended(m) return m.walk_ended == true end -- a test plays the engine ending his walk
 	function P.guard(m) rec("guard", m and m.id) return false end
-	function P.disarm(m) rec("disarm", m and m.id) end
+	function P.disarm(m, shots) rec("disarm", m and m.id, shots) end
 	function P.arm(m) rec("arm", m and m.id) end
 	function P.gate(on) rec("gate", on) return true end
 	function P.terrain_floor(on) rec("terrain_floor", on) return true end
@@ -439,6 +455,9 @@ function H.step(seconds)
 				if not ok then error(err, 0) end
 			end
 		end
+		-- the engine owns a world-space pin's own visibility: shown each frame while its unit is on screen, whatever
+		-- SetVisible said (measured 2026-10-19: both pins a probe flipped were back 2 s later). Every unit is on screen here
+		for _, c in ipairs(H.pinned) do c.visible = true end
 	end
 end
 
@@ -454,12 +473,13 @@ function H.fresh(opts)
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
 	H.T, H.calls, H.timers, H.keys, H.focus, H.mouse, H.wheel_notches = 100, {}, {}, {}, true, {0, 0}, 0
 	H.log, H.phase, H.selection_cbs, H.selected, H.sel = {}, {}, {}, nil, {}
-	H.units, H.enemies, next_id = {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
+	H.units, H.enemies, H.allies, next_id = {}, {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
 	H.mp, H.replay = opts.mp or false, opts.replay or false
 	H.screen, H.tick_ms = opts.screen or {1920, 1080}, opts.tick_ms
 	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold, H.report_ms = 0, false, false, false, false, 0
 	H.features = opts.features or {input = true, anim = true, wheel = true}
 	H.root = comp("root")
+	H.pinned = {}
 	H.cco, H.cco_ids, H.w2s = H.default_cco(), nil, nil
 	H.eye, H.look, H.ground, H.roof = nil, nil, nil, nil
 	-- H.cam_lag: frames the engine's reported position trails the asked eye (measured 2026-10-15: two)
@@ -482,6 +502,7 @@ function H.fresh(opts)
 	bm = make_bm()
 	for _, o in ipairs(opts.units or {{general = true}}) do H.unit(o) end
 	for _, o in ipairs(opts.enemies or {}) do o.enemy = true H.unit(o) end
+	for _, o in ipairs(opts.allies or {}) do o.ally = true H.unit(o) end
 	local cards = comp("cards_panel", comp("hud_battle", H.root))
 	for _, u in ipairs(H.units) do comp(tostring(u._id), cards).cco = "cco_" .. u._id end
 	H.P = fake_platform()

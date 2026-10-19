@@ -178,6 +178,17 @@ return function(E)
 		if b then b:SimulateLClick() else E.once("fly", "no Toggle flying button for " .. F.utype) end
 	end
 
+	-- no shot he did not ask for (the author, 2026-10-14: "absolute control of the unit and no auto attack"): a unit
+	-- played whole holds its fire, given back at the end. One man of a regiment leaves it alone - his regiment shoots
+	-- as the player set it (the author, 2026-10-19: "controlling a ranged unit disables the rest of the battalions
+	-- ranged option too"; 2026-10-15: one man gives it no orders)
+	local function hold_fire(unit)
+		if F.held_fire or F.model or unit:missile_range() <= 0 then return end
+		F.held_fire = true
+		F.uc:fire_at_will(false)
+		F.uc:release_control()
+	end
+
 	local function look()
 		if P.held(E.S.keys.look_free) then F.dragging = false return end
 		if not F.dragging then P.look_begin() F.dragging = true return end
@@ -218,7 +229,8 @@ return function(E)
 			-- he died, or he is the last man: the next front-centre man, or the whole unit
 			F.model, F.man_hold, F.shot, F.lock, F.swung = E.move.front_man(unit), nil, nil, nil, nil
 			F.reload_slot = F.model and P.reload_slot(F.model)
-			-- played whole from here; it keeps holding its fire until third person ends (no shot he did not ask for)
+			-- played whole from here: it holds its fire until third person ends
+			hold_fire(unit)
 			F.fire_slot = F.model and fire_clip(F.model)
 			F.solo = F.model ~= nil and E.D.shots[F.utype] ~= nil and P.features.anim and F.fire_slot ~= nil
 			capabilities(F.model or P.models(unit)[1])
@@ -250,6 +262,9 @@ return function(E)
 			if P.pressed(S.keys.hide_ui) then hide_ui(not F.ui_off) end -- paused too: a still to take a picture of
 			if P.pressed(S.keys.minimap) then F.map = E.hud.map(not F.map) end
 			if P.pressed(S.keys.view) then E.first_person = not E.first_person end -- kept for the battle
+			-- the markers under enemies and allies (the author, 2026-10-19: "show the ally/enemy guide while holding/ toggle
+			-- Alt, configurable using mct"): while held, or a press switches them; paused too
+			if S.guide_hold then F.guide = P.held(S.keys.guide) elseif P.pressed(S.keys.guide) then F.guide = not F.guide end
 			cursor(not F.dragging)
 			kf = (P.held(S.keys.forward) and 1 or 0) - (P.held(S.keys.back) and 1 or 0)
 			kr = (P.held(S.keys.right) and 1 or 0) - (P.held(S.keys.left) and 1 or 0)
@@ -306,11 +321,15 @@ return function(E)
 				if c == pd.slot then pd.seen = true end
 				if pd.seen and c ~= pd.slot or not pd.seen and gnow >= pd.till then F.pending = nil end
 			end
+			-- one man of a regiment: none of its volleys either, armed only for his own shot (F.shot); a unit of one keeps his
+			-- shot clips, the engine's own order fires him (combat.lua C.ground)
 			local man = F.model or single
 			if man then
-				if F.lock or F.swung or F.native_attack or F.pending then P.arm(man) else P.disarm(man) end
+				if F.lock or F.swung or F.native_attack or F.pending or F.shot then P.arm(man) else P.disarm(man, F.model ~= nil) end
 				F.disarmed = man
 			end
+			-- through his jump, charge attack and a blow standing idle (his defend): a unit of one only
+			E.combat.invincible(single, gnow, kf == 0 and kr == 0)
 			if F.shot and (kf ~= 0 or kr ~= 0) then E.combat.drop(gnow, true) end
 			if F.shot then P.face(F.model, E.rig.yaw)
 			elseif E.combat.locked(gnow) and not F.lock.runs then
@@ -436,6 +455,7 @@ return function(E)
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
 		F.lead = nil -- his steering point at its full distance (move.lua)
+		F.hit_hp, F.next_react = nil, 0 -- a blow is his hit points falling from one frame to the next (combat.lua C.invincible)
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
 		local x, y, z
 		if F.model then x, y, z = P.model_pos(F.model) else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
@@ -444,11 +464,17 @@ return function(E)
 		F.on = true
 		-- the author: "absolute control of the unit and no auto attack". It shoots when clicked, never at will, and
 		-- keeps its ground (defend: no pursuit) - both given back as the player had them
-		if unit:missile_range() > 0 then F.held_fire = true F.uc:fire_at_will(false) end
-		F.defend_was = unit:is_behaviour_active("defend")
-		if not F.defend_was and unit:can_use_behaviour("defend") then F.uc:change_behaviour_active("defend", true, false) end
-		F.uc:halt()
-		F.uc:release_control()
+		hold_fire(unit)
+		-- one man of a regiment gives it neither: CA's halt turns its fire at will off, and it stayed off past the end
+		-- (the author, 2026-10-19: "controlling a ranged unit disables the rest of the battalions ranged option too";
+		-- measured that day). He is halted alone (E.move.halt below)
+		F.defend_was = nil
+		if not F.model then
+			F.defend_was = unit:is_behaviour_active("defend")
+			if not F.defend_was and unit:can_use_behaviour("defend") then F.uc:change_behaviour_active("defend", true, false) end
+			F.uc:halt()
+			F.uc:release_control()
+		end
 		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate); a unit of one steered
 		-- alone too, whose melee attack the engine orders again every tick (measured 2026-10-18: none of 5 played, gated 6 of 6)
 		if F.model or F.single_steer then
@@ -465,6 +491,9 @@ return function(E)
 		F.shortcuts = {}
 		for _, name in pairs(S.names) do
 			local sc = E.K.game[name]
+			if sc then bm:disable_shortcut(sc, true) F.shortcuts[#F.shortcuts + 1] = sc end
+			-- Alt the guide key: Alt held with an action's key is the game's Alt shortcut too (Alt+M its music)
+			sc = S.names.guide == "Alt" and E.K.game_alt[name]
 			if sc then bm:disable_shortcut(sc, true) F.shortcuts[#F.shortcuts + 1] = sc end
 		end
 		bm.battle:enable_tooltips(false) -- the unit hover panel (SpecialTooltip) follows the parked cursor
@@ -497,6 +526,7 @@ return function(E)
 		-- his swings back; nothing written to a dead man, whose model may be gone
 		if F.disarmed then try(function() if P.alive(F.unit, F.disarmed) then P.arm(F.disarmed) end end) F.disarmed = nil end
 		if F.gated then F.gated = nil try(function() P.gate(false) end) end
+		if F.invincible then F.invincible = nil try(function() F.uc:set_invincible(false) F.uc:release_control() end) end
 		try(function() E.move.halt() end)
 		if F.firing then try(function() E.combat.stop_fire() end) end
 		try(function() E.abilities.cancel() end)

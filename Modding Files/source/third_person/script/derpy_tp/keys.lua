@@ -1,4 +1,4 @@
--- The keys the MCT page offers, their Windows virtual-key codes, and the 28 actions with their
+-- The keys the MCT page offers, their Windows virtual-key codes, and the 29 actions with their
 -- defaults and labels. The MCT page and the battle script both loadfile this, so they cannot
 -- disagree. A name can stand for two keys: "+" is the main-row plus and the numpad plus.
 local K = {names = {}, vk = {}}
@@ -19,12 +19,12 @@ add("Page Up", 0x21) add("Page Down", 0x22) add("Up", 0x26) add("Down", 0x28) ad
 add("+", {0xBB, 0x6B}) add("-", {0xBD, 0x6D})
 
 K.order = {"toggle", "forward", "back", "left", "right", "walk", "sprint", "look_free", "attack", "mode", "jump", "fly", "zoom_in",
-	"zoom_out", "cheer", "hide_ui", "minimap", "view", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
+	"zoom_out", "cheer", "hide_ui", "minimap", "view", "guide", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
 	"ability_10"}
 
 K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D", walk = "Z", sprint = "Shift",
 	look_free = "Middle mouse", attack = "Left mouse", mode = "Right mouse", jump = "E", fly = "Space", zoom_in = "+", zoom_out = "-",
-	cheer = "O", hide_ui = "P", minimap = "M", view = "V",
+	cheer = "O", hide_ui = "P", minimap = "M", view = "V", guide = "Alt",
 	ability_1 = "1", ability_2 = "2", ability_3 = "3", ability_4 = "4", ability_5 = "5", ability_6 = "6",
 	ability_7 = "7", ability_8 = "8", ability_9 = "9", ability_10 = "0"}
 
@@ -35,6 +35,7 @@ K.labels = {toggle = "Third person on and off", forward = "Walk forward", back =
 	fly = "Fly or land (flying units)", zoom_in = "Zoom in", zoom_out = "Zoom out", cheer = "Cheer",
 	hide_ui = "Hide or show the interface (works paused)", minimap = "Show or hide the minimap",
 	view = "First or third person view",
+	guide = "Markers under enemies and allies (hold, or press: see On the battlefield)",
 	ability_1 = "Ability 1", ability_2 = "Ability 2", ability_3 = "Ability 3", ability_4 = "Ability 4",
 	ability_5 = "Ability 5", ability_6 = "Ability 6", ability_7 = "Ability 7", ability_8 = "Ability 8",
 	ability_9 = "Ability 9", ability_10 = "Ability 10"}
@@ -44,5 +45,10 @@ K.labels = {toggle = "Third person on and off", forward = "Walk forward", back =
 -- the game binds only with a modifier
 K.game = {P = "toggle_pause", O = "visibility_toggle_radar", K = "toggle_ui", Space = "show_allied_units_proxies",
 	Z = "cam_down"}
+-- the game's shortcut on each key it binds with Alt (default_keys, read 2026-10-19): off on an action's key while third
+-- person is on and Alt is the guide key, held with those keys
+K.game_alt = {X = "toggle_sfx", M = "toggle_music", K = "toggle_ui_with_borders", ["0"] = "button_group_management_6",
+	["1"] = "battle_land_spell_1", ["2"] = "battle_land_spell_2", ["3"] = "battle_land_spell_3",
+	["4"] = "battle_land_spell_4", ["5"] = "battle_land_spell_5", ["6"] = "battle_land_spell_6"}
 
 return K

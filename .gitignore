@@ -17,5 +17,6 @@ __pycache__/
 *.json
 *.npz
 *.twui.xml
-# ours: written by tools/gen_third_person_hud.py, it names CA's art by path only
+# ours: written by tools/gen_third_person_hud.py, they name CA's art by path only
 !Modding Files/source/third_person/ui/derpy_tp/hud.twui.xml
+!Modding Files/source/third_person/ui/derpy_tp/bar_*.twui.xml

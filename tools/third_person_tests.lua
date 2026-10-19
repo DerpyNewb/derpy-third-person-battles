@@ -607,15 +607,6 @@ T.input_unreadable_says_memreader = function()
 	check(H.logged("no keyboard or mouse"), "the reason is logged")
 end
 
-T.one_man_regiment_with_shots_holds_fire = function()
-	H.fresh({units = {{general = true}, {type = "wh3_main_cth_inf_jade_warrior_crossbowmen_1", men = 20, range = 160, ammo = 3960}}})
-	H.select(H.units[2])
-	H.tap("F2")
-	check(H.units[2]._faw == false, "the rest of the regiment holds fire")
-	H.tap("F2")
-	check(H.units[2]._faw == true, "F2 off gives it back")
-end
-
 local function playing(o, enemies)
 	H.fresh({units = {{general = true}, o}, enemies = enemies})
 	H.select(H.units[2])
@@ -801,15 +792,76 @@ T.swing_falls_back_to_an_attack_order = function()
 	check(H.count("uc:attack_unit") == 1 and H.last("uc:attack_unit")[3] == H.enemies[1], "an attack order on the enemy ahead")
 end
 
+-- a player, 2026-10-19: "my character has 10 sets of combat animations ... the left mouse button cycles through 4 ...,
+-- the right mouse button another 4 ... 2 sets cannot be triggered" (it was 4 and 3: ATTACK_8-10 never played). The attack
+-- clips he has are halved between the buttons, in order: ten are 1-5 and 6-10, seven 1-4 and 5-7 (as before), five 1-3
+-- and 4-5, nine (1-8 and 10, the rider of str_xian_longma) 1-5 and 6-8, 10
+T.both_buttons_together_reach_every_attack_clip_he_has = function()
+	for _, case in ipairs({{{454, 455, 456, 457, 458}, {459, 460, 461, 462, 463}}, {{454, 455, 456, 457}, {458, 459, 460}},
+		{{454, 455, 456}, {457, 458}}, {{454, 455, 456, 457, 458}, {459, 460, 461, 463}}}) do
+		local slots, want = {}, {}
+		for b = 1, 2 do for _, s in ipairs(case[b]) do slots[s] = true want[s] = b end end
+		playing({type = "wh_test_melee", men = 21, x = 40, slots = slots})
+		for b, key in ipairs({"Left mouse", "Right mouse"}) do
+			local seen, n = {}, 0
+			for _ = 1, #case[b] do
+				past_swing_gap()
+				local before = H.count("play")
+				H.tap(key)
+				local p = H.last("play")
+				check(H.count("play") == before + 1 and want[p[3]] == b, key .. " plays one of its half: " .. tostring(p and p[3]))
+				if not seen[p[3]] then seen[p[3]], n = true, n + 1 end
+			end
+			check(n == #case[b], key .. " reaches all " .. #case[b] .. " of its half, got " .. n)
+		end
+	end
+	-- each button on its own count: a right click between two left ones does not move the left's on
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [455] = true, [456] = true, [457] = true}})
+	local got = {}
+	for k = 1, 4 do past_swing_gap() H.tap(k % 2 == 1 and "Left mouse" or "Right mouse") got[k] = H.last("play")[3] end
+	check(table.concat(got, " ") == "454 456 455 457", "left and right in turn: " .. table.concat(got, " "))
+end
+
+-- the author, 2026-10-19: "ranged units can only use the left button so attacks 1-10 should be on the left button if its
+-- a ranged unit". A unit that can shoot has the right button for its mode (C.mode); out of ammo it swings, halved again
+T.a_ranged_units_left_button_has_every_attack_clip = function()
+	local slots = {[1554] = true, [1557] = true}
+	for s = 454, 463 do slots[s] = true end
+	local u = playing({type = "wh3_main_cth_inf_jade_warrior_crossbowmen_1", men = 21, x = 40, range = 160, ammo = 3960,
+		slots = slots})
+	check(H.E.F.ranged, "a crossbowman starts ranged")
+	H.tap("Right mouse") H.step(0.1)
+	check(not H.E.F.ranged, "the right button: melee mode")
+	local seen, n = {}, 0
+	for _ = 1, 10 do
+		past_swing_gap()
+		local before = H.count("play")
+		H.tap("Left mouse")
+		local p = H.last("play")
+		check(H.count("play") == before + 1, "the left button swings")
+		if not seen[p[3]] then seen[p[3]], n = true, n + 1 end
+	end
+	check(n == 10, "the left button reaches all ten: " .. n)
+	u._ammo = 0
+	past_swing_gap()
+	H.tap("Right mouse")
+	check(H.last("play")[3] == 459, "out of ammo the right button swings its half, ATTACK_6: " .. tostring(H.last("play")[3]))
+end
+
+-- a mounted man's swing is his mount's (the engine plays mounted attacks on the mount): the mount's clips are the ones
+-- halved. Before, a button whose clips the mount lacked fell back to ATTACK_1 every time (2026-10-19, str_xian_longma:
+-- the right button played ATTACK_1 four times of four)
 T.mounted_swings_use_rider_slots = function()
-	local u = playing({type = "wh_test_mount", men = 1, slots = {[454] = true, [455] = true, [1901] = true, [1902] = true}})
-	u._models[1].mount = {id = 999, slots = {[454] = true, [455] = true}}
+	local u = playing({type = "wh_test_mount", men = 1, slots = {[454] = true, [455] = true, [456] = true, [457] = true,
+		[458] = true, [459] = true, [460] = true, [461] = true, [1901] = true, [1902] = true}})
+	u._models[1].mount = {id = 999, slots = {[454] = true, [455] = true, [456] = true}}
 	H.tap("Left mouse") past_swing_gap() H.tap("Left mouse")
 	local p = H.all("play")
 	check(#p == 2 and p[1][2] == 999 and p[2][2] == 999, "mounted swings play through the mount, which drives its rider")
 	check(p[1][3] == 454 and p[2][3] == 455 and p[1][4] == nil, "mount ground attack events stay active without a second rider command")
 	past_swing_gap() H.tap("Right mouse")
-	check(H.last("play")[2] == 999 and H.last("play")[3] == 454, "missing rider variants fall back to a supported rider/mount pair")
+	check(H.last("play")[2] == 999 and H.last("play")[3] == 456, "the right button: the mount's own third, not ATTACK_1 again: "
+		.. tostring(H.last("play")[3]))
 end
 
 T.flying_mount_swings_use_airborne_rider_slots = function()
@@ -1170,6 +1222,26 @@ T.fire_held_as_a_session_starts_waits_for_the_camera = function()
 	check(H.count("launch") == 1, "and he shoots once the camera is there")
 end
 
+-- one man: none of his regiment's volleys on him (2026-10-19), but his own shot plays: armed through it, disarmed of shots
+-- again after. A unit of one keeps his shot clips (the engine's own order fires him)
+T.one_man_is_kept_from_his_regiments_volleys_and_armed_for_his_own_shot = function()
+	crossbowmen()
+	H.step(0.2)
+	local man = H.E.F.model
+	local d = H.last("disarm")
+	check(d and d[2] == man.id and d[3] == true, "one man: disarmed of his shots too")
+	H.down("Left mouse") H.step(0.3)
+	check(H.E.F.shot ~= nil, "his own shot under way")
+	local n = H.count("disarm")
+	H.step(1)
+	check(H.E.F.shot ~= nil and H.count("disarm") == n, "never disarmed under his own shot: " .. H.count("disarm") - n)
+	H.up("Left mouse") H.step(20)
+	check(H.E.F.shot == nil and H.count("disarm") > n and H.last("disarm")[3] == true, "disarmed of his shots once it is over")
+	general_on()
+	H.step(0.2)
+	check(H.last("disarm") and not H.last("disarm")[3], "a unit of one keeps his shot clips")
+end
+
 T.solo_waits_for_the_engine_reload_and_finishes_after_release = function()
 	crossbowmen({reload_slot = 1564})
 	H.down("Left mouse") H.step(5.5) -- aim 1 s, fire 4 s: reloading
@@ -1294,12 +1366,12 @@ T.error_restores_everything = function()
 	H.tap("F2")
 	H.step(0.1)
 	local x = find_uicomponent(H.root, "derpy_tp_crosshair")
-	check(x and x:Visible() and H.units[2]._faw == false, "playing: crosshair up, the regiment holding fire")
+	check(x and x:Visible() and H.units[2]._faw ~= false, "playing: crosshair up, the regiment's fire left alone")
 	H.E.rig.update = function() error("test: rig failed") end
 	H.step(1 / 60)
 	check(not H.E.F.on, "stopped")
 	check(H.last("disable_orders")[2] == false and H.last("camera_functions")[3] == true, "orders and camera back")
-	check(H.units[2]._faw == true, "fire at will back")
+	check(H.units[2]._faw ~= false, "fire at will still on")
 	check(not x:Visible(), "crosshair hidden")
 	local c = H.last("cinematic_ui")
 	check(c[2] == false and c[3] == true, "interface and cursor shown")
@@ -1350,7 +1422,7 @@ end
 -- the author, 2026-10-14: "absolute control of the unit and no auto attack": played whole, it still holds its fire
 T.solo_regiment_down_to_one_still_holds_fire = function()
 	local u = crossbowmen({men = 2})
-	check(u._faw == false, "holding fire")
+	check(u._faw ~= false, "one man: his regiment's own fire setting")
 	H.E.F.model.alive = false
 	H.step(1 / 60)
 	check(u._faw == false, "one man left: played whole, and still no shot he did not ask for")
@@ -1633,6 +1705,26 @@ T.a_transformation_plays_on_as_its_new_form = function()
 	assert(ok, err)
 end
 
+-- F2 pressed on the new form before its card is there (the wait above is the follow's, not the key's): the HUD had no
+-- context and its portrait and slots went off; it fills in when the card comes
+T.a_new_form_taken_before_its_card_gets_its_hud_when_the_card_comes = function()
+	local function hud_part(id) return find_uicomponent(H.root, "derpy_tp_hud", id) end
+	local undo, new = swapping(true)
+	local ok, err = pcall(function()
+		H.step(0.2)
+		local u = new()
+		H.select(u)
+		H.tap("F2") H.step(0.1)
+		check(H.E.F.on and H.E.F.unit == u, "taken over at the key, before its card")
+		check(not hud_part("portrait"):Visible(), "no context yet: no portrait")
+		H.comp(tostring(u._id), find_uicomponent(H.root, "cards_panel")).cco = "cco_" .. u._id
+		H.step(0.5)
+		check(find_uicomponent(H.root, "derpy_tp_hud"):Visible() and hud_part("portrait"):Visible(), "its card came: the portrait shows")
+	end)
+	undo()
+	assert(ok, err)
+end
+
 T.a_transformation_that_never_comes_leaves_third_person_off = function()
 	local undo = swapping(false)
 	local ok, err = pcall(function()
@@ -1713,6 +1805,25 @@ T.toggle_loads_no_files = function()
 	check(H.E.F.on and H.E.strikes == 0, "F2 starts with no file loaded, strikes " .. H.E.strikes)
 end
 
+-- the author, 2026-10-19: "controlling a ranged unit disables the rest of the battalions ranged option too". One man
+-- of a regiment gives it no orders (2026-10-15): his regiment keeps the fire setting the player gave it, through his
+-- own shot and after. A regiment played whole still holds its fire
+T.one_man_leaves_his_regiments_fire_setting_alone = function()
+	local u = crossbowmen()
+	check(H.E.F.model and H.E.F.solo, "one man, shooting alone")
+	H.step(0.5)
+	H.tap("Left mouse") H.step(3)
+	check(H.E.F.shot_n > 0, "he shot")
+	H.tap("F2") H.step(0.1)
+	check(H.count("uc:fire_at_will") == 0 and u._faw ~= false, "never touched: " .. H.count("uc:fire_at_will"))
+	-- nor halted (it turns fire at will off) nor put in defend: no order at all
+	check(H.count("uc:halt") == 0 and H.count("uc:change_behaviour_active") == 0 and u._defend == false,
+		"his regiment had no halt or stance: " .. H.count("uc:halt") .. ", " .. H.count("uc:change_behaviour_active"))
+	whole_on({type = XBOW, men = 21, range = 160, ammo = 3960})
+	H.step(0.1)
+	check(H.units[2]._faw == false, "a regiment played whole still holds its fire")
+end
+
 T.solo_others_die_still_holds_fire = function()
 	local u = crossbowmen({men = 2})
 	for _, m in ipairs(u._models) do if m ~= H.E.F.model then m.alive = false end end
@@ -1724,7 +1835,10 @@ T.solo_others_die_still_holds_fire = function()
 end
 
 T.stop_restores_past_a_failing_step = function()
-	local u = crossbowmen()
+	whole_on({type = XBOW, men = 21, x = 40, range = 160, ammo = 3960}) -- played whole: it holds its fire
+	H.step(0.1)
+	local u = H.units[2]
+	check(H.E.F.on and u._faw == false, "on, holding fire")
 	H.E.move.halt = function() error("test: halt failed") end
 	H.tap("F2")
 	check(not H.E.F.on, "stopped")
@@ -2511,10 +2625,10 @@ T.the_man_played_alone_points_at_a_fragment_with_no_attack_clips = function()
 	check(mine.addr ~= shared and hmine.addr ~= hshared and mine.addr ~= hmine.addr, "rider and horse each on a copy")
 	check(mr.read_pointer(mine, 0).addr == BASE + 0x39d9448, "the copy carries the fragment's head")
 	for _, f in ipairs({mine, hmine}) do
-		for _, s in ipairs({454, 459, 463, 484, 494, 500, 1901, 1941, 1950}) do
+		for _, s in ipairs({454, 459, 463, 484, 494, 500, 501, 503, 1901, 1941, 1950}) do
 			check(mr.read_uint16(f, 0x50 + s * 2) == 0xffff, "no attack clip in slot " .. s)
 		end
-		for _, s in ipairs({0, 42, 135, 453, 464, 483, 501, 1094, 1557, 1564, 1900, 1951, 2329}) do
+		for _, s in ipairs({0, 42, 135, 453, 464, 483, 504, 1094, 1557, 1564, 1900, 1951, 2329}) do
 			check(mr.read_uint16(f, 0x50 + s * 2) == s % 31, "slot " .. s .. " kept")
 		end
 	end
@@ -2528,6 +2642,48 @@ T.the_man_played_alone_points_at_a_fragment_with_no_attack_clips = function()
 	check(mr.read_pointer(m, 0x308).addr == shared, "twice is harmless")
 	P.disarm(m)
 	check(mr.read_pointer(m, 0x308).addr == mine.addr, "one copy per fragment, made once")
+end
+
+-- one man of a regiment: his regiment's volleys too (2026-10-19, its fire at will left alone: he aimed and fired with it
+-- in 34 of 108 samples, no clip of ours) - the aim, fire and reload clips (combat.lua's shooting()) go from his copy as
+-- well. A unit of one, whose shot is the engine's own order (C.ground), keeps them
+T.one_man_points_at_a_fragment_with_no_shot_clips_either = function()
+	local P, mr, put, BASE, fragment = fragment_platform()
+	local m, lord = mr.add(mr.base, 0x6300000), mr.add(mr.base, 0x6320000)
+	local shared, lshared = BASE + 0x6400000, BASE + 0x6404000
+	fragment(shared) fragment(lshared)
+	put(m.addr + 0x308, shared, 8) put(lord.addr + 0x308, lshared, 8)
+	P.disarm(m, true)
+	P.disarm(lord)
+	local mine, his = mr.read_pointer(m, 0x308), mr.read_pointer(lord, 0x308)
+	for _, s in ipairs({454, 1547, 1557, 1564, 1599, 949, 952, 2104, 2116}) do
+		check(mr.read_uint16(mine, 0x50 + s * 2) == 0xffff, "one man: no clip in slot " .. s)
+	end
+	for _, s in ipairs({1546, 1600, 948, 953, 2103, 2117}) do
+		check(mr.read_uint16(mine, 0x50 + s * 2) == s % 31, "one man: slot " .. s .. " kept")
+	end
+	check(mr.read_uint16(his, 0x50 + 454 * 2) == 0xffff, "a unit of one: no swing")
+	for _, s in ipairs({1557, 1564, 2104}) do
+		check(mr.read_uint16(his, 0x50 + s * 2) == s % 31, "a unit of one keeps shot slot " .. s)
+	end
+	check(P.has_slot(m, 1557) and P.has_slot(m, 1564), "his own shot clips still read as his")
+	-- the same fragment, both kinds: the swing-only copy is not the one with no shots
+	put(lord.addr + 0x308, shared, 8)
+	P.disarm(lord)
+	check(mr.read_uint16(mr.read_pointer(lord, 0x308), 0x50 + 1557 * 2) == 1557 % 31, "a copy per kind")
+	P.disarm(lord, true)
+	check(mr.read_pointer(lord, 0x308).addr == mine.addr, "switched to the kind asked for")
+	-- his own shot is pushed on his own table, as his swing is
+	local G, B = BASE + 0x5000000, BASE + 0x5100000
+	put(BASE + 0x4480da0, G, 8) put(G + 0x468, B, 8) put(B + 0x644e8, BASE + 0x5200000, 8)
+	check(P.check_anim(), "the command route")
+	local under
+	function mr.call(f) if f.addr == BASE + 0x2e9b974 then under = mr.read_pointer(m, 0x308).addr end end
+	for _, s in ipairs({1548, 1557, 1564}) do
+		P.disarm(m, true)
+		under = nil
+		check(P.play(m, s, 6) and under == shared, "his own shot clip " .. s .. " on his own table")
+	end
 end
 
 -- his own swing is pushed with his own table under it, or the engine finds no clip to play
@@ -2713,14 +2869,11 @@ T.unknown_build_has_no_walk_command_writes = function()
 	check(#mr.calls == 0, "no 9.0 function is called on another build")
 end
 
-T.solo_start_cancels_the_existing_attack_order = function()
-	crossbowmen()
-	check(H.count("uc:halt") > 0, "solo start stops a prior targeted fire order")
-end
-
+-- a unit of one and a regiment played whole: one man of a regiment gives it no halt, which turned its fire at will off
+-- (2026-10-19, one_man_leaves_his_regiments_fire_setting_alone)
 T.f2_cancels_existing_movement_before_accepting_input = function()
 	for _, o in ipairs({{general = true, prior_walk = true}, {general = true, men = 21, prior_walk = true}}) do
-		H.fresh({units = {o}})
+		H.fresh({units = {o}, mct = o.men and {combat_one_man = false} or nil})
 		H.tap("F2")
 		local u = H.units[1]
 		local z = u._z
@@ -3399,6 +3552,35 @@ T.with_the_hud_off_the_next_unit_casts_through_its_own_context = function()
 	check(c and c[3] == "cco_2", "unit 2's key 1 runs on unit 2's ability: " .. tostring(c and c[3]))
 end
 
+-- a player, 2026-10-19: "I turned the UI off mid transformation and the HUD stayed off for the rest of the match (only
+-- while controlling him)". Three HUD part errors switched it off "until this battle ends" (the 2026-10-17 logs: a new
+-- form taken over before its card, two parts off, then the third): the next session - another unit, his new form -
+-- starts with a whole HUD again
+T.the_hud_comes_back_whole_with_the_next_session = function()
+	H.fresh({units = {{general = true, abilities = {"wh_test_a"}}, {abilities = {"wh_test_b"}, x = 30}}})
+	local a, b = ability_record({}), ability_record({})
+	a["BattleAbilityList.At(0).SetupAbilityContext.RecordKey"] = "wh_test_a"
+	b["BattleAbilityList.At(0).SetupAbilityContext.RecordKey"] = "wh_test_b"
+	a.IconPath = function() error("test: portrait") end
+	H.cco_ids = {cco_1 = a, cco_2 = b}
+	H.tap("F2") H.step(0.1)
+	H.units[1].unary_hitpoints = function() error("test: health") end
+	H.units[1].initial_number_of_men = function() error("test: men") end
+	H.step(1 / 60)
+	check(not find_uicomponent(H.root, "derpy_tp_hud"):Visible(), "three HUD errors: the HUD is off")
+	H.tap("F2")
+	H.units[1].unary_hitpoints, H.units[1].initial_number_of_men = nil, nil
+	H.select(H.units[2])
+	H.tap("F2") H.step(0.1)
+	check(find_uicomponent(H.root, "derpy_tp_hud"):Visible() and hud_part("portrait"):Visible(),
+		"the next session: the HUD whole again")
+	H.tap("F2")
+	H.select(H.units[1])
+	H.tap("F2") H.step(0.1)
+	check(find_uicomponent(H.root, "derpy_tp_hud"):Visible() and not hud_part("portrait"):Visible(),
+		"the first unit again: shown, its broken portrait alone hidden")
+end
+
 T.f2_off_and_on_keeps_the_reload = function()
 	local launches = {}
 	for _, cycle in ipairs({false, true}) do
@@ -3423,12 +3605,17 @@ end
 
 T.leaving_gives_back_the_players_own_fire_setting = function()
 	xbow_with({}, {hold_fire = true})
-	check(H.units[2]._faw == false, "holding fire while he shoots alone")
+	check(H.units[2]._faw == false, "the player's hold fire while he shoots alone")
 	H.tap("F2")
 	check(H.units[2]._faw == false, "the player had it on hold fire: it stays on hold fire")
 	xbow_with({})
 	H.tap("F2")
-	check(H.units[2]._faw == true, "fire at will before: fire at will after")
+	check(H.units[2]._faw ~= false, "fire at will before: fire at will after")
+	whole_on({type = XBOW, men = 21, range = 160, ammo = 3960})
+	H.step(0.1)
+	check(H.units[2]._faw == false, "played whole: holding fire")
+	H.tap("F2")
+	check(H.units[2]._faw == true, "and given back")
 end
 
 T.paused_the_arrow_still_follows_the_camera = function()
@@ -4385,9 +4572,11 @@ end
 -- attacks run 1, 2 or 5 deep, an engineer lacks ATTACK_3; a list that rotates past what he has plays nothing
 T.a_swing_rotates_only_through_the_clips_he_has = function()
 	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [455] = true, [490] = true, [42] = true}})
+	-- two clips, halved between the buttons (2026-10-19): the left plays ATTACK_1, the right ATTACK_2 - before, the right
+	-- had ATTACK_5-7 alone and played nothing for him
 	local got = {}
-	for k = 1, 4 do H.tap("Left mouse") past_swing_gap() got[k] = H.last("play")[3] end
-	check(got[1] == 454 and got[2] == 455 and got[3] == 454 and got[4] == 455, "454 455 454 455: " .. table.concat(got, " "))
+	for k = 1, 4 do H.tap(k <= 2 and "Left mouse" or "Right mouse") past_swing_gap() got[k] = H.last("play")[3] end
+	check(got[1] == 454 and got[2] == 454 and got[3] == 455 and got[4] == 455, "454 454 455 455: " .. table.concat(got, " "))
 	H.tap("E") H.step(1 / 60)
 	check(H.last("play")[3] == 490, "a jump list of one: JUMPING_ATTACK_2 every time")
 	H.step(3) H.tap("Left mouse") H.step(1 / 60)
@@ -4722,6 +4911,23 @@ T.the_games_shortcuts_on_its_keys_are_off_while_on = function()
 	H.tap("F2")
 	s = shortcuts()
 	check(s.toggle_ui == true and s.toggle_pause == nil, "hide on K: K's game shortcut off, pause left alone")
+end
+
+-- Alt held for the markers (the guide key) and a key pressed with it is one of the game's Alt shortcuts (default_keys:
+-- Alt+M its music, Alt+1-6 its land spells, Alt+0 group 6): those on an action's key are off while on; a guide key
+-- moved off Alt leaves them alone
+T.with_alt_the_guide_key_the_games_alt_shortcuts_on_its_keys_are_off = function()
+	general_on()
+	local s = shortcuts()
+	check(s.toggle_music == true and s.battle_land_spell_1 == true and s.battle_land_spell_6 == true
+		and s.button_group_management_6 == true, "Alt+M, Alt+1-6 and Alt+0 off")
+	check(s.toggle_sfx == nil and s.toggle_ui_with_borders == nil, "Alt+X and Alt+K: X and K are none of its keys")
+	H.tap("F2")
+	s = shortcuts()
+	check(s.toggle_music == false and s.battle_land_spell_1 == false, "back at the end")
+	H.fresh({mct = {key_guide = "G"}})
+	H.tap("F2")
+	check(shortcuts().toggle_music == nil, "the guide on G: the game's Alt shortcuts left alone")
 end
 
 -- the author, 2026-10-15: "fix two modes for ranged units (should walk and idle with melee weapons if melee mode, and
@@ -5797,6 +6003,272 @@ T.men_check_reads_the_mounts_steering_copies = function()
 	put(m.addr + 0x2e0, horse, 8)
 	for _, off in ipairs({0x1e0, 0x1e8, 0x194, 0x198}) do mr.fl[horse + off] = 0 end
 	check(P.check_men(u), "validate steering on the horse that receives the movement")
+end
+
+-- the author, 2026-10-19: "theres no invisibility frames on some animations (where the unit doesnt take damage after a
+-- certain"; asked which, the charge attack, the jump attack and the "defense animation when being hit", for a unit of
+-- one only. CA's switch (uc:set_invincible) is the whole unit's: on one man of a regiment it would cover all his men
+local function invincible() local c = H.last("uc:set_invincible") return c and c[3] end
+-- each switch released at once, as CA's own on a unit the player controls (lib_battle_script_unit.lua)
+local function released_after_each_switch()
+	for i, c in ipairs(H.calls) do
+		if c[1] == "uc:set_invincible" and not (H.calls[i + 1] and H.calls[i + 1][1] == "uc:release_control") then return false end
+	end
+	return true
+end
+-- a clip the engine plays on a man for ms, as it does when he is hit
+local function engine_plays(m, slot, ms) m.anim_slot, m.anim_end = slot, H.model_ms() + ms end
+
+T.a_unit_of_one_cannot_be_hurt_through_his_jump = function()
+	general_on() H.step(0.5)
+	check(H.count("uc:set_invincible") == 0, "nothing before")
+	H.tap("E") H.step(0.1)
+	check(invincible() == true, "on as the jump starts: " .. tostring(invincible()))
+	H.step(1.5)
+	check(invincible() == true and H.count("uc:set_invincible") == 1, "on through it, sent once: " .. H.count("uc:set_invincible"))
+	H.step(3)
+	check(invincible() == false and not H.units[1]._invulnerable, "off once its clip is over")
+	check(released_after_each_switch(), "each switch released")
+end
+
+T.a_unit_of_one_cannot_be_hurt_through_his_charge_attack = function()
+	general_on() H.step(0.5)
+	H.down("W") H.down("Shift") H.step(0.3)
+	check(H.count("uc:set_invincible") == 0, "the charge run alone is not one")
+	H.tap("Left mouse") H.step(0.1)
+	check(plays_of(484) == 1 and invincible() == true, "on with the charge attack")
+	H.up("Shift") H.up("W") H.step(3.5)
+	check(invincible() == false, "off after it")
+end
+
+T.a_unit_of_one_cannot_be_hurt_while_he_blocks_or_reels = function()
+	general_on() H.step(0.5)
+	local man = H.units[1]._models[1]
+	-- the first and last of each kind: HIT_REACTION_STAND_1, MELEE_BLOCK_10, DEFEND_1 and _10, FLY_DEFEND_1 and _10,
+	-- HIT_REACTION_COMBAT_READY_1, HIT_REACTION_SHOOT_READY_10, RIDER_DEFEND_1 and _10, RIDER_FLY_DEFEND_1 and _10,
+	-- RIDER_HIT_REACTION_STAND_1, RIDER_HIT_REACTION_SHOOT_10
+	for _, slot in ipairs({368, 387, 474, 483, 504, 513, 1217, 1246, 1921, 1930, 1951, 1960, 2202, 2221}) do
+		engine_plays(man, slot, 800) H.step(0.1)
+		check(invincible() == true, "on under " .. slot)
+		H.step(1)
+		check(invincible() == false, "off once it is over: " .. slot)
+	end
+	-- the clips either side of them are not (MOVING_ATTACK_1 484 among them: the engine's, not his charge attack)
+	local n = H.count("uc:set_invincible")
+	for _, slot in ipairs({367, 388, 473, 484, 503, 514, 1216, 1247, 1920, 1931, 1950, 1961, 2201, 2222}) do
+		engine_plays(man, slot, 800) H.step(1)
+	end
+	check(H.count("uc:set_invincible") == n, "none beside them: " .. H.count("uc:set_invincible") - n)
+	check(released_after_each_switch(), "each switch released")
+end
+
+-- the engine plays no defend clip on a unit of one in melee (measured 2026-10-19: Yuan Bo under two regiments, 9 blows in
+-- 20 s, all under his own swings or none; in third person he stands, the guard stopping each melee order), so the window
+-- above never opened. A blow on him standing idle plays his DEFEND (mask 6), and he cannot be hurt through it: once per
+-- REACT_GAP, never under his own swing, never while he walks
+T.a_blow_on_a_unit_of_one_standing_idle_plays_his_defend = function()
+	general_on() H.step(0.5)
+	local man = H.units[1]._models[1]
+	local n = H.count("play")
+	man.hp = man.hp - 5 H.step(0.1)
+	local p = H.last("play")
+	check(H.count("play") == n + 1 and p[2] == man.id and p[3] == 474 and p[4] == 6, "his DEFEND_1, held whole: "
+		.. tostring(p and p[3]))
+	H.step(0.1)
+	check(invincible() == true, "he cannot be hurt through it")
+	man.hp = man.hp - 5 H.step(0.1)
+	check(H.count("play") == n + 1, "a second blow inside the gap plays nothing")
+	H.step(6)
+	check(invincible() == false, "off once it is over")
+	man.hp = man.hp - 5 H.step(0.1)
+	check(H.count("play") == n + 2 and H.last("play")[3] == 475, "past the gap: his next defend, DEFEND_2")
+	-- under his own swing: nothing
+	H.step(7)
+	H.tap("Left mouse") H.step(0.1)
+	n = H.count("play")
+	man.hp = man.hp - 5 H.step(0.1)
+	check(H.count("play") == n, "a blow under his own swing plays nothing")
+	-- walking: nothing
+	H.step(7)
+	H.down("W") H.step(0.3)
+	n = H.count("play")
+	man.hp = man.hp - 5 H.step(0.1)
+	check(H.count("play") == n, "a blow while he walks plays nothing")
+	H.up("W")
+	-- one man of a regiment: nothing (a unit of one only, as the window)
+	crossbowmen() H.step(0.5)
+	n = H.count("play")
+	H.E.F.model.hp = H.E.F.model.hp - 5 H.step(0.1)
+	check(H.count("play") == n, "one man of a regiment: nothing")
+end
+
+T.a_mounted_unit_of_one_cannot_be_hurt_while_his_mount_reels = function()
+	H.fresh()
+	local man = H.units[1]._models[1]
+	local horse = {id = 999, x = man.x, y = man.y, z = man.z, hp = 100, hp_max = 100}
+	man.mount = horse
+	H.tap("F2") H.step(0.5)
+	engine_plays(horse, 474, 800) H.step(0.1)
+	check(invincible() == true, "on under his mount's block")
+	H.step(1)
+	check(invincible() == false, "off after it")
+end
+
+T.a_swing_or_a_cheer_gives_no_invincibility = function()
+	general_on() H.step(0.5)
+	H.tap("Left mouse") H.step(5)
+	H.tap("O") H.step(5)
+	check(plays_of(454) == 1 and #H.all("play") >= 2, "the swing and the cheer played")
+	check(H.count("uc:set_invincible") == 0, "neither is one: " .. H.count("uc:set_invincible"))
+end
+
+T.one_man_of_a_regiment_has_no_invincibility = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("E") H.step(0.5)
+	engine_plays(H.E.F.model, 474, 800) H.step(0.2)
+	check(plays_of(489) == 1 and H.count("uc:set_invincible") == 0, "it would cover all his men: " .. H.count("uc:set_invincible"))
+	whole_on() H.step(0.5)
+	H.tap("E") H.step(0.5)
+	check(H.count("uc:set_invincible") == 0, "nor a regiment played whole")
+end
+
+T.an_invincibility_the_battle_gave_him_is_left_alone = function()
+	H.fresh()
+	H.units[1]._invulnerable = true -- a battle script's own (CA's intro battles make the player's units invincible)
+	H.tap("F2") H.step(0.5)
+	H.tap("E") H.step(4)
+	engine_plays(H.units[1]._models[1], 474, 800) H.step(1)
+	H.tap("F2") H.step(0.2)
+	check(H.count("uc:set_invincible") == 0 and H.units[1]._invulnerable, "neither switched on nor off")
+end
+
+T.handing_him_back_mid_jump_ends_his_invincibility = function()
+	general_on() H.step(0.5)
+	H.tap("E") H.step(0.3)
+	check(invincible() == true, "on in the jump")
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.on and invincible() == false and released_after_each_switch(), "off as he is handed back")
+	H.tap("F2") H.step(0.5)
+	check(H.E.F.on and H.count("uc:set_invincible") == 2, "nothing left over the next time: " .. H.count("uc:set_invincible"))
+end
+
+-- players, 2026-10-19: "a health bar each unit and a ally or enemy highlight". One bar per unit, made from the layout of
+-- the lift over his men (data.lua bodies: Jade Longma riders 3.2 m, so 4.5 m, bar_3; a unit with no body 1.8 m, so 2.5 m,
+-- bar_1) on his own context, in the HUD's first part so the panel draws over them; the played unit's and a dead
+-- unit's hidden; none with the setting off. The author, 2026-10-19: "add a distance visibility for the healthbars ...
+-- by default only near the character ... on all the time or activatable using alt": a bar shows only within the MCT
+-- distance of the man played (40 m; 1000 is the whole field), and with the guide setting only while the markers show
+local function bar_battle(mct)
+	H.fresh({units = {{general = true}, {type = "wh3_main_cth_cav_jade_longma_riders_0", men = 6, x = 30}},
+		enemies = {{men = 10, x = 60}, {men = 10, x = 90, hidden = true}}, allies = {{men = 10, x = -30}}, mct = mct})
+	H.tap("F2") H.step(0.6)
+end
+local function pins()
+	local by = {}
+	for _, c in ipairs(find_uicomponent(H.root, "derpy_tp_hud", "bars").kids) do by[c.context and c.context.id] = c end
+	return by
+end
+T.every_unit_gets_a_bar_over_its_men_on_its_own_context = function()
+	bar_battle({display_bars_range = 1000})
+	local hud = find_uicomponent(H.root, "derpy_tp_hud")
+	check(hud.kids[1].id == "bars", "the bars' holder is the panel's first part: " .. tostring(hud.kids[1].id))
+	local by, all = pins(), {}
+	for _, u in ipairs(H.units) do all[#all + 1] = u end
+	for _, u in ipairs(H.enemies) do all[#all + 1] = u end
+	for _, u in ipairs(H.allies) do all[#all + 1] = u end
+	for _, u in ipairs(all) do
+		local p = by[tostring(u._id)]
+		check(p and p.context.kind == "CcoBattleUnit", "unit " .. u._id .. " has a bar on its own context")
+		local want = u._type == "wh3_main_cth_cav_jade_longma_riders_0" and "ui/derpy_tp/bar_3" or "ui/derpy_tp/bar_1"
+		check(p.layout == want, "unit " .. u._id .. " at its lift: " .. tostring(p.layout))
+		check(p:Visible() == (u ~= H.units[1]), "unit " .. u._id .. " shown unless played: " .. tostring(p:Visible()))
+	end
+	check(find_uicomponent(by[tostring(H.enemies[1]._id)], "base", "fill"), "a pin carries its base and fill")
+	for _, m in ipairs(H.enemies[1]._models) do m.alive = false end
+	H.step(0.6)
+	check(not pins()[tostring(H.enemies[1]._id)]:Visible(), "a dead unit's bar hides")
+	local gone = table.remove(H.allies, 1)
+	H.step(0.6)
+	check(not pins()[tostring(gone._id)]:Visible(), "a unit gone from its army's list keeps no bar")
+	H.allies[1] = gone
+	H.tap("F2") H.step(0.1)
+	check(not hud:Visible(), "off with third person")
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	check(pins()[tostring(H.units[1]._id)]:Visible() and not pins()[tostring(H.units[2]._id)]:Visible(),
+		"the next unit played: his bar hides, the general's shows")
+	local n = #find_uicomponent(H.root, "derpy_tp_hud", "bars").kids
+	check(n == #all, "made once a unit, kept across sessions: " .. n)
+	bar_battle({display_bars_show = "off"})
+	check(#find_uicomponent(H.root, "derpy_tp_hud", "bars").kids == 0 and not hud_part("bars"):Visible(), "the setting off: none")
+end
+
+T.a_bar_shows_only_near_the_man_played_and_with_the_guide_setting_only_with_the_markers = function()
+	bar_battle()
+	local by = pins()
+	local function shown(u) return by[tostring(u._id)]:Visible() end
+	check(shown(H.units[2]) and shown(H.allies[1]), "30 m off, inside the default 40: shown")
+	check(not shown(H.enemies[1]) and not shown(H.enemies[2]), "60 and 90 m off: not")
+	H.units[1]._x = 50 H.step(0.6)
+	check(shown(H.enemies[1]) and shown(H.enemies[2]) and not shown(H.allies[1]),
+		"measured from where he is now: 10 and 40 m shown, 80 m not")
+	H.units[1]._x = 0 H.select(H.units[2]) H.tap("F2") H.tap("F2") H.step(0.6)
+	check(H.E.F.model, "one Longma rider played")
+	H.E.F.model.x = 90 H.step(0.6)
+	check(shown(H.enemies[2]) and not shown(H.units[1]), "measured from the man, not his regiment 60 m back")
+	bar_battle({display_bars_range = 1000, display_bars_show = "guide"})
+	by = pins()
+	H.enemies[2]._x = 5000
+	check(not shown(H.enemies[1]) and not shown(H.units[2]), "the guide setting: none before the markers key")
+	H.down("Alt") H.step(1 / 60) H.step(1 / 60)
+	check(shown(H.enemies[1]) and shown(H.enemies[2]) and shown(H.units[2]), "Alt held: every one, at once, 5 km off too")
+	H.up("Alt") H.step(1 / 60) H.step(1 / 60)
+	check(not shown(H.enemies[1]) and not shown(H.units[2]), "let go: none, at once")
+end
+
+-- CA's tracker chevrons (unitcontroller:highlight) under the men of every unit the player does not command, an enemy only
+-- while he can see it, each released at once; never a controller on a unit of his. Shown by the guide key (the author,
+-- 2026-10-19: "show the ally/enemy guide while holding/ toggle Alt, configurable using mct"): while it is held, at once,
+-- or a press switches them; all off with third person
+local function marks()
+	local on = {}
+	for _, c in ipairs(H.all("uc:highlight")) do on[c[2]] = c[3] end
+	return on
+end
+T.markers_go_under_enemies_seen_and_allies_never_the_players_own = function()
+	bar_battle()
+	check(H.count("uc:highlight") == 0, "none before the guide key")
+	H.down("Alt") H.step(1 / 60) H.step(1 / 60)
+	local on = marks()
+	check(on[H.enemies[1]._id] == true and on[H.allies[1]._id] == true, "Alt held: the seen enemy and the ally, at once")
+	check(on[H.enemies[2]._id] == nil, "an enemy he cannot see is not")
+	for _, c in ipairs(H.calls) do
+		if c[1]:find("^uc:") and c[2] ~= H.units[1]._id then
+			check(c[2] ~= H.units[2]._id, "no controller call on his own other unit: " .. c[1])
+		end
+	end
+	check(H.count("uc:release_control") >= 2, "released at once")
+	H.enemies[2]._hidden = false H.step(0.6)
+	check(marks()[H.enemies[2]._id] == true, "seen now: marked")
+	local n = H.count("uc:highlight")
+	H.step(1.2)
+	check(H.count("uc:highlight") == n, "marked once, not every refresh")
+	H.up("Alt") H.step(1 / 60) H.step(1 / 60)
+	on = marks()
+	check(on[H.enemies[1]._id] == false and on[H.enemies[2]._id] == false and on[H.allies[1]._id] == false,
+		"Alt let go: all off, at once")
+	H.down("Alt") H.step(0.1)
+	check(marks()[H.enemies[1]._id] == true, "held again: on")
+	H.tap("F2") H.step(0.1)
+	check(marks()[H.enemies[1]._id] == false, "off with third person")
+	H.up("Alt")
+	-- the setting off: a press shows them, the next hides them
+	bar_battle({display_guide_hold = false})
+	H.tap("Alt") H.step(0.1)
+	check(marks()[H.enemies[1]._id] == true, "a press: on")
+	H.step(1)
+	check(marks()[H.enemies[1]._id] == true, "and stays on, the key let go")
+	H.tap("Alt") H.step(0.1)
+	check(marks()[H.enemies[1]._id] == false, "the next press: off")
 end
 
 return T

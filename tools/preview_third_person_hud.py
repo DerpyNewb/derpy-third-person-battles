@@ -2,6 +2,7 @@
 
     py tools/preview_third_person_hud.py             draw .skilltree_cache/ui_preview/tp_hud_<w>.png at 1600/1920/2560
     py tools/preview_third_person_hud.py --check     validate the twui with TWUI Studio's reader; no drawing
+    py tools/preview_third_person_hud.py --bars      draw the unit bar (ui/derpy_tp/bar_1) for each side, tp_bars_<w>.png
     py tools/preview_third_person_hud.py --selftest  prove the contrast and fit checks can fail
 
 WHERE EVERY PART IS comes from the harness: tools/third_person_hud_dump.lua runs the SHIPPED hud.lua against the
@@ -149,9 +150,68 @@ def render(width):
     return out
 
 
+# What AllianceColour answers, from CA's ui_colours (db.pack, read with tools/read_vanilla_db.py): the fill's colour by
+# side, which the engine sets and no file carries
+SIDES = (("ours", "#A2EC17"), ("ally", "#68CEFF"), ("enemy", "#FF2D2D"))
+
+
+
+
+def render_bars(width):
+    """The unit bar (ui/derpy_tp/bar_1, as shipped) for each side at full, two-thirds and a quarter health with the
+    loss behind it, over the battle screenshot, at the size the engine draws it on this screen."""
+    from PIL import Image, ImageDraw
+    model, rendering = PG._studio()
+    doc = model.Document(io.open(GEN.BAR_FILE % 1, encoding="utf-8").read())
+    named = dict((c.get("id", c.tag), c) for c in doc.components)
+    _n, missing = PG.extract_art("hud", extra=[GEN.ART["bar"]], folder=FOLDER)
+    if missing:
+        raise SystemExit("art not found in CA's packs: %s" % missing)
+    scale = width / 1920.0
+    size = (width, int(1080 * scale + 0.5))
+    canvas = Image.open(GROUND).convert("RGBA").resize(size) if os.path.isfile(GROUND) else Image.new("RGBA", size, (96, 104, 88, 255))
+    draw = ImageDraw.Draw(canvas)
+    bw, bh = GEN.BAR["size"]
+
+    def layer(comp, x, y, frac, colour=None):
+        st = doc.state(comp)
+        box = comp.child("componentimages")
+        paths = dict((n.get("this"), n.get("imagepath")) for n in box.children) if box is not None else {}
+        for n in st.child("imagemetrics").children:
+            ox, oy = (float(v) for v in n.get("offset", "0,0").split(","))
+            w = max(1, int(float(n.get("width")) * frac * scale + 0.5))
+            h = max(1, int(float(n.get("height")) * scale + 0.5))
+            img = rendering.raster(_asset(paths[n.get("componentimage")]), w, h, n)
+            if colour:  # bar_white under the authored colour, re-tinted by its shading to the side's
+                was = int(n.get("colour")[3:5], 16) or 1
+                want = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
+                px = img.load()
+                for i in range(img.size[0]):
+                    for j in range(img.size[1]):
+                        r, g, b, a = px[i, j]
+                        k = min(1.0, g / float(was))
+                        px[i, j] = (int(want[0] * k), int(want[1] * k), int(want[2] * k), a)
+            canvas.alpha_composite(img, (int(x + ox * scale), int(y + oy * scale)))
+
+    for col, (side, colour) in enumerate(SIDES):
+        for row, (hp, lost) in enumerate(((1.0, 1.0), (0.66, 0.8), (0.25, 0.4))):
+            x, y = (760 + col * 160) * scale, (420 + row * 60) * scale
+            layer(named["base"], x, y, 1)
+            layer(named["delayed"], x, y, lost)
+            layer(named["fill"], x, y, hp, colour)
+        draw.text(((760 + col * 160) * scale, 390 * scale), side, fill=TEXT, font=_font(int(14 * scale)))
+    out = os.path.join(PG.CACHE, "tp_bars_%d.png" % width)
+    canvas.convert("RGB").save(out)
+    return out
+
+
 def main(argv):
     if "--selftest" in argv:
         return 0 if selftest() else 1
+    if "--bars" in argv:
+        for w in WIDTHS:
+            print("drew %s" % render_bars(w))
+        return 0
     problems = PG.validate("hud", folder=FOLDER)
     for p in problems:
         print("FINDING: %s" % p)
