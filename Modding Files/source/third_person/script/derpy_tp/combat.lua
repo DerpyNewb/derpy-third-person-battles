@@ -10,6 +10,7 @@ local SLOTS_TAUNT = {1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113}
 local LOCK_MAX, LOCK_WAIT = 3, 1
 local TURN_DEG, TURN_WAIT_MS, MAX_MODELS = 25, 350, 160
 local AIM_COS, AIM_RANGE, AIM_CLOSE = 0.707, 150, 8 -- a melee target: inside 45 deg and 150 m, or 8 m any way
+local CHARGE_REACH = 30 -- the sprint's charge: an enemy this near ahead
 local AIM_STEP, FIRE_REAIM, FIRE_ARC, FIRE_COMMIT, STEER_GAP = 2, 5, 20, 4, 0.5 -- AIM_STEP: m a march step of the view
 -- s a ground-fire shot's clip may run on past the shot leaving before it is halted anyway: a fire clip runs to 9.5 s
 -- (the Necrofex Colossus's flame, 6.8 s of it after the flame leaves; Ku'gath's throw 5.7)
@@ -108,7 +109,7 @@ return function(E)
 	local function first_enemy(ex, ey, ez, dx, dy, dz, t_max)
 		local hh = dx * dx + dz * dz
 		if hh < 1e-6 then return nil end
-		local best = t_max
+		local best, best_u = t_max, nil
 		local armies = bm:get_non_player_alliance():armies()
 		for a = 1, armies:count() do
 			local list = armies:item(a):units()
@@ -124,12 +125,12 @@ return function(E)
 						local mx, my, mz = P.model_pos(m)
 						local s = ((mx - ex) * dx + (mz - ez) * dz) / hh
 						local cx, cz, y = ex + dx * s - mx, ez + dz * s - mz, ey + dy * s
-						if s > 0 and s < best and cx * cx + cz * cz <= r * r and y >= my and y <= my + h then best = s end
+						if s > 0 and s < best and cx * cx + cz * cz <= r * r and y >= my and y <= my + h then best, best_u = s, u end
 					end
 				end
 			end
 		end
-		return best < t_max and best or nil
+		if best < t_max then return best, best_u end
 	end
 
 	function C.aim_point(reach)
@@ -147,7 +148,9 @@ return function(E)
 		repeat t = t + AIM_STEP cap = cap - 1 until stop(t) or cap <= 0
 		local lo = t - AIM_STEP
 		for _ = 1, 5 do local mid = (lo + t) / 2 if stop(mid) then t = mid else lo = mid end end
-		return at(first_enemy(R.ex, R.ey, R.ez, dx, dy, dz, t) or t)
+		local hit, unit = first_enemy(R.ex, R.ey, R.ez, dx, dy, dz, t)
+		local x, y, z = at(hit or t)
+		return x, y, z, unit
 	end
 
 	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and reach (AIM_RANGE, a gun's its range), or
@@ -213,13 +216,12 @@ return function(E)
 	-- now: the swing is an action (jump, charge attack) that nothing may cut until its clip ends - see C.locked - or hold s
 	-- pass (a swing's clip runs 2.1-7.1 s, median 3.5, measured 2026-10-15 over 37 ATTACK_1-7 clips of 6 units)
 	-- an action starts (a swing, jump, charge attack, cheer): a shot under way is dropped, or it fired after the action
-	-- (round 25); he faces the crosshair before the clip plays (main.lua's lock writes nothing once the engine reports it).
+	-- (round 25); he turns to the crosshair until the clip plays (main.lua's lock writes nothing once the engine reports it).
 	-- A charge's run ends through the sprint, which the lock ends, and charge_run sends no clip over the action's
 	local function act(now)
 		C.drop(now)
 		F.native_attack = nil
 		F.face_yaw = nil
-		if F.model then P.face(F.model, E.rig.yaw) end
 	end
 
 	local function swing(slots, primary, now, hold, mask)
@@ -234,9 +236,10 @@ return function(E)
 		local air = flyer and F.unit:is_currently_flying() and attack
 		-- a mounted man's swing is his mount's, which the engine plays mounted (play below): a mount with attack clips of its
 		-- own gives the list (2026-10-19, str_xian_longma: rider ATTACK_1-8 and 10, mount 1-3 - the right button's 5-7 fell
-		-- back to ATTACK_1 every time)
+		-- back to ATTACK_1 every time). His jumps and charge attacks too (the author, 2026-10-21: Archaon "stand on his horse
+		-- and do a default jumping attack as if he was on foot" - measured, JUMPING_ATTACK_2 on the rider, his horse idle)
 		local body
-		if attack and mount then for _, s in ipairs(slots) do if P.has_slot(mount, s) then body = mount break end end end
+		if mount then for _, s in ipairs(slots) do if P.has_slot(mount, s) then body = mount break end end end
 		for _, s in ipairs(slots) do
 			if air then
 				if P.has_slot(flyer, s + 40) then has[#has + 1] = s end
@@ -337,13 +340,41 @@ return function(E)
 		return shooting(first and P.anim_slot(first)) or shooting(body and P.anim_slot(body))
 	end
 
+	-- a regiment played whole: not a crew on one body or a war machine (the Tilean tank's ground fire was tuned on
+	-- 2026-10-17 and stays). One man who shoots alone goes to C.solo and one who cannot is never ranged; a gun is never here
+	local function unit_order() return not F.crew and not F.unit:is_war_machine() end
+	local function whole_volley() return unit_order() and F.unit:number_of_men_alive() > 1 end
+
 	local function fire(now)
-		local ax, ay, az = C.aim_point(F.unit:missile_range())
+		local reach = F.unit:missile_range()
+		local ax, ay, az, target = C.aim_point(reach)
 		if not ax then return end
+		-- a unit of one (a hero, a lord): the enemy on the crosshair, else the one nearest the aim in its cone, by CA's
+		-- order too. Ground fire walked an Engineer 14.9 m in 15 s and fired once; the order stood him still (measured
+		-- 2026-10-21; a player: "they move to god knows where"). The regiment keeps its own rule: the crosshair's unit only
+		if unit_order() and not whole_volley() and not (target and target:is_valid_target() and not target:is_routing()) then
+			target = pick_target(reach)
+		end
+		-- the crosshair on an enemy unit: CA's attack order on it (the author, 2026-10-20: "if controlled as regiment,
+		-- select the enemy army to shoot"), which spreads the volley over its men - ground fire at one point had every
+		-- muzzle on one man up close (a player, 2026-10-19). No range gate: out of range the regiment walks into range,
+		-- as CA's order does. Sent again only for another unit: a new order restarts a shot under way
+		if target and not target:is_valid_target() or target and target:is_routing() then target = nil end
+		if target and unit_order() then
+			local id = target:unique_ui_id()
+			if F.fire_unit == id or (F.fire_unit or F.fire_at) and in_shot() or now - (F.last_order or -1e9) < STEER_GAP then return end
+			F.uc:fire_at_will(true)
+			F.uc:attack_unit(target, true, false)
+			F.uc:release_control()
+			F.fire_unit, F.fire_at, F.turn_to, F.last_order, F.driving = id, nil, nil, now, false
+			E.log("fire order on " .. target:type())
+			return
+		end
 		-- a shot under way is not re-aimed or turned: a new order starts the engine's aim again (the author, 2026-10-18:
 		-- "moving the mouse and aiming for fire, it keeps repeating the aim animation and never firing" - the Necrofex
-		-- Colossus, 13 orders in 14 s, his FIRE_LEVEL letting the shot go 2.66 s into 9.5)
-		if F.fire_at and in_shot() then return end
+		-- Colossus, 13 orders in 14 s, his FIRE_LEVEL letting the shot go 2.66 s into 9.5). The unit order's too
+		if (F.fire_at or F.fire_unit) and in_shot() then return end
+		F.fire_unit = nil
 		local q = F.unit:position()
 		local want = math.deg(math.atan2(ax - q:get_x(), az - q:get_z())) % 360
 		if math.abs((want - F.unit:bearing() + 540) % 360 - 180) > FIRE_ARC then
@@ -370,7 +401,7 @@ return function(E)
 	end
 
 	function C.stop_fire()
-		F.firing, F.fire_at, F.turn_to, F.fire_order_t = false, nil, nil, nil
+		F.firing, F.fire_at, F.turn_to, F.fire_order_t, F.fire_unit = false, nil, nil, nil, nil
 		if F.held_fire then F.uc:fire_at_will(false) end -- shooting over: no shot he did not ask for
 		F.uc:halt()
 		F.uc:release_control()
@@ -421,8 +452,9 @@ return function(E)
 		local d = math.max(math.sqrt((ax - x) ^ 2 + (az - z) ^ 2), 0.01)
 		local h = ay - (y + SHOT_H)
 		local v = E.D.speeds[F.utype]
-		if not v then return math.atan2(h, d) end
-		return math.atan((v * v - math.sqrt(math.max(0, v ^ 4 - G * (G * d * d + h * v * v * 2)))) / (G * d))
+		local g = E.D.gravities and E.D.gravities[F.utype] or G
+		if not v or g == 0 then return math.atan2(h, d) end
+		return math.atan((v * v - math.sqrt(math.max(0, v ^ 4 - g * (g * d * d + h * v * v * 2)))) / (g * d))
 	end
 
 	-- the shot's pair: low or high only when he has both its clips (or neither aim, as for level) and data.lua its muzzle
@@ -454,7 +486,7 @@ return function(E)
 			+ (az - z) ^ 2)) .. " m out, " .. r1(ay - y) .. " m up; raise " .. tostring(aims and shot.aim_slot) .. ", fire "
 			.. tostring(shot.fire_slot))
 		F.face_yaw = nil -- he shoots along the crosshair
-		P.hold(F.model, x, z, E.rig.yaw)
+		P.hold(F.model, x, z, E.move.turn(F.model, E.rig.yaw, E.move.ACTION_TURN))
 		if not play_phase(shot, aims and "aim" or "fire", aims and shot.aim_slot or shot.fire_slot, now) then return end
 		F.shot, F.man_hold = shot, nil
 		F.shot_n = F.shot_n + 1
@@ -702,7 +734,7 @@ return function(E)
 	function C.attack(now, clicked, held)
 		C.flush(now)
 		if C.locked(now) then return end
-		if clicked and F.charging and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
+		if clicked and (F.charging or F.sprinting and (F.charge_order or not (F.model or F.single))) and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
 		if F.ranged then
 			-- a gun's click is its attack on the enemy nearest the crosshair, out to its range: ground fire drove a flame
 			-- cannon toward the point and fired nothing (measured 2026-10-18, probes/zz_tp_arty_order.lua)
@@ -768,7 +800,10 @@ return function(E)
 		first = first and (P.mount(first) or first)
 		local air = F.unit:is_currently_flying()
 		local clip = air and FLY_CHARGE or CHARGE
-		local on = want and first and not F.arty and P.has_slot(first, clip) and P.features.anim and F.men_ok
+		-- one man or a unit of one only: on every man of a regiment played whole it held the regiment still (measured
+		-- 2026-10-20, Daemonettes and Seekers 0.0 m in 4 s of sprint; 14.2 and 29.4 m without it)
+		-- A native charge owns its animation too: forced CHARGE clips stall large entities at contact.
+		local on = want and not F.charge_order and first and (F.model or F.single) and not F.arty and P.has_slot(first, clip) and P.features.anim and F.men_ok
 		local playing = on and P.anim_slot(first) == clip
 		if playing then F.charge_seen = true end
 		if F.lock then -- the charge attack, thrown on the run: neither clip over it
@@ -777,7 +812,7 @@ return function(E)
 			local len = E.D.charges and E.D.charges[F.utype]
 			len = len and len[air and 2 or 1] or 0
 			F.charge_at, F.charge_seen = now + (len > CHARGE_LEAD and len - CHARGE_LEAD or LOCK_MAX), false
-		elseif not on and F.charging then
+		elseif not on and F.charging and not F.charge_order then
 			each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end)
 		end
 		if not on then F.charge_at, F.charge_seen = nil, nil end
@@ -791,9 +826,26 @@ return function(E)
 		F.stamina_t = now
 		F.stamina = math.max(0, math.min(1, F.stamina + dt * (F.sprinting and -1 / STAMINA_DRAIN or 1 / STAMINA_FILL)))
 		F.sprinting = want and (not C.locked(now) or F.lock.runs) and F.stamina > 0 and (F.sprinting or F.stamina >= STAMINA_AGAIN)
+		C.charge(now)
 		C.charge_run(now, F.sprinting)
 	end
 	function C.can_sprint() return F.sprinting or F.stamina >= STAMINA_AGAIN end
+
+	-- The native order enables charge collisions. A single entity keeps direct steering and its ordinary swings
+	-- disarmed; the order must not hand W control over to sustained melee.
+	function C.charge(now)
+		local co = F.charge_order
+		if co and (not F.sprinting or not co.target:is_valid_target() or co.target:is_routing()) then F.charge_order, co = nil, nil end
+		if co or F.model or not F.sprinting then return end
+		local target = pick_target(CHARGE_REACH)
+		if not target then return end
+		F.charge_order = {target = target, at = now}
+		send(function()
+			F.uc:attack_unit(target, true, true)
+			F.native_attack = not F.single
+			E.log("charge order on " .. target:type())
+		end)
+	end
 
 	-- a click in the charge throws the charge attack: MOVING_ATTACK_1-2 (the only two any unit has, measured 2026-10-15)
 	-- as a swing, on its own cooldown, and he runs on through it (the author, 2026-10-16: "charge attack while sprinting

@@ -4,18 +4,21 @@
 -- regiment at 118, a long name, 11742 of 12000 hit points, a caster's 47 of 100 winds, 12 of 20 shots, stamina part
 -- spent; all seven action buttons (it flies: fly and cheer too), walk and sprint lit, four counting down, the longest key
 -- label on jump; hide and the minimap in their corner, the minimap shown (CA's radar, 184 px, drawn as a stand-in).
+-- Twelve abilities, one a spell: three pages, so the page tab reads its longest, "(Page Down) Abilities 2"; TP_HUD_PAGE
+-- turns to that page first (the spells are page 3).
 local T = {}
 T.dump = function()
-	local ab = {} for i = 1, 10 do ab[i] = "wh_main_spell_test_" .. i end
+	local ab = {} for i = 1, 12 do ab[i] = "wh_main_spell_test_" .. i end
 	H.fresh({units = {{general = true, abilities = ab, can = {[ab[4]] = false}, men = 120, range = 160, ammo = 12,
 		start_ammo = 20, hp = 0.62, type = "wh3_main_cth_inf_iron_hail_gunners_0", can_fly = true, flying = true}},
-		mct = {key_ability_9 = "Numpad 9", key_ability_10 = "Mouse 5", key_jump = "Caps Lock"}, enemies = {{x = 20, z = 80}}})
+		mct = {key_ability_9 = "Numpad 9", key_ability_10 = "Mouse 5", key_jump = "Caps Lock", key_page = "Page Down"}, enemies = {{x = 20, z = 80}}})
 	local t = H.default_cco()
 	t.Name = "Iron Hail Gunners of the Jade Fleet"
 	t.IconPath = "ui/units/icons/wh3_main_cth_inf_iron_hail_gunners_0.png"
-	t["BattleAbilityList.Size"] = 10
+	t["BattleAbilityList.Size"] = 12
 	-- a caster (ability 1 spends winds) with the widest figures: five-digit hit points, a pool of two-digit winds
 	t.HealthValue, t.HealthMax = 11742, 12000
+	t.IsHidden, t.IsUnspottable = true, true -- the hidden mark, its longer word
 	t["BattleAbilityList.At(0).ManaUsed"] = 9
 	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"], t["ArmyContext.WindsOfMagicPoolContext.MaxWind"] = 47.6, 100
 	for i, k in ipairs(ab) do
@@ -38,7 +41,11 @@ T.dump = function()
 	H.down("W") H.down("Shift") -- and the Sprint button
 	H.tap("M")
 	H.step(1 / 60)
-	H.E.hud.armed(3) -- an armed ability and the label naming its target, the longest name a vanilla unit has
+	for _ = 2, tonumber(os.getenv("TP_HUD_PAGE") or "1") do H.E.hud.next_page() end
+	H.E.hud.cost(20) H.step(1 / 60) -- an overcast spell's cost previewed on the winds bar
+	local armed = os.getenv("TP_HUD_PAGE") == "3" and 1 or 3
+	H.E.hud.overcast(armed, true) -- and CA's glow on its slot
+	H.E.hud.armed(armed) -- an armed ability and the label naming its target, the longest name a vanilla unit has
 	H.E.hud.target("Chaos Lord of Nurgle on Rot Fly")
 	H.w2s = function() return 1180, 400, 0.98 end -- and the arrow over him, up and right of the crosshair
 	H.E.hud.mark(H.enemies[1])

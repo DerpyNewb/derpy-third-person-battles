@@ -19,15 +19,19 @@ return function(E)
 
 	-- the regiment's front-centre man, where the captain stands (position_of_officer() returns nil);
 	-- nil for a unit of fewer than two
-	function M.front_man(unit)
+	-- body: a chariot; its crewman is taken if one lives
+	function M.front_man(unit, body)
 		local ms = P.models(unit)
 		if #ms < 2 then return nil end
 		local q = unit:position()
 		local b = math.rad(unit:bearing())
 		local fx, fz = math.sin(b), math.cos(b)
+		local mate
+		if body then for _, m in ipairs(ms) do local o = P.mount(m) if o and P.same(o, body) and P.model_hp(m) > 0 then mate = true end end end
 		local best, best_score
 		for _, m in ipairs(ms) do
-			if P.model_hp(m) > 0 then
+			local o = mate and P.mount(m)
+			if P.model_hp(m) > 0 and (not mate or o and P.same(o, body)) then
 				local x, _, z = P.model_pos(m)
 				local dx, dz = x - q:get_x(), z - q:get_z()
 				local score = -(dx * fx + dz * fz) + math.abs(dx * fz - dz * fx) * 0.5
@@ -37,12 +41,26 @@ return function(E)
 		return best
 	end
 
+	-- his heading toward want, this frame's step of the set turn rate from the one he has, never there in one write (the author, 2026-10-21: "the instant turning to the cameras
+	-- direction rather than smoothly"). rate: times S.turn_rate; an action's turn is ACTION_TURN, so a swing faces the
+	-- crosshair before its clip turns him itself (0.19-0.31 s after the send, combat.lua). F.dt is the frame's real time
+	-- (main.lua reads a stall over 0.25 s as one frame): the model clock steps in 100 ms ticks, which turned him at a
+	-- quarter to half the rate, in steps; a 0.05 s cap halved it under 20 fps (round 25)
+	function M.turn(m, want, rate)
+		local face = P.heading(m) or want
+		local d = (want - face + math.pi) % (2 * math.pi) - math.pi
+		local step = E.S.turn_rate * (rate or 1) * (F.dt or 0)
+		if math.abs(d) <= step then face = want elseif d > 0 then face = face + step else face = face - step end
+		return face
+	end
+	M.ACTION_TURN = 2
+
 	function M.halt()
 		local man = F.model or F.single
 		if man and P.alive(F.unit, man) then
 			local x, _, z = P.model_pos(man)
 			F.man_hold = {x, z}
-			P.hold(man, x, z, F.face_yaw or E.rig.yaw)
+			P.hold(man, x, z) -- his heading as it is
 		end
 		if F.driving then
 			F.uc:halt()
@@ -64,22 +82,17 @@ return function(E)
 		-- he faces where he walks and keeps that facing when he stops, as a single entity does (the author, 2026-10-15:
 		-- steered with the camera's facing, a man pressed left walked mostly forward, measured). A swing or a shot
 		-- clears it and he faces the crosshair again
-		-- the frame's real time (main.lua reads a stall over 0.25 s as one frame): the model clock steps in 100 ms ticks,
-		-- which turned him at a quarter to half the rate, in steps; a 0.05 s cap halved it under 20 fps (round 25)
-		local dt = F.dt or 0
 		if dx == 0 and dz == 0 then
 			F.man_hold, F.lead = F.man_hold or {x, z}, nil
 			-- standing past a swing's hold, its clip still playing: no facing written over the clip's turn (the author,
 			-- 2026-10-15: "still looking at the right ... at the last part of the animation")
 			local sw = F.swung
 			if sw and P.anim_slot(sw[1]) ~= sw[2] then F.swung, sw = nil, nil end
-			P.hold(m, F.man_hold[1], F.man_hold[2], not sw and (F.face_yaw or E.rig.yaw) or nil)
+			P.hold(m, F.man_hold[1], F.man_hold[2], not sw and M.turn(m, F.face_yaw or E.rig.yaw) or nil)
 		else
 			-- he turns toward the keys' direction at S.turn_rate and walks along his facing (the author, 2026-10-15:
 			-- "smoother animation or turning rate when pressing side buttons and back")
-			local face, want = F.face_yaw or E.rig.yaw, math.atan2(dx, dz)
-			local d, step = (want - face + math.pi) % (2 * math.pi) - math.pi, E.S.turn_rate * dt
-			if math.abs(d) <= step then face = want elseif d > 0 then face = face + step else face = face - step end
+			local face = M.turn(m, math.atan2(dx, dz))
 			F.face_yaw = face
 			dx, dz = math.sin(face), math.cos(face)
 			F.man_hold = nil

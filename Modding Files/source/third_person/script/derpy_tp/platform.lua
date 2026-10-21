@@ -160,7 +160,8 @@ function M.build(mr)
 	local base = mr.base
 	local function at(p, n) local hi, lo = M.split(n) return mr.add(mr.add(p, hi), lo) end
 	local function problem(group, why) P.features[group] = false P.problems[#P.problems + 1] = group .. ": " .. why end
-	local function sys(p) local s = mr.tostring(p) return s >= "00007FF000000000" and s < "0000800000000000" end
+	-- Wine can map imported DLL functions below Windows' usual DLL address range.
+	local function sys(p) return p ~= nil and not mr.is_null(p) end
 
 	-- a 32-bit field read as two exact 16-bit halves: read_int32 above 2^24 comes back rounded, and every
 	-- RVA in Warhammer3.exe is above it. rva() turns the field straight into a pointer into the image.
@@ -306,7 +307,7 @@ function M.build(mr)
 	-- one man of a regiment: his regiment's volleys too (2026-10-19, its fire at will left alone: he aimed and fired with
 	-- it). The aim, fire and reload clips, as combat.lua's shooting()
 	local function is_shot(s) return s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116 end
-	local copy_of, orig_of, shots_of = {}, {}, {} -- by address: the fragment -> its copy (per kind), and back; a copy's kind
+	local copy_of, orig_of, shots_of, charge_of = {}, {}, {}, {} -- by address: the fragment -> its copy (per kind), and back; a copy's kind
 	local function unpoint(x)
 		local o = orig_of[mr.tostring(mr.read_pointer(x, FRAG))]
 		if o then mr.write(x, FRAG, o) end
@@ -493,6 +494,12 @@ function M.build(mr)
 		mr.write(m, 0xb0, mr.uint16(angle))
 		return angle
 	end
+	-- the heading P.face writes, read back: radians, the camera's yaw convention
+	function P.heading(m)
+		if not P.features.steer then return nil end
+		m = P.mount(m) or m
+		return mr.read_uint16(m, 0xb0) * 2 * math.pi / 0x10000
+	end
 	function P.place(m, x, z) mr.write(m, MODEL_POS, x) mr.write(m, MODEL_POS + 8, z) end
 	-- scale: times the engine's own speed for his gait (a sprint's 1.5). Under his own walk (walk_b) the cave writes the
 	-- point, run flag, speed, gait and heading into it, and clears its cached destination (+0x3c0) when one changed; under
@@ -563,33 +570,39 @@ function M.build(mr)
 	-- Copies are kept for the battle in a global: a man may still point at one once this module is gone (a dead man)
 	local keep = _G.DERPY_TP_FRAGS or {}
 	_G.DERPY_TP_FRAGS = keep
-	local function point(x, shots)
+	local function point(x, shots, charge)
 		shots = shots == true
+		charge = charge == true
 		local a = mr.read_pointer(x, FRAG)
 		if mr.is_null(a) then return end
 		local on = mr.tostring(a)
 		if orig_of[on] then
-			if shots_of[on] == shots then return end
+			if shots_of[on] == shots and charge_of[on] == charge then return end
 			a = orig_of[on] -- on the other kind's copy
 		end
-		local key = mr.tostring(a) .. (shots and "+shots" or "")
+		local key = mr.tostring(a) .. (shots and "+shots" or "") .. (charge and "+charge" or "")
 		local c = copy_of[key]
 		if not c then
 			local block = mr.alloc(FRAG_COPY)
 			keep[#keep + 1] = block
 			c = mr.add(block, 0) -- a plain pointer, written as the experiment wrote it
 			for off = 0, FRAG_COPY - 8, 8 do mr.write(c, off, mr.read_pointer(a, off)) end
-			for s = 454, 2116 do if is_attack(s) or shots and is_shot(s) then mr.write(c, 0x50 + s * 2, mr.uint16(0xffff)) end end
+			for s = 454, 2116 do
+				if is_attack(s) and not (charge and s >= 484 and s <= 493) or shots and is_shot(s) then
+					mr.write(c, 0x50 + s * 2, mr.uint16(0xffff))
+				end
+			end
 			copy_of[key], orig_of[mr.tostring(c)], shots_of[mr.tostring(c)] = c, a, shots
+			charge_of[mr.tostring(c)] = charge
 		end
 		mr.write(x, FRAG, c)
 	end
 	-- the horse's swings and the rider's; shots: his shot clips too (one man of a regiment)
-	function P.disarm(m, shots)
+	function P.disarm(m, shots, charge)
 		if not P.features.steer then return end
 		local body = P.mount(m)
-		if body then point(body, shots) end
-		point(m, shots)
+		if body then point(body, shots, charge) end
+		point(m, shots, charge)
 	end
 	function P.arm(m)
 		if not P.features.steer then return end

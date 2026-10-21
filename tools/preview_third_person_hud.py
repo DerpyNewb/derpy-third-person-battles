@@ -61,10 +61,10 @@ def too_wide(text, box_w, size):
     return d.textlength(text, font=_font(size)) > box_w - 4
 
 
-def dump():
-    """[(id, x, y, w, h, visible, image, text)] as the shipped hud.lua left the harness's tree."""
+def dump(page=1):
+    """[(id, x, y, w, h, visible, image, text)] as the shipped hud.lua left the harness's tree, on that page of the bar."""
     out = os.path.join(tempfile.gettempdir(), "tp_hud_dump.tsv")
-    env = dict(os.environ, TP_HUD_DUMP=out)
+    env = dict(os.environ, TP_HUD_DUMP=out, TP_HUD_PAGE=str(page))
     src = os.path.join(ROOT, "Modding Files", "source", "third_person").replace(os.sep, "/")
     r = subprocess.run([LUA, os.path.join(ROOT, "tools", "third_person_harness.lua"), src,
                         os.path.join(ROOT, "tools", "third_person_hud_dump.lua"), "dump"],
@@ -84,13 +84,13 @@ def _asset(path):
     return Path(p) if os.path.isfile(p) else None
 
 
-def render(width):
-    """One picture at this screen width, scaled from the 1920 the harness lays out at."""
+def render(width, page=1):
+    """One picture at this screen width, scaled from the 1920 the harness lays out at, on that page of the bar."""
     from PIL import Image, ImageDraw
     model, rendering = PG._studio()
     doc = model.Document(io.open(GEN.UI_FILE, encoding="utf-8").read())
     named = dict((c.get("id", c.tag), c) for c in doc.components)
-    rows = dump()
+    rows = dump(page)
     _n, missing = PG.extract_art("hud", extra=sorted({r[6] for r in rows if r[6]}), folder=FOLDER)
     if missing:
         raise SystemExit("art not found in CA's packs: %s" % missing)
@@ -141,11 +141,11 @@ def render(width):
         ty = Y + (Hh - px) / 2 - 1
         ratio = contrast(canvas, (tx, ty, tw, px), px)
         if ratio < 4.5:
-            LOW.append("%d: %.1f:1  %s %r" % (width, ratio, pid, text))
+            LOW.append("%d p%d: %.1f:1  %s %r" % (width, page, ratio, pid, text))
         if too_wide(text, W, px):
-            OVER.append("%d: %s %r is wider than its %dpx box" % (width, pid, text, W))
+            OVER.append("%d p%d: %s %r is wider than its %dpx box" % (width, page, pid, text, W))
         draw.text((tx, ty), text, fill=TEXT, font=f)
-    out = os.path.join(PG.CACHE, "tp_hud_%d.png" % width)
+    out = os.path.join(PG.CACHE, "tp_hud_%d.png" % width if page == 1 else "tp_hud_%d_p%d.png" % (width, page))
     canvas.convert("RGB").save(out)
     return out
 
@@ -220,6 +220,7 @@ def main(argv):
         return 1 if problems else 0
     for w in WIDTHS:
         print("drew %s" % render(w))
+    print("drew %s" % render(1920, 3))  # the spells page (the dump scene's third)
     for line in LOW + OVER:
         print("FINDING: %s" % line)
     return 1 if (problems or LOW or OVER) else 0

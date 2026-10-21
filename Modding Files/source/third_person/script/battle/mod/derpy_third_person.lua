@@ -39,7 +39,7 @@ local ok, err = pcall(function()
 	end
 	E.P = load("platform").build(mr)
 	if not E.P.features.input then
-		when_shown(function() E.say("derpy_tp_needs_memreader") end)
+		when_shown(function() E.say("derpy_tp_input_unavailable") end)
 		E.once("input", "no keyboard or mouse: " .. table.concat(E.P.problems, "; "))
 		return
 	end

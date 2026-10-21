@@ -67,6 +67,8 @@ function UNIT:set_current_ammo_unary(u) rec("set_ammo", self._id, u) self._ammo 
 function UNIT:number_of_men_alive() local n = 0 for _, m in ipairs(self._models) do if m.alive ~= false then n = n + 1 end end return n end
 function UNIT:is_routing() return self._routing end
 function UNIT:is_valid_target() return self._hidden ~= true end
+-- CA's entry: "hidden in tall grass/trees", apart from being out of sight behind hills (battle_unit.html)
+function UNIT:is_hidden() return self._in_cover == true end
 -- fire at will is on unless the player (o.hold_fire) or a controller turned it off
 function UNIT:is_behaviour_active(b)
 	if b == "fire_at_will" then return self._faw ~= false end
@@ -77,6 +79,8 @@ function UNIT:can_use_behaviour(b) return b == "fire_at_will" or b == "defend" e
 function UNIT:ordered_width() return 20 end
 function UNIT:select_in_ui() rec("select_in_ui", self._id) H.select(self) end
 function UNIT:owned_non_passive_special_abilities() return self._abilities end
+-- his army: its winds (army:winds_of_magic_current) from _army_winds; none set, the read throws
+function UNIT:army() local u = self return {winds_of_magic_current = function() return assert(u._army_winds, "test: no army winds") end} end
 function UNIT:can_perform_special_ability(key) return self._can[key] ~= false end
 function UNIT:unary_hitpoints() return self._hp end
 function UNIT:initial_number_of_men() return #self._models end
@@ -261,6 +265,8 @@ function COMP:SetStateText(t, src)
 	if type(t) ~= "string" then error("SetStateText(" .. tostring(t) .. ")") end
 	rec("text", self.id, t) self.text = t
 end
+-- CA's (width, height, lines) of text were it shown here; 7 px a character, one 18 px line
+function COMP:TextDimensionsForText(t) return 7 * #t, 18, 1 end
 function COMP:SetCanResizeWidth(b) self.can_w = b ~= false end
 function COMP:SetCanResizeHeight(b) self.can_h = b ~= false end
 function COMP:Resize(w, h)
@@ -325,7 +331,7 @@ common = {get_context_value = function(kind, id, expr)
 end, call_context_command = function(kind, id, expr) rec("cco_cmd", kind, id, expr) end}
 function H.default_cco()
 	return {IconPath = "ui/units/icons/test_card.png", Name = "Test Regiment", ["BattleAbilityList.Size"] = 0,
-		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000}
+		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000, IsHidden = false, IsUnspottable = false}
 end
 -- CA's lib_battle sound helpers: new_sfx(event, is_cinematic, is_vo) and play_sound(position, sfx)
 function new_sfx(event, cinematic, vo) return {event = event, cinematic = cinematic, vo = vo} end
@@ -396,9 +402,10 @@ local function fake_platform()
 	-- latched for good, and he slides in its pose
 	function P.steer(m, x, z, run, yaw, speed)
 		rec("steer", m.id, x, z, run, yaw, speed)
+		if yaw then (m.mount or m).yaw = yaw end
 		if P.anim_slot(m) and m.mask ~= 0 then rec("slide", m.id, m.anim_slot) m.anim_end = math.huge end
 	end
-	function P.hold(m, x, z, yaw) rec("hold", m.id, x, z, yaw) end
+	function P.hold(m, x, z, yaw) rec("hold", m.id, x, z, yaw) if yaw then (m.mount or m).yaw = yaw end end
 	function P.command(m) return m.command or "walk" end
 	function P.walk_ended(m) return m.walk_ended == true end -- a test plays the engine ending his walk
 	function P.guard(m) rec("guard", m and m.id) return false end
@@ -421,7 +428,9 @@ local function fake_platform()
 		m.anim_end = H.model_ms() + ((m.clip_ms or {})[slot] or slot == 1564 and 7000 or slot == 1554 and 1000 or 4000)
 		return true
 	end
-	function P.face(m, yaw) rec("face", m.id, yaw) end
+	-- the heading lives on the body, as platform.lua writes it (+0xb0 of his mount, or of him)
+	function P.face(m, yaw) rec("face", m.id, yaw) if yaw then (m.mount or m).yaw = yaw end end
+	function P.heading(m) return (m.mount or m).yaw end
 	function P.alive(unit, m) return m.alive ~= false and m.hp > 0 end
 	function P.same(a, b) return a == b end
 	function P.check_men(unit) if unit._men_ok == false then return false, "test: men off" end return true end

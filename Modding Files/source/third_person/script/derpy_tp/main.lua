@@ -68,6 +68,14 @@ return function(E)
 		return true
 	end
 
+	-- a chariot (the author, 2026-10-20: "chariots can be played alone or regiment depending on the mod settings"): every
+	-- chariot in CA's data is a war machine, drawn by beasts (data.lua chariots, off db.pack and the installed mods); its
+	-- crewman is played and his chariot steered (platform.lua P.mount). Other war machines stay whole: a lord in a tank
+	-- steered as a crewman moved nothing (2026-10-14), and a war machine of one is unmeasured on the mailbox.
+	-- ponytail: a chariot whose crew shoot (Tiranoc, wolf chariots) is played whole with the guns, so the Tilean tank
+	-- and the Knellgun stay as they were; a unit of a mod installed after --gen is played whole
+	local function chariot(unit) return E.D.chariots ~= nil and E.D.chariots[unit:type()] == true end
+
 	local function capabilities(m)
 		m = m and (P.mount(m) or m)
 		-- a slot whose every clip is an empty file is none (data.lua blanks): the Great Unclean One's jump is in his
@@ -177,6 +185,28 @@ return function(E)
 		local b = find_uicomponent(core:get_ui_root(), "button_toggle_flying")
 		if b then b:SimulateLClick() else E.once("fly", "no Toggle flying button for " .. F.utype) end
 	end
+	-- the author, 2026-10-21: "using the space bar is inconsistent when flying off and on". The button drops a click while
+	-- the unit cannot toggle (CA's CanToggleFlying: its cooldown, a take-off or landing under way), so a press is what he
+	-- asked for, up or down, kept until the button can take it or FLY_WAIT s pass. A press while one waits takes it back.
+	-- CA's IsFlying is the order (the button's selected state), is_currently_flying where he is: ordered there already,
+	-- he is on his way, and a click would turn him back
+	-- s a press waits: a landing (3 s) then the toggle's cooldown (10 s), measured 2026-10-21 on a Disc Sorcerer; s
+	-- between two clicks for it
+	local FLY_WAIT, FLY_GAP = 20, 1
+	local function fly_press(now)
+		local up = F.fly_want and F.fly_want.up
+		if up == nil then up = F.unit:is_currently_flying() end
+		F.fly_want = {up = not up, till = now + FLY_WAIT}
+		if E.hud.value("CanToggleFlying") == nil then toggle_flying() F.fly_want = nil end -- no context: the click alone
+	end
+	local function fly(now)
+		local w = F.fly_want
+		if not w then return end
+		if F.unit:is_currently_flying() == w.up or now >= w.till then F.fly_want = nil return end
+		if now < (w.next or 0) or E.hud.value("CanToggleFlying") ~= true or E.hud.value("IsFlying") == w.up then return end
+		toggle_flying()
+		w.next = now + FLY_GAP
+	end
 
 	-- no shot he did not ask for (the author, 2026-10-14: "absolute control of the unit and no auto attack"): a unit
 	-- played whole holds its fire, given back at the end. One man of a regiment leaves it alone - his regiment shoots
@@ -226,8 +256,10 @@ return function(E)
 		-- orders are off, selection is not: a click on another unit or on the ground would take the portrait
 		if bm:num_units_selected() ~= 1 or not selected(unit) then bm:clear_selection() unit:select_in_ui() end
 		if F.model and (unit:number_of_men_alive() < 2 or not P.alive(unit, F.model)) then
-			-- he died, or he is the last man: the next front-centre man, or the whole unit
-			F.model, F.man_hold, F.shot, F.lock, F.swung = E.move.front_man(unit), nil, nil, nil, nil
+			-- he died, or he is the last man: the next front-centre man, or the whole unit; a crewman's mate on the same
+			-- chariot first, so the camera stays on the chariot played (F.body: read while he lived, not off a dead man)
+			F.model, F.man_hold, F.shot, F.lock, F.swung = E.move.front_man(unit, F.body), nil, nil, nil, nil
+			F.body = F.model and P.mount(F.model)
 			F.reload_slot = F.model and P.reload_slot(F.model)
 			-- played whole from here: it holds its fire until third person ends
 			hold_fire(unit)
@@ -292,6 +324,9 @@ return function(E)
 					if F.firing and not held and (kf ~= 0 or kr ~= 0) then E.combat.stop_fire() end
 					E.combat.attack(gnow, F.dragging and clicked, F.dragging and held)
 				end
+				-- the next page of the ability bar (the author, 2026-10-20: "pressing t will switch the hotbar to spells");
+				-- an armed ability's slot goes with its page, so it is disarmed
+				if P.pressed(S.keys.page) and F.dragging then E.abilities.cancel() E.hud.next_page() end
 				for n = 1, 10 do
 					if P.pressed(S.keys["ability_" .. n]) and F.dragging then
 						local why = E.abilities.press(n, gnow)
@@ -299,7 +334,7 @@ return function(E)
 						if not F.on then return end -- a transformation ends this session: nothing more on the old unit
 					end
 				end
-				if P.pressed(S.keys.fly) and F.dragging then toggle_flying() end
+				if P.pressed(S.keys.fly) and F.dragging then fly_press(gnow) end
 			end
 			zoom(dt)
 		else
@@ -325,19 +360,25 @@ return function(E)
 			-- shot clips, the engine's own order fires him (combat.lua C.ground)
 			local man = F.model or single
 			if man then
-				if F.lock or F.swung or F.native_attack or F.pending or F.shot then P.arm(man) else P.disarm(man, F.model ~= nil) end
+				if F.lock or F.swung or F.native_attack or F.pending or F.shot then P.arm(man)
+				else P.disarm(man, F.model ~= nil, single and F.sprinting and F.charge_order ~= nil) end
 				F.disarmed = man
 			end
 			-- through his jump, charge attack and a blow standing idle (his defend): a unit of one only
 			E.combat.invincible(single, gnow, kf == 0 and kr == 0)
+			fly(gnow)
 			if F.shot and (kf ~= 0 or kr ~= 0) then E.combat.drop(gnow, true) end
-			if F.shot then P.face(F.model, E.rig.yaw)
+			if F.shot then P.face(F.model, E.move.turn(F.model, E.rig.yaw, E.move.ACTION_TURN))
 			elseif E.combat.locked(gnow) and not F.lock.runs then
-				-- a swing or cheer: until the engine reports its clip (0.19-0.31 s), as a clip under way still turns him; then the
-				-- clip turns him (round 25)
+				-- a swing or cheer: until the engine reports its clip (0.19-0.31 s) and he has turned to the crosshair, as a clip
+				-- under way still turns him; then the clip turns him (round 25)
 				local m = F.model or F.single
-				if m and not (F.lock.turns and F.lock.seen) then P.face(m, F.lock.yaw) end
-			elseif not F.firing then E.move.drive(gnow, kf, kr, F.running, F.sprinting and SPRINT_SPEED or 1) end
+				if m and not (F.lock.turns and F.lock.seen and F.lock.faced) then
+					local yaw = E.move.turn(m, F.lock.yaw, E.move.ACTION_TURN)
+					P.face(m, yaw)
+					F.lock.faced = yaw == F.lock.yaw
+				end
+			elseif not F.firing and (not F.charge_order or F.single) then E.move.drive(gnow, kf, kr, F.running, F.sprinting and SPRINT_SPEED or 1) end
 		end
 		-- the author, 2026-10-16: "UNRESPONSIVE UNITS WHEN IN COMBAT INCL BATTALION STILL NOT FIXED", not reproduced off the
 		-- game: with the debug log on, a second of a move key held with him under half a metre from where it began logs what
@@ -423,12 +464,13 @@ return function(E)
 		-- when moving"; measured that day, probes/zz_tp_fly_one.lua: a Birdman steered alone in the air and landed. On
 		-- 2026-10-15's steering a gyro gunship's crew steered nothing, and flyers were played whole)
 		F.crew = men_ok and P.features.steer and crewed(unit)
-		F.model = S.one_man and men_ok and P.features.steer and P.features.mailbox and not F.arty and not unit:is_war_machine()
-			and not F.crew and E.move.front_man(unit) or nil
+		F.model = S.one_man and men_ok and P.features.steer and P.features.mailbox and not F.arty
+			and (not unit:is_war_machine() or chariot(unit)) and not F.crew and E.move.front_man(unit) or nil
+		F.body = F.model and P.mount(F.model)
 		-- a unit of one walks steered alone too, his sprint in the steer (the author, 2026-10-18; CA's walk speed scalar
 		-- leaves a single entity's speed alone, measured that day): main.lua's frame keeps F.single, his model
 		F.single_steer = not F.model and men_ok and P.features.steer and P.features.mailbox and not F.arty
-			and not unit:is_war_machine()
+			and (not unit:is_war_machine() or chariot(unit))
 		F.reload_slot = F.model and P.reload_slot(F.model)
 		F.thrown = false
 		learn_shot(unit)
@@ -444,7 +486,7 @@ return function(E)
 		-- "only show cheer and fly if its applicable")
 		capabilities(F.model or P.models(unit)[1])
 		F.lock, F.next_charge, F.next_jump, F.charging, F.charge_at = nil, 0, 0, false, nil
-		F.native_attack = nil
+		F.native_attack, F.charge_order = nil, nil
 		-- artillery too: its click is the gun's attack (combat.lua C.attack), the mode key CA's Manual fire (the author, 2026-10-18: "I am
 		-- only controlling the gunners, not the artillery piece itself")
 		F.ranged = E.can_shoot()
@@ -455,6 +497,7 @@ return function(E)
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
 		F.lead = nil -- his steering point at its full distance (move.lua)
+		F.fly_want = nil
 		F.hit_hp, F.next_react = nil, 0 -- a blow is his hit points falling from one frame to the next (combat.lua C.invincible)
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
 		local x, y, z

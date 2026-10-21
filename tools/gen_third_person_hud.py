@@ -40,8 +40,27 @@ HUD = {
     "slot": 69, "icon": 59, "slot_gap": 8, "slots": 10,
     "key": (72, 18), "key_y": 63,      # the key's lozenge: size, and its top under the slot's rim
     "cool_plate": (44, 22),            # the same lozenge behind the cooldown seconds, centred on the icon
+    # the uses an ability has left (the author, 2026-10-21: "how many times an ability can be used in the HUD"); CA's
+    # bar shows them in the tooltip only (special_ability_tooltip.twui.xml, RemainingUses). The lozenge in the icon's
+    # top-right corner, inset by its rim
+    "uses_plate": (26, 18), "uses_in": 2,
     "armed": 79,                       # CA's selected ability: spell_dial_spell_selected 79x79 at the icon's -10,-10
-    "target": (320, 28), "target_y": 44,  # the armed ability's target label: size, and its top below screen centre
+    # CA's overcast glow: spell_dial_spell_glow drawn 100px over a 64px button (hud_battle.twui.xml overcast_effect,
+    # read 2026-10-20), the same 1.56 over our 59px icon
+    "over": 92,
+    # the winds an armed spell would spend, over the winds bar: CA's "magic" at half strength (CA's own preview is the
+    # engine's, SpellPreviewRemainingMana, and carries no colour of its own in any file)
+    "winds_cost": "#41E1E180",
+    # a plate with one line of text on it: tooltip_frame's 8px edge on each side, a header_14 line and air. 24 and 28 had
+    # the letters on the borders (the author, 2026-10-20, in game: "the text is touching the top and bottom borders")
+    "text_plate_h": 32,
+    "target": 320, "target_y": 44,     # the armed ability's target label: width, and its top below screen centre
+    # the page tab at the bar's left end (the author, 2026-10-20, mockup A: "(T) Spells"), the target label's plate and
+    # font. Its width here is the layout's only: hud.lua sizes it to its text and the padding ("too long", 2026-10-20)
+    "tab": 200,
+    # the hidden mark over the portrait (the 2026-10-20 design, Part 4): CA's banner status icon on a plate, and the word;
+    # wide enough for "Unspottable"
+    "hidden": 140, "hidden_icon": 24,
     "arrow": (52, 40), "arrow_lift": 3,  # the arrow over its target: CA's 68x53 event arrow at 0.77; tip, m above him
     "dim": "#FFFFFF82",                # CA's own tint on ability_inactive
     "windup": "#C0FFFFFF",             # CA's tint on the timer ring's wind_up state
@@ -52,7 +71,8 @@ HUD = {
     # run and charge buttons' places
     "actions": ("walk", "sprint", "attack", "fire", "jump", "fly", "cheer"), "stack": 8,
     "fonts": {"name": ("header_14", 14), "men": ("body_12", 12), "key": ("body_12", 12),
-              "cool": ("header_14", 14), "ammo": ("header_20_bold", 20), "target": ("header_14", 14)},
+              "cool": ("header_14", 14), "ammo": ("header_20_bold", 20), "target": ("header_14", 14),
+              "tab": ("header_14", 14), "hidden": ("header_14", 14)},
     "ring": ((0.0, 3.141593), (0.0, -3.141593)),  # per half (L1 right, L2 left), empty -> full, radians, measured 2026-10-14
 }
 # The bar over every other unit (players, 2026-10-19: "a health bar each unit and a ally or enemy highlight"), briefed
@@ -75,6 +95,7 @@ ART = {
     "slot": "ui/skins/default/spell_dial_spell_frame.png",
     "inactive": "ui/skins/default/ability_inactive.png",
     "armed": "ui/skins/default/spell_dial_spell_selected.png",
+    "over": "ui/skins/default/spell_dial_spell_glow.png",
     "key": "ui/skins/default/number_frame_lozenge_18px.png",
     "bar_back": "ui/skins/default/bar_back.png",
     "bar_frame": "ui/skins/default/bar_frame.png",
@@ -109,6 +130,10 @@ ART = {
     "act_fly": "ui/battle ui/ability_icons/flying.png",
     "act_cheer": "ui/battle ui/ability_icons/force_rally.png",
     "act_hide": "ui/battle ui/ability_icons/hide_forest.png",
+    # CA's battle unit banner (ui/battle ui/unit_banner.twui.xml, read 2026-10-20): StatusIcon's hidden state, and
+    # icon_unspottable; hud.lua swaps the one for the other
+    "hidden": "ui/skins/default/icon_status_hidden.png",
+    "unspottable": "ui/skins/default/icon_unspottable.png",
 }
 
 
@@ -138,6 +163,13 @@ def _parts():
     P.append(("plate_left_short", "left", cx, ny + _lift() - pad, col, ph - ny - _lift() + pad,
               {"image": ART["plate"], "imagemargin": 8}))
     P.append(("name", "left", ix, ny, iw, 22, {"text": " ", "fontcat": f["name"][0], "size": f["name"][1]}))
+    hw, hh = H["hidden"], H["text_plate_h"]
+    hi = H["hidden_icon"]
+    hy0 = -(hh + H["gap"])               # over the portrait, its left edge on his
+    P.append(("hidden_plate", "left", 0, hy0, hw, hh, {"image": ART["plate"], "imagemargin": 8}))
+    P.append(("hidden_icon", "left", 4, hy0 + (hh - hi) // 2, hi, hi, {"image": ART["hidden"]}))
+    P.append(("hidden", "left", 4 + hi + 4, hy0, hw - hi - 8 - pad, hh, {"text": " ", "fontcat": f["hidden"][0],
+                                                                         "size": f["hidden"][1]}))
     P.append(("men_icon", "left", ix, my - 1, ri, ri, {"image": ART["icon_men"]}))
     P.append(("men", "left", bx, my, iw - (ri + 4), 18, {"text": " ", "fontcat": f["men"][0], "size": f["men"][1]}))
     for bar, y, fill, fig_id, tint in (("winds", wy, "winds_fill", "winds", H["magic"]),
@@ -145,6 +177,9 @@ def _parts():
                                        ("stamina", sy, "winds_fill", "stamina", H["stamina"])):
         P.append((fig_id + "_icon", "left", ix, y + (bh - ri) // 2, ri, ri, {"image": ART["icon_" + bar.replace("health", "hp")]}))
         P.append((bar + "_back", "left", bx, y, bw, bh, {"image": ART["bar_back"], "imagemargin": 6}))
+        if bar == "winds":  # under the fill: the fill shrinks to what a cast would leave, this shows the rest
+            P.append(("winds_cost", "left", bx + fx, y + fy, bw - 2 * fx, bh - 2 * fy,
+                      {"image": ART["winds_fill"], "colour_img": H["winds_cost"]}))
         kw = {"image": ART[fill]}
         if tint:
             kw["colour_img"] = tint
@@ -168,15 +203,28 @@ def _parts():
         P.append((s + "dim", "bar", x + io_, io_, ic, ic, {"image": ART["inactive"], "colour_img": H["dim"]}))
         ao = (H["armed"] - ic) // 2      # CA's selected state: the ring over the icon, 10px out on every side
         P.append((s + "armed", "bar", x + io_ - ao, io_ - ao, H["armed"], H["armed"], {"image": ART["armed"]}))
+        go = (H["over"] - ic) // 2       # an armed spell overcast: CA's glow over the ring
+        P.append((s + "over", "bar", x + io_ - go, io_ - go, H["over"], H["over"], {"image": ART["over"]}))
         cw, ch = H["cool_plate"]
         cpx, cpy = x + (sl - cw) // 2, (sl - ch) // 2
         P.append((s + "coolplate", "bar", cpx, cpy, cw, ch, {"image": ART["key"]}))
         P.append((s + "cool", "bar", cpx, cpy, cw, ch, {"text": " ", "fontcat": f["cool"][0], "size": f["cool"][1],
                                                         "align": "Center"}))
+        uw, uh = H["uses_plate"]
+        ux, uy = x + io_ + ic - uw - H["uses_in"], io_ + H["uses_in"]
+        P.append((s + "usesplate", "bar", ux, uy, uw, uh, {"image": ART["key"]}))
+        P.append((s + "uses", "bar", ux, uy, uw, uh, {"text": " ", "fontcat": f["key"][0], "size": f["key"][1],
+                                                      "align": "Center"}))
         kx = x + (sl - kw_) // 2
         P.append((s + "keyplate", "bar", kx, H["key_y"], kw_, kh, {"image": ART["key"]}))
         P.append((s + "key", "bar", kx, H["key_y"], kw_, kh, {"text": " ", "fontcat": f["key"][0],
                                                               "size": f["key"][1], "align": "Center"}))
+    # the page tab, left of slot 1 by a slot's gap, centred on the slot's height; it moves with the bar (hud.lua)
+    tw, th = H["tab"], H["text_plate_h"]
+    tx, ty = -(tw + H["slot_gap"]), (sl - th) // 2
+    P.append(("tab_plate", "bar", tx, ty, tw, th, {"image": ART["plate"], "imagemargin": 8}))
+    P.append(("tab", "bar", tx + pad, ty, tw - 2 * pad, th, {"text": " ", "fontcat": f["tab"][0], "size": f["tab"][1],
+                                                            "align": "Center"}))
     for a in H["actions"]:  # each from its own button's corner: hud.lua packs the shown ones
         s = "act_%s_" % a
         P.append((s + "frame", "actions", 0, 0, sl, sl, {"image": ART["slot"]}))
@@ -216,7 +264,7 @@ def _parts():
     P.append(("ammo_back", "right", pad, ay, rw - 2 * pad, bh, {"image": ART["bar_back"], "imagemargin": 6}))
     P.append(("ammo_fill", "right", pad + fx, ay + fy, rw - 2 * pad - 2 * fx, bh - 2 * fy, {"image": ART["bar_fill"]}))
     P.append(("ammo_frame", "right", pad, ay, rw - 2 * pad, bh, {"image": ART["bar_frame"], "imagemargin": 6}))
-    tw, th = H["target"]
+    tw, th = H["target"], H["text_plate_h"]
     P.append(("target_plate", "centre", 0, 0, tw, th, {"image": ART["plate"], "imagemargin": 8}))
     P.append(("target", "centre", pad, 0, tw - 2 * pad, th, {"text": " ", "fontcat": f["target"][0],
                                                             "size": f["target"][1], "align": "Center"}))
@@ -241,7 +289,7 @@ def _groups():
     n, sl = H["slots"], H["slot"]
     return {"left": (H["portrait"][0] + H["gap"] + H["column"], H["portrait"][1]),
             "bar": (n * sl + (n - 1) * H["slot_gap"], H["key_y"] + H["key"][1]),
-            "right": H["right"], "centre": H["target"],
+            "right": H["right"], "centre": (H["target"], H["text_plate_h"]),
             "actions": (len(H["actions"]) * (sl + H["slot_gap"]) - H["slot_gap"], H["key_y"] + H["key"][1]),
             "toggle": (2 * sl + H["slot_gap"], H["key_y"] + H["key"][1]), "screen": (1, 1)}
 
@@ -312,11 +360,13 @@ def build():
              "\taction_pitch = %d, -- one button and its gap" % (HUD["slot"] + HUD["slot_gap"]),
              "\tstack = %d, -- the actions' gap above the right plate" % HUD["stack"],
              "\ttarget_y = %d, -- the target label's top, design px below screen centre" % HUD["target_y"],
+             "\tpad = %d, -- a plate's border to its text" % HUD["pad"],
              "\tarrow_lift = %s, -- m above the unit's position the arrow's tip points at" % _lua(HUD["arrow_lift"]),
              "\tring = %s, -- radians, each half ring (L1, L2) from empty to full" % _lua(HUD["ring"]),
-             "\tart = {melee = %s, ranged = %s}," % (_lua(ART["melee"]), _lua(ART["ranged"])),
-             "\tfill = {health_fill = %d, ammo_fill = %d, winds_fill = %d, stamina_fill = %d}," % (
-                 width["health_fill"], width["ammo_fill"], width["winds_fill"], width["stamina_fill"]),
+             "\tart = {melee = %s, ranged = %s, hidden = %s, unspottable = %s}," % (
+                 _lua(ART["melee"]), _lua(ART["ranged"]), _lua(ART["hidden"]), _lua(ART["unspottable"])),
+             "\tfill = {health_fill = %d, ammo_fill = %d, winds_fill = %d, stamina_fill = %d, winds_cost = %d}," % (
+                 width["health_fill"], width["ammo_fill"], width["winds_fill"], width["stamina_fill"], width["winds_cost"]),
              "\tlift = %d, -- design px the rows above a caster's winds bar drop for any other unit" % _lift(),
              "\tlifted = {%s}," % ", ".join("%s = true" % k for k in LIFTED),
              "\tat = {"]

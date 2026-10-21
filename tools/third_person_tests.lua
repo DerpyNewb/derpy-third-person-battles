@@ -600,10 +600,10 @@ T.wheel_fails_zoom_on_keys = function()
 	check(H.E.rig.zoom < 1, "+ still zooms in, got " .. H.E.rig.zoom)
 end
 
-T.input_unreadable_says_memreader = function()
+T.input_unreadable_reports_input_failure = function()
 	H.fresh({features = {input = false}})
 	H.phase.Deployment()
-	check(H.last("subtitle") and H.last("subtitle")[2] == "derpy_tp_needs_memreader", "the player is told")
+	check(H.last("subtitle") and H.last("subtitle")[2] == "derpy_tp_input_unavailable", "MemReader is present: report input initialization failure")
 	check(H.logged("no keyboard or mouse"), "the reason is logged")
 end
 
@@ -2189,7 +2189,7 @@ local function f32(n)
 	if e <= 0 then return n end
 	return math.floor(n / 2 ^ e + 0.5) * 2 ^ e
 end
-local function fake_image(stamp)
+local function fake_image(stamp, imports_at)
 	local BASE, mem = 0x14 * 2 ^ 28, {} -- Lua 5.1 on Windows reads a hex literal above 32 bits as 0xFFFFFFFF
 	local function put(addr, n, bytes) for i = 0, bytes - 1 do mem[addr + i] = math.floor(n / 256 ^ i) % 256 end end
 	local function str(addr, s) for i = 1, #s do mem[addr + i - 1] = s:byte(i) end mem[addr + #s] = 0 end
@@ -2203,7 +2203,7 @@ local function fake_image(stamp)
 			"ClientToScreen", "GetWindowThreadProcessId", "SetCursor", "ShowCursor"}},
 		{"KERNEL32.dll", {"GetCurrentProcessId"}},
 	}
-	local free, fn = 0x2000001, 0x7FF8 * 2 ^ 32 + 0x12340000
+	local free, fn = 0x2000001, imports_at or 0x7FF8 * 2 ^ 32 + 0x12340000
 	for d, dll in ipairs(dlls) do
 		local desc = BASE + IMP + (d - 1) * 20
 		local name, oft, ft = free, free + 0x101, free + 0x403
@@ -2612,6 +2612,23 @@ local function fragment_platform()
 	end
 	local function fragment(addr) put(addr, BASE + 0x39d9448, 8) for s = 0, 2329 do put(addr + 0x50 + s * 2, s % 31, 2) end end
 	return P, mr, put, BASE, fragment
+end
+
+T.a_charge_keeps_impact_clips_but_blocks_ordinary_melee = function()
+	local P, mr, put, BASE, fragment = fragment_platform()
+	local m, shared = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	fragment(shared) put(m.addr + 0x308, shared, 8)
+	P.disarm(m, false, true)
+	local charged = mr.read_pointer(m, 0x308)
+	for s = 484, 493 do check(mr.read_uint16(charged, 0x50 + s * 2) == s % 31, "charge impact clip " .. s) end
+	for s = 454, 463 do check(mr.read_uint16(charged, 0x50 + s * 2) == 65535, "no ordinary melee " .. s) end
+	P.disarm(m)
+	local idle = mr.read_pointer(m, 0x308)
+	check(idle.addr ~= charged.addr and mr.read_uint16(idle, 0x50 + 484 * 2) == 65535, "release removes impact clips")
+	P.disarm(m, false, true)
+	check(mr.read_pointer(m, 0x308).addr == charged.addr, "charge copy reused")
+	P.arm(m)
+	check(mr.read_pointer(m, 0x308).addr == shared, "explicit attack restores original fragment")
 end
 
 T.the_man_played_alone_points_at_a_fragment_with_no_attack_clips = function()
@@ -3128,8 +3145,9 @@ T.the_hotbar_centres_on_the_slots_it_shows = function()
 	check(math.abs((a.x + b.x + b.w) / 2 - 960) <= 1, "four slots centred: " .. a.x .. " to " .. (b.x + b.w))
 	local ab = {} for i = 1, 11 do ab[i] = "a" .. i end
 	hud_on({abilities = ab})
-	a, b = hud_part("slot_1_frame"), hud_part("slot_10_frame")
-	check(math.abs((a.x + b.x + b.w) / 2 - 960) <= 1, "eleven abilities: the ten slots centred")
+	-- two pages: the tab hangs off the bar's left end, and the two centre together (the_bar_and_its_tab_centre_together)
+	a, b = hud_part("tab_plate"), hud_part("slot_10_frame")
+	check(math.abs((a.x + b.x + b.w) / 2 - 960) <= 1, "eleven abilities: the tab and ten slots centred")
 end
 
 T.the_hotbar_shows_one_slot_per_ability_with_its_key = function()
@@ -3149,9 +3167,13 @@ T.hotbar_icons_and_the_portrait_come_from_the_unit_context = function()
 	check(c[2] == "CcoBattleUnit" and c[3] == "cco_1", "read through the card's context id: " .. tostring(c[3]))
 end
 
-T.hotbar_follows_the_cast_order_not_the_context_order = function()
+-- the bar is CA's own list, in CA's order (the 2026-10-20 design, Part 2): key 1 casts what slot 1 shows
+T.hotbar_follows_cas_order_and_key_one_casts_slot_one = function()
 	hud_on({abilities = {"a1", "a2"}, order = {"a2", "a1"}})
-	check(hud_part("slot_1_icon").img[0] == "ui/battle ui/ability_icons/a1.png", "slot 1 is what key 1 casts")
+	check(hud_part("slot_1_icon").img[0] == "ui/battle ui/ability_icons/a2.png", "slot 1 is CA's first")
+	H.step(0.3) H.tap("1") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == "a2", "and key 1 casts it: " .. tostring(c and c[3]))
 end
 
 T.eleven_abilities_fill_ten_slots = function()
@@ -4003,6 +4025,19 @@ T.shift_held_on_the_move_charges_for_as_long_as_it_is_held = function()
 	H.up("W")
 end
 
+-- a regiment played whole sprints with no charge clip: played on every man it held the whole regiment still (measured
+-- 2026-10-20: Daemonettes 0.0 m and Seekers 0.0 m in 4 s of W and Shift, 14.2 and 29.4 m with the clip off; CA's own
+-- order under the walk scalar moved both). CA's charge plays when the sprint's charge order reaches the enemy
+T.a_regiment_played_whole_sprints_with_no_charge_clip = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21}}, mct = {combat_one_man = false}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	check(H.E.F.model == nil and H.E.F.single == nil, "played whole")
+	H.down("W") H.down("Shift") H.step(2)
+	check(H.E.F.sprinting, "sprinting")
+	check(charges() == 0, "no charge clip on his men: " .. charges())
+	H.up("Shift") H.up("W")
+end
+
 T.a_click_in_the_charge_throws_the_charge_attack = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.down("W") H.step(0.3)
@@ -4695,7 +4730,7 @@ end
 
 -- the author, 2026-10-15: "it also doesnt attack to the cameras direction, it redirects to the battalions facing
 -- direction when attacking" - the log shows jump and charge attacks. An action turns him to the camera as it starts and
--- holds that facing until it ends
+-- holds that facing until it ends. He turns to it at the action's rate, never in one write (the author, 2026-10-21)
 T.an_action_faces_the_camera_and_keeps_it = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.down("D") H.step(0.5) H.up("D") H.step(0.1) -- he faces right, the camera ahead
@@ -4703,8 +4738,12 @@ T.an_action_faces_the_camera_and_keeps_it = function()
 	local yaw0 = H.E.rig.yaw
 	local function off(y) return math.abs(((y - yaw0) + math.pi) % (2 * math.pi) - math.pi) end
 	local faces = H.count("face")
+	local was = off(H.E.P.heading(H.E.F.model))
 	H.tap("E") H.step(1 / 60)
-	check(H.count("face") > faces and off(H.last("face")[3]) < 0.01, "the jump starts facing the camera")
+	check(H.count("face") > faces and off(H.last("face")[3]) < was and off(H.last("face")[3]) > 0.01,
+		"the jump starts turning to the camera: " .. math.deg(was) .. " deg off, then " .. math.deg(off(H.last("face")[3])))
+	H.step(0.3)
+	check(off(H.last("face")[3]) < 0.01, "at the camera's facing by 0.3 s")
 	faces = H.count("face")
 	H.E.rig.look(400, 0) H.step(1)
 	check(H.count("face") > faces + 30, "held every frame of the jump: " .. (H.count("face") - faces))
@@ -4753,6 +4792,7 @@ T.the_panel_shows_health_and_a_casters_winds = function()
 	check(hud_part("hp"):Visible() and hud_part("hp").text == "1240 / 1500" and hud_part("hp_icon"):Visible(), "health: "
 		.. tostring(hud_part("hp").text))
 	check(not hud_part("winds"):Visible() and not hud_part("winds_fill"):Visible(), "no ability that costs winds: no winds")
+	check(not hud_part("winds_cost"):Visible(), "nor the winds' cost preview") -- the final review, 2026-10-20
 	check(not H.logged("HUD part winds"), "and no pool read for him to fail")
 	check(hud_part("plate_left_short"):Visible() and not hud_part("plate_left"):Visible(), "the short plate")
 	local _, short_y = hud_part("name"):Position()
@@ -5037,7 +5077,7 @@ end
 -- the author, 2026-10-15 21:16: "WHY IS IT SWINGING TO THE RIGHT". Measured (probes/tp_cmd_trace.py, Chosen, ATTACK_2): the
 -- engine turns him through the clip - 21 deg right on the wind-up, 28-46 deg left through the blow, back by the end - and
 -- the lock's facing, written every frame, undid each turn, so the blow landed 30-45 deg right of the crosshair. A swing
--- starts facing the camera; once the engine plays its clip, the clip turns him
+-- starts turning to the camera; once the engine plays its clip, the clip turns him
 T.a_swing_lets_its_clip_turn_him = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.E.rig.look(150, 0) H.step(0.1)
@@ -5045,7 +5085,7 @@ T.a_swing_lets_its_clip_turn_him = function()
 	local faces = H.count("face")
 	H.tap("Left mouse") H.step(1 / 60)
 	local f = H.all("face")[faces + 1]
-	check(f and f[2] == H.E.F.model.id and math.abs(f[3] - yaw0) < 0.01, "the swing starts facing the camera")
+	check(f and f[2] == H.E.F.model.id, "the swing turns him to the camera")
 	faces = H.count("face")
 	H.step(1)
 	check(plays_of(454) == 1 and H.count("face") == faces, "nothing written over the clip's turn: " .. H.count("face") - faces)
@@ -5645,11 +5685,11 @@ T.the_next_man_is_not_held_by_the_dead_mans_lock = function()
 	check(H.E.F.lock == nil, "the lock went with him")
 end
 
--- a new F2 starts him facing the camera, not the last session's walk
+-- a new F2 turns him to the camera, not the last session's walk
 T.a_new_session_starts_facing_the_camera = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
 	H.down("D") H.step(0.5) H.up("D") H.step(0.1)
-	H.tap("F2") H.step(0.1) H.tap("F2") H.step(0.1)
+	H.tap("F2") H.step(0.1) H.tap("F2") H.step(0.6)
 	local h = H.last("hold")
 	check(h and math.abs(((h[5] - H.E.rig.yaw) + math.pi) % (2 * math.pi) - math.pi) < 0.01, "the camera's facing")
 end
@@ -6269,6 +6309,869 @@ T.markers_go_under_enemies_seen_and_allies_never_the_players_own = function()
 	check(marks()[H.enemies[1]._id] == true, "and stays on, the key let go")
 	H.tap("Alt") H.step(0.1)
 	check(marks()[H.enemies[1]._id] == false, "the next press: off")
+end
+
+-- one chariot (docs/superpowers/specs/2026-10-20-third-person-chariots-abilities-charge-design.md, Part 1) --------------
+-- every chariot in CA's data is a war machine (land_units category war_machine), and its crew ride one body each; data.lua
+-- lists the chariots. The crew are dealt to the chariots in turn (man i on chariot (i - 1) % n + 1), so a chariot's two
+-- men stand apart in the harness's one rank: the man nearest the centre after the played one is another chariot's
+local function chariots(n, crew, o)
+	o = o or {}
+	H.fresh({units = {{general = true}, {type = o.type or "wh_test_chariot", men = n * crew, war_machine = true,
+		range = o.range, ammo = o.ammo}}, mct = o.mct})
+	H.E.D.chariots = {wh_test_chariot = true}
+	local u = H.units[2]
+	local bodies = {}
+	for c = 1, n do bodies[c] = {id = 900 + c, x = u._x, y = 0, z = u._z, hp = 100, hp_max = 100, slots = o.slots} end
+	for i, m in ipairs(u._models) do m.mount = bodies[(i - 1) % n + 1] end
+	H.select(u) H.tap("F2") H.step(0.1)
+	return u, bodies
+end
+
+T.one_man_on_plays_one_chariot = function()
+	chariots(3, 2)
+	local man = H.E.F.model
+	check(man and man.mount, "a crewman is played: " .. tostring(man))
+	H.down("W") H.step(1) H.up("W")
+	local bodies, n = {}, 0
+	for _, c in ipairs(H.all("steer")) do if not bodies[c[2]] then bodies[c[2]] = true n = n + 1 end end
+	check(n == 1 and bodies[man.mount.id], "only his chariot is steered: " .. n .. " bodies")
+	check(H.count("uc:goto_location") == 0 and H.count("uc:goto_location_angle_width") == 0, "and the regiment gets no order")
+end
+
+T.one_man_off_plays_the_chariots_whole = function()
+	chariots(3, 2, {mct = {combat_one_man = false}})
+	check(H.E.F.model == nil and H.E.F.single == nil, "no one man")
+	H.down("W") H.step(1) H.up("W")
+	check(H.count("uc:goto_location") + H.count("uc:goto_location_angle_width") > 0, "the regiment walks by orders")
+end
+
+T.a_unit_of_one_chariot_is_steered_alone = function()
+	local u, bodies = chariots(1, 2)
+	check(H.E.F.model == nil and H.E.F.single == u._models[1], "a unit of one, on its first crewman")
+	H.down("W") H.step(1) H.up("W")
+	check(H.count("steer") > 0 and H.last("steer")[2] == bodies[1].id, "W steers the chariot")
+end
+
+-- the Tilean tank and the Knellgun are war machines that shoot, in no chariot list: played whole, as before
+T.a_shooting_war_machine_plays_as_today = function()
+	chariots(3, 1, {type = "teb_tank_ror", range = 120, ammo = 20})
+	check(H.E.F.model == nil and not H.E.F.single_steer, "played whole")
+end
+
+T.his_swing_goes_to_one_body_once = function()
+	chariots(3, 2, {slots = {[454] = true}})
+	local man = H.E.F.model
+	H.step(0.5)
+	H.tap("Left mouse") H.step(0.1)
+	local p = H.all("play")
+	check(#p == 1 and (p[1][2] == man.id or p[1][2] == man.mount.id), "one swing, on him or his chariot: " .. #p)
+end
+
+T.the_next_man_rides_the_same_chariot = function()
+	chariots(3, 2)
+	local body = H.E.F.model.mount
+	H.E.F.model.alive = false H.step(1 / 60)
+	check(H.E.F.model and H.E.F.model.mount == body, "his crewmate takes over: " .. tostring(H.E.F.model and H.E.F.model.mount.id))
+end
+
+-- the ability pages (the 2026-10-20 design, Part 2) -----------------------------------------------------------------------
+-- the unit's owned list as the game gives it: every spell twice, its key and its overcast's (measured 2026-10-20: Yuan
+-- Bo and Archaon read 15 entries for 9 abilities)
+local function owned(abilities, spells)
+	local t = {}
+	for _, k in ipairs(abilities) do t[#t + 1] = k end
+	for _, k in ipairs(spells) do t[#t + 1] = k t[#t + 1] = k .. "_upgraded" end
+	return t
+end
+-- CA's list, which holds each once: abilities then spells, a spell costing winds (ManaUsed)
+local function pages_cco(abilities, spells)
+	local list = {}
+	for _, k in ipairs(abilities) do list[#list + 1] = k end
+	for _, k in ipairs(spells) do list[#list + 1] = k end
+	local t = hud_cco(list)
+	for i, k in ipairs(list) do t["BattleAbilityList.At(" .. (i - 1) .. ").ManaUsed"] = i > #abilities and 10 or 0 end
+	return t
+end
+local function pages_on(abilities, spells, o)
+	o = o or {}
+	return hud_on({abilities = owned(abilities, spells), cco = o.cco or pages_cco(abilities, spells), mct = o.mct})
+end
+local function shown_keys()
+	local t = {} for n = 1, 10 do t[n] = H.E.hud.key(n) end return table.concat(t, ",")
+end
+
+-- CA's list leads with the passives (measured 2026-10-20, the Exalted Keeper of Secrets: 8 of 22, Single Entity among
+-- them); the bar is what he can cast
+T.a_passive_in_cas_list_takes_no_slot = function()
+	local t = pages_cco({"p1", "p2", "a1"}, {"s1"})
+	t["BattleAbilityList.At(0).SetupAbilityContext.IsPassive"] = true
+	t["BattleAbilityList.At(1).SetupAbilityContext.IsPassive"] = true
+	pages_on({"a1"}, {"s1"}, {cco = t})
+	check(shown_keys() == "a1", "the abilities page: a1 alone: " .. shown_keys())
+	check(H.E.hud.page_name(1) == "Spells", "then the spells: " .. tostring(H.E.hud.page_name(1)))
+end
+
+T.no_overcast_copy_gets_a_slot = function()
+	pages_on({"a1", "a2"}, {"s1", "s2"})
+	check(shown_keys() == "a1,a2", "the abilities page: a1, a2: " .. shown_keys())
+	check(not hud_part("slot_3_frame"):Visible(), "no third slot")
+	-- and were CA's list to hold a copy too (unmeasured whether it can), it gets no slot either
+	pages_on({"a1"}, {"s1", "s1_upgraded"})
+	H.E.hud.next_page()
+	check(shown_keys() == "s1", "the spells page: s1 alone: " .. shown_keys())
+end
+
+T.spells_are_on_their_own_page = function()
+	pages_on({"a1", "a2"}, {"s1", "s2"})
+	check(H.E.hud.next_page() and shown_keys() == "s1,s2", "the next page: the spells: " .. shown_keys())
+	check(hud_part("slot_1_icon").img[0] == "ui/battle ui/ability_icons/s1.png", "slot 1 wears s1")
+	H.E.hud.next_page()
+	check(shown_keys() == "a1,a2", "and round to the abilities")
+end
+
+T.eleven_abilities_make_two_pages = function()
+	local ab = {} for i = 1, 11 do ab[i] = "a" .. i end
+	pages_on(ab, {})
+	check(H.E.hud.key(10) == "a10" and H.E.hud.page_name(0) == "Abilities" and H.E.hud.page_name(1) == "Abilities 2", "page 1")
+	H.E.hud.next_page()
+	check(shown_keys() == "a11" and H.E.hud.page_name(0) == "Abilities 2", "page 2 holds the eleventh: " .. shown_keys())
+end
+
+T.key_one_casts_slot_one_of_the_shown_page = function()
+	pages_on({"a1"}, {"s1"})
+	H.step(0.3)
+	H.E.hud.next_page()
+	H.tap("1") H.step(1 / 60) -- s1 has an overcast: it arms (the overcast tests), and the click casts it
+	H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == "s1", "key 1 casts s1: " .. tostring(c and c[3]))
+end
+
+-- Review Focus 1: no card context (taken over in a transformation's gap): the copies are dropped all the same
+T.without_a_context_the_copies_are_still_dropped = function()
+	local t = H.default_cco()
+	t["BattleAbilityList.Size"] = function() error("test: no context") end
+	pages_on({"a1"}, {"s1"}, {cco = t})
+	check(shown_keys() == "a1,s1", "a1 and s1, no s1_upgraded: " .. shown_keys())
+	H.step(0.3) H.tap("2") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == "s1", "key 2 casts s1: " .. tostring(c and c[3]))
+end
+
+-- Review Focus 2: an ability granted mid-battle: the page is rebuilt, and no slot casts another than its icon
+T.a_changed_list_rebuilds_the_page = function()
+	pages_on({"a1", "a2"}, {})
+	H.cco["BattleAbilityList.Size"] = 3
+	H.cco["BattleAbilityList.At(2).SetupAbilityContext.RecordKey"] = "a3"
+	H.cco["BattleAbilityList.At(2).SetupAbilityContext.IconPath"] = "ui/battle ui/ability_icons/a3.png"
+	H.cco["BattleAbilityList.At(2).RechargeTimeRemainingSecs"] = 0
+	H.cco["BattleAbilityList.At(2).IsActive"], H.cco["BattleAbilityList.At(2).ActiveTimeRemainingSecs"] = false, 0
+	H.cco["BattleAbilityList.At(2).WindUpTimeRemainingSecs"] = -1
+	H.step(0.5)
+	check(H.E.hud.key(3) == "a3" and hud_part("slot_3_frame"):Visible(), "a3 has slot 3: " .. shown_keys())
+	check(hud_part("slot_3_icon").img[0] == "ui/battle ui/ability_icons/a3.png", "wearing its icon")
+end
+
+T.a_new_session_opens_on_abilities = function()
+	pages_on({"a1"}, {"s1"})
+	H.E.hud.next_page()
+	H.tap("F2") H.tap("F2")
+	check(shown_keys() == "a1", "a new session: the abilities: " .. shown_keys())
+end
+
+-- the page key and its tab (the author, 2026-10-20: "the pressing of t should be on the hud"; "can 'T' be enclosed
+-- with ()? A is the closest ui design"): a tab at the bar's left end naming the page the key goes to next
+T.the_tab_names_the_next_page_with_its_key = function()
+	pages_on({"a1"}, {"s1"})
+	check(hud_part("tab"):Visible() and hud_part("tab_plate"):Visible() and hud_part("tab").text == "(T) Spells",
+		"at the start: (T) Spells: " .. tostring(hud_part("tab").text))
+	H.tap("T") H.step(1 / 60)
+	check(hud_part("tab").text == "(T) Abilities" and H.E.hud.key(1) == "s1", "T: the spells, and the tab names the abilities")
+	local a, t = hud_part("slot_1_frame"), hud_part("tab_plate")
+	check(t.x + t.w < a.x, "the tab sits left of the bar: " .. (t.x + t.w) .. " < " .. a.x)
+end
+
+T.no_tab_with_one_page = function()
+	pages_on({"a1", "a2"}, {})
+	check(not hud_part("tab"):Visible() and not hud_part("tab_plate"):Visible(), "one page: no tab")
+	H.tap("T") H.step(1 / 60)
+	check(H.E.hud.key(1) == "a1", "T: nothing to switch to")
+end
+
+T.the_page_key_disarms = function()
+	pages_on({"a1"}, {"s1"})
+	H.cco["BattleAbilityList.At(0).SetupAbilityContext.UnitSpecialAbilityRecordContext.TargetGround"] = true
+	H.step(0.3)
+	H.tap("1") H.step(1 / 60)
+	check(H.E.F.armed, "armed")
+	H.tap("T") H.step(1 / 60)
+	check(H.E.F.armed == nil and not hud_part("slot_1_armed"):Visible(), "T disarms")
+end
+
+T.a_moved_page_key_shows_in_the_tab = function()
+	pages_on({"a1"}, {"s1"}, {mct = {key_page = "G"}})
+	check(hud_part("tab").text == "(G) Spells", "the tab names G: " .. tostring(hud_part("tab").text))
+	H.tap("T") H.step(1 / 60)
+	check(H.E.hud.key(1) == "a1", "T does nothing now")
+	H.tap("G") H.step(1 / 60)
+	check(H.E.hud.key(1) == "s1", "G turns the page")
+end
+
+-- the preview, 2026-10-20: a 200px tab beside ten slots ran into the portrait's plate; the bar and its tab centre together
+T.the_bar_and_its_tab_centre_together = function()
+	local ab = {} for i = 1, 10 do ab[i] = "a" .. i end
+	pages_on(ab, {"s1"})
+	local t, b = hud_part("tab_plate"), hud_part("slot_10_frame")
+	check(math.abs((t.x + b.x + b.w) / 2 - 960) <= 1, "tab and ten slots centred: " .. t.x .. " to " .. (b.x + b.w))
+	H.E.hud.next_page()
+	local a = hud_part("slot_1_frame")
+	check(math.abs((t.x + a.x + a.w) / 2 - 960) <= 1, "tab and one slot centred: " .. t.x .. " to " .. (a.x + a.w))
+end
+
+-- the author, 2026-10-20, in game: "too long and the text is touching the top and bottom borders": the tab is its text
+-- and the plate's padding, a slot's gap left of slot 1, whatever the key's name
+T.the_tab_fits_its_text = function()
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	local gap = -L.at.tab_plate[2] - L.size.tab_plate[1]
+	for _, key in ipairs({"T", "Page Down"}) do
+		pages_on({"a1"}, {"s1"}, {mct = {key_page = key}})
+		local p, t, s1, s = hud_part("tab_plate"), hud_part("tab"), hud_part("slot_1_frame"), H.E.hud.s
+		local want = 7 * #("(" .. key .. ") Spells") + 2 * L.pad * s
+		check(math.abs(p.w - want) <= 1, key .. ": the plate is the text and its padding: " .. tostring(p.w) .. " for " .. want)
+		check(math.abs(p.x + p.w + gap * s - s1.x) <= 1, key .. ": a slot's gap left of slot 1: " .. p.x .. " + " .. p.w
+			.. " against " .. s1.x)
+		check(math.abs(t.x - (p.x + L.pad * s)) <= 1, key .. ": the text inside it")
+	end
+end
+
+-- the preview, 2026-10-20: slot 1's cooldown seconds stayed from the page before, on no plate, until the next read
+T.a_turned_page_shows_no_seconds_from_the_page_before = function()
+	pages_on({"a1"}, {"s1"}, {cco = (function() local t = pages_cco({"a1"}, {"s1"})
+		t["BattleAbilityList.At(0).RechargeTimeRemainingSecs"] = 12 return t end)()})
+	H.step(0.3)
+	check(hud_part("slot_1_cool").text == "12", "a1 cooling: 12")
+	H.E.hud.next_page()
+	check(hud_part("slot_1_cool").text == "", "s1 is not cooling: no seconds: " .. tostring(hud_part("slot_1_cool").text))
+end
+
+T.settings_page_key_defaults_to_t = function()
+	local S = settings_with(nil)
+	check(S.keys.page == 0x54 and S.names.page == "T", "the page key is T")
+end
+
+-- overcast by pressing twice (the author, 2026-10-20: "pressing the spell twice can upgrade the spells", "third press
+-- of 1", and "should show UI hints as possible as the CA Vanilla design"). A caster with these spells, each aimed at the
+-- ground unless o.flags says otherwise; o.cost: winds each costs, the _upgraded overcast's through data.lua overcasts.
+-- can_perform_special_ability does NOT count the winds: true for an 8-wind overcast with 6 in the pool, and the click
+-- then cast nothing and spent nothing (measured 2026-10-20, the Exalted Keeper's Acquiescence)
+local function caster_on(o)
+	local t = pages_cco({}, o.spells)
+	for i, k in ipairs(o.spells) do
+		local at = "BattleAbilityList.At(" .. (i - 1) .. ")."
+		t[at .. "ManaUsed"] = o.cost[k] or 10
+		for _, f in ipairs({"TargetGround", "TargetGroundUnderEnemies", "TargetGroundUnderAllies", "TargetEnemies",
+			"TargetFriends", "TargetSelf"}) do
+			t[at .. "SetupAbilityContext.UnitSpecialAbilityRecordContext." .. f] = (o.flags or {TargetGround = true})[f] == true
+		end
+	end
+	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"], t["ArmyContext.WindsOfMagicPoolContext.MaxWind"] = o.winds, 100
+	H.fresh({units = {{general = true, abilities = owned({}, o.spells), can = o.can or {}}}})
+	H.cco = t
+	H.E.D.overcasts = {}
+	for _, k in ipairs(o.spells) do H.E.D.overcasts[k] = o.cost[k .. "_upgraded"] end
+	H.tap("F2") H.step(0.3)
+	return H.units[1]
+end
+local function slot_press(k) H.tap(k) H.step(1 / 60) end
+
+T.a_spell_pressed_twice_overcasts = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}})
+	slot_press("1") slot_press("1")
+	check(H.E.F.armed and H.E.F.armed.over and hud_part("slot_1_over"):Visible(), "armed, overcast, glowing")
+	H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability_ground")
+	check(c and c[3] == "s1_upgraded", "the click casts the overcast: " .. tostring(c and c[3]))
+end
+
+T.the_third_press_cancels = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}})
+	slot_press("1") slot_press("1") slot_press("1")
+	check(H.E.F.armed == nil and not hud_part("slot_1_over"):Visible() and not hud_part("slot_1_armed"):Visible(), "cancelled")
+	H.tap("Left mouse") H.step(1 / 60)
+	check(H.count("uc:perform_special_ability_ground") == 0, "and nothing cast")
+end
+
+T.no_overcast_version_second_press_cancels = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}})
+	local u = H.units[1]
+	u._abilities = {"s1"} -- no s1_upgraded
+	H.tap("F2") H.tap("F2") H.step(0.3)
+	slot_press("1") slot_press("1")
+	check(H.E.F.armed == nil, "the second press cancels")
+end
+
+T.too_few_winds_shows_why_and_stays_armed = function()
+	caster_on({spells = {"s1"}, winds = 15, cost = {s1 = 10, s1_upgraded = 20}})
+	slot_press("1") H.step(0.3) slot_press("1") H.step(0.1)
+	check(H.E.F.armed and not H.E.F.armed.over and not hud_part("slot_1_over"):Visible(), "armed, at normal power")
+	check(hud_part("target").text == "Not enough winds to overcast", "the label says why: " .. tostring(hud_part("target").text))
+	check(hud_part("slot_1_dim"):Visible(), "the slot shows CA's invalid overlay")
+	H.step(2.2)
+	check(hud_part("target").text ~= "Not enough winds to overcast" and not hud_part("slot_1_dim"):Visible(),
+		"two seconds on: the target again: " .. tostring(hud_part("target").text))
+end
+
+-- the final review, 2026-10-20: the list rebuilt under an armed slot moved what that slot holds; the click cast the new one
+T.a_rebuilt_list_disarms = function()
+	caster_on({spells = {"s1", "s2"}, winds = 60, cost = {s1 = 10, s2 = 10}})
+	slot_press("2") H.step(0.1)
+	check(H.E.F.armed and H.E.F.armed.n == 2, "s2 armed")
+	H.cco["BattleAbilityList.Size"] = H.cco["BattleAbilityList.Size"] - 1 -- s2 gone from CA's list
+	H.step(0.6)
+	check(H.E.F.armed == nil, "disarmed by the rebuild")
+	H.tap("Left mouse") H.step(1 / 60)
+	check(H.count("uc:perform_special_ability_ground") == 0, "and the click casts nothing")
+end
+
+-- winds enough, but the engine says no (its overcast on cooldown, say): normal power, and the plain reason
+T.an_overcast_the_engine_refuses_stays_normal = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}, can = {s1_upgraded = false}})
+	slot_press("1") H.step(0.3) slot_press("1") H.step(0.1)
+	check(H.E.F.armed and not H.E.F.armed.over, "armed, at normal power")
+	check(hud_part("target").text == "Cannot overcast now", "the label says why: " .. tostring(hud_part("target").text))
+end
+
+-- Review Focus 3: the winds go between the overcast and the click
+T.winds_gone_before_the_click_drops_to_normal_power = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}})
+	slot_press("1") slot_press("1")
+	H.cco["ArmyContext.WindsOfMagicPoolContext.CurrentWind"] = 15
+	H.tap("Left mouse") H.step(0.1)
+	check(H.count("uc:perform_special_ability_ground") == 0, "nothing cast")
+	check(H.E.F.armed and not H.E.F.armed.over and hud_part("target").text == "Not enough winds to overcast",
+		"armed at normal power, and why: " .. tostring(hud_part("target").text))
+	H.step(0.6) H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability_ground")
+	check(c and c[3] == "s1", "the next click casts it: " .. tostring(c and c[3]))
+end
+
+-- the final review's minors, 2026-10-20 (the author: "fix the minor issues")
+-- no context on his card: the winds from his army (CA's army:winds_of_magic_current), so the overcast still knows the pool
+T.with_no_card_context_the_winds_come_from_his_army = function()
+	local u = caster_on({spells = {"s1"}, winds = nil, cost = {s1 = 10, s1_upgraded = 20}})
+	u._army_winds = 15
+	slot_press("1") H.step(0.3) slot_press("1") H.step(0.1)
+	check(H.E.F.armed and not H.E.F.armed.over, "armed, at normal power")
+	check(hud_part("target").text == "Not enough winds to overcast", "and why: " .. tostring(hud_part("target").text))
+end
+-- refused for the winds: the bar previews the overcast's cost while the reason shows, all the winds there are, then the
+-- normal cost again
+T.an_overcast_refused_for_winds_previews_its_cost = function()
+	caster_on({spells = {"s1"}, winds = 15, cost = {s1 = 10, s1_upgraded = 20}})
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	slot_press("1") H.step(0.3) slot_press("1") H.step(0.25)
+	check(hud_part("winds_cost"):Visible() and hud_part("winds_fill").w == 1, "the overcast's 20 of 15: nothing left (1 px, the floor), "
+		.. tostring(hud_part("winds_fill").w))
+	H.step(2.2)
+	check(hud_part("winds_fill").w == math.floor(L.fill.winds_fill * 5 / 100 + 0.5), "the hint over: the normal 10 of 15, "
+		.. tostring(hud_part("winds_fill").w))
+end
+-- refused by the engine, winds enough: no overcast cost previewed, the reason is not the winds
+T.an_overcast_the_engine_refuses_previews_no_cost = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}, can = {s1_upgraded = false}})
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	slot_press("1") H.step(0.3) slot_press("1") H.step(0.25)
+	check(hud_part("winds_fill").w == math.floor(L.fill.winds_fill * 50 / 100 + 0.5), "the normal 10 of 60: "
+		.. tostring(hud_part("winds_fill").w))
+end
+-- a spell granted mid-battle makes him a caster: the tall plate and the winds rows, as at the start
+T.a_rebuild_that_makes_him_a_caster_shows_the_winds = function()
+	local t = pages_cco({"a1"}, {})
+	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"], t["ArmyContext.WindsOfMagicPoolContext.MaxWind"] = 30, 60
+	pages_on({"a1"}, {}, {cco = t})
+	H.step(1 / 60)
+	check(hud_part("plate_left_short"):Visible() and not hud_part("winds"):Visible(), "no spell: the short plate, no winds")
+	local at = "BattleAbilityList.At(1)."
+	t["BattleAbilityList.Size"] = 2
+	t[at .. "SetupAbilityContext.RecordKey"], t[at .. "SetupAbilityContext.IconPath"] = "s1", "ui/battle ui/ability_icons/s1.png"
+	t[at .. "ManaUsed"], t[at .. "RechargeTimeRemainingSecs"], t[at .. "WindUpTimeRemainingSecs"] = 10, 0, -1
+	t[at .. "IsActive"], t[at .. "ActiveTimeRemainingSecs"] = false, 0
+	H.units[1]._abilities = owned({"a1"}, {"s1"})
+	H.step(0.6)
+	check(hud_part("plate_left"):Visible() and not hud_part("plate_left_short"):Visible(), "the tall plate")
+	check(hud_part("winds"):Visible() and hud_part("winds").text == "30 / 60", "and the winds: " .. tostring(hud_part("winds").text))
+end
+-- one entry of CA's list that cannot be read costs that entry, not the rest of the bar, and the list is still watched
+T.one_unreadable_entry_costs_only_itself = function()
+	local t = pages_cco({"a1", "a2", "a3"}, {})
+	t["BattleAbilityList.At(1).SetupAbilityContext.RecordKey"] = nil
+	pages_on({"a1", "a2", "a3"}, {}, {cco = t})
+	H.step(1 / 60)
+	check(shown_keys() == "a1,a3", "the others still on the bar: " .. shown_keys())
+	t["BattleAbilityList.At(1).SetupAbilityContext.RecordKey"] = "a2"
+	t["BattleAbilityList.Size"] = 4
+	local at = "BattleAbilityList.At(3)."
+	t[at .. "SetupAbilityContext.RecordKey"], t[at .. "SetupAbilityContext.IconPath"] = "a4", "ui/battle ui/ability_icons/a4.png"
+	t[at .. "ManaUsed"], t[at .. "RechargeTimeRemainingSecs"], t[at .. "WindUpTimeRemainingSecs"] = 0, 0, -1
+	t[at .. "IsActive"], t[at .. "ActiveTimeRemainingSecs"] = false, 0
+	H.units[1]._abilities = {"a1", "a2", "a3", "a4"}
+	H.step(0.6)
+	check(shown_keys() == "a1,a2,a3,a4", "a fourth granted: the list read again, " .. shown_keys())
+end
+
+T.an_untargeted_spell_with_an_overcast_arms_first = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}, flags = {}})
+	slot_press("1")
+	check(H.E.F.armed and H.count("uc:perform_special_ability") + H.count("cco_cmd") == 0, "armed, not cast")
+	slot_press("1")
+	check(H.E.F.armed.over, "overcast")
+	H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == "s1_upgraded", "the click casts the overcast: " .. tostring(c and c[3]))
+end
+
+T.the_winds_bar_previews_the_cost = function()
+	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}})
+	local L = H.E.load("hud_layout")
+	local function frac(id) return hud_part(id).w / L.fill[id] end
+	slot_press("1") H.step(0.3)
+	check(hud_part("winds_cost"):Visible() and near(frac("winds_fill"), 0.5, 0.02), "armed: 50 of 100 left: " .. frac("winds_fill"))
+	check(near(frac("winds_cost"), 0.6, 0.02), "and the cost shown up to the 60 there are")
+	slot_press("1") H.step(0.3)
+	check(near(frac("winds_fill"), 0.4, 0.02), "overcast: 40 left: " .. frac("winds_fill"))
+	slot_press("1") H.step(0.3)
+	check(not hud_part("winds_cost"):Visible() and near(frac("winds_fill"), 0.6, 0.02), "cancelled: 60, no cost shown")
+end
+
+-- the hidden mark (the 2026-10-20 design, Part 4; a player, 2026-10-19: "Hidden in Trees/Stalk/Unspottable units don't
+-- seem to have a way to indicate you are hidden"): CA's banner shows it, and third person turns the banners off
+T.the_hidden_mark_shows_while_he_is_hidden = function()
+	hud_on({})
+	H.step(0.3)
+	check(not hud_part("hidden_icon"):Visible() and not hud_part("hidden"):Visible(), "seen: no mark")
+	H.cco.IsHidden = true H.step(0.3)
+	check(hud_part("hidden_icon"):Visible() and hud_part("hidden").text == "Hidden", "hidden: " .. tostring(hud_part("hidden").text))
+	check(hud_part("hidden_icon").img[0] == "ui/skins/default/icon_status_hidden.png", "CA's hidden icon")
+	H.cco.IsHidden = false H.step(0.3)
+	check(not hud_part("hidden_icon"):Visible() and not hud_part("hidden"):Visible(), "seen again: gone")
+end
+
+T.hidden_in_tall_grass_reads_hidden = function()
+	hud_on({})
+	H.units[1]._in_cover = true H.step(0.3)
+	check(hud_part("hidden").text == "Hidden" and hud_part("hidden"):Visible(), "unit:is_hidden: Hidden")
+end
+
+T.unspottable_reads_unspottable = function()
+	hud_on({})
+	H.cco.IsHidden, H.cco.IsUnspottable = true, true H.step(0.3)
+	check(hud_part("hidden").text == "Unspottable", "unspottable: " .. tostring(hud_part("hidden").text))
+	check(hud_part("hidden_icon").img[0] == "ui/skins/default/icon_unspottable.png", "CA's unspottable icon")
+end
+
+T.a_missing_field_turns_only_the_mark_off = function()
+	hud_on({})
+	H.cco.IsHidden = nil H.step(0.3)
+	check(not hud_part("hidden_icon"):Visible() and hud_part("portrait"):Visible() and H.E.F.on, "the mark off, the rest on")
+end
+
+-- a regiment's volley on the enemy under the crosshair (the 2026-10-20 design, Part 5; a player, 2026-10-19: Thunderers
+-- "all aim at the same point up close"; the author: "if controlled as regiment, select the enemy army to shoot"). Played
+-- whole, facing +z, the view tipped 3 deg down: it meets the ground ~38 m out, so a regiment 20 m ahead is on the ray
+-- (the ranged view is level at 2 m, over a 1.8 m man's head)
+local function whole_aim(enemies, mct)
+	mct = mct or {combat_one_man = false}
+	H.fresh({units = {{general = true}, {type = XBOW, men = 21, range = 160, ammo = 3960}}, enemies = enemies, mct = mct})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	set_view(nil, math.rad(3)) H.step(0.5) -- clear of the start's halt
+end
+
+T.a_regiment_aimed_at_an_enemy_attacks_that_unit = function()
+	whole_aim({{x = 0, z = 20, men = 20}})
+	H.down("Left mouse") H.step(3) H.up("Left mouse")
+	local a = H.all("uc:attack_unit")
+	check(#a == 1 and a[1][3] == H.enemies[1], "one order, on that unit: " .. #a)
+	check(H.count("uc:attack_location") == 0, "no ground fire")
+end
+
+T.on_bare_ground_it_fires_at_the_point = function()
+	whole_aim({})
+	H.tap("Left mouse") H.step(1)
+	check(H.count("uc:attack_location") == 1 and H.count("uc:attack_unit") == 0, "ground fire at the point")
+end
+
+T.a_new_unit_under_the_crosshair_gets_a_new_order = function()
+	whole_aim({{x = 0, z = 20, men = 20}, {x = 20, z = 20, men = 20}})
+	H.down("Left mouse") H.step(1)
+	set_view(math.rad(45)) H.step(1)
+	H.up("Left mouse")
+	local a = H.all("uc:attack_unit")
+	check(#a == 2 and a[1][3] == H.enemies[1] and a[2][3] == H.enemies[2], "an order on each, in turn: " .. #a)
+end
+
+-- Review Focus 5: the unit aimed at breaks mid-volley: ground fire at the crosshair, and the unit order is not sent again
+-- (a dead one the view no longer meets: first_enemy reads living regiments only)
+T.a_routing_target_falls_back_to_ground_fire = function()
+	whole_aim({{x = 0, z = 20, men = 20}})
+	H.down("Left mouse") H.step(1)
+	H.enemies[1]._routing = true
+	H.step(1) H.up("Left mouse")
+	check(H.count("uc:attack_unit") == 1 and H.count("uc:attack_location") == 1, "then ground fire: "
+		.. H.count("uc:attack_unit") .. " unit orders, " .. H.count("uc:attack_location") .. " ground")
+end
+
+-- the final review, 2026-10-20: the crosshair swept off the regiment mid-shot sent ground fire, which restarts the shot
+T.the_crosshair_off_the_unit_mid_shot_waits_for_the_shot = function()
+	whole_aim({{x = 0, z = 20, men = 20}})
+	H.down("Left mouse") H.step(1)
+	check(H.count("uc:attack_unit") == 1, "the unit order")
+	H.units[2]._models[1].anim_slot = 1557 -- his shot under way
+	set_view(math.rad(60)) H.step(1) -- bare ground under the crosshair
+	local n = H.count("uc:attack_location") + H.count("uc:goto_location_angle_width")
+	check(n == 0, "no ground fire or turn through the shot: " .. n)
+	H.units[2]._models[1].anim_slot = nil H.step(1)
+	H.up("Left mouse")
+	check(H.count("uc:attack_location") + H.count("uc:goto_location_angle_width") >= 1, "then it follows the crosshair")
+end
+
+T.one_man_still_shoots_alone = function()
+	whole_aim({{x = 0, z = 20, men = 20}}, {})
+	check(H.E.F.model ~= nil, "one man")
+	H.tap("Left mouse") H.step(2)
+	check(H.count("uc:attack_unit") == 0 and H.count("uc:attack_location") == 0, "no order to his regiment")
+end
+
+-- a crew on one body that is no war machine (a howdah's archers): one body, one aim, the ground fire it had
+T.a_crew_on_one_body_keeps_ground_fire = function()
+	H.fresh({units = {{general = true}, {type = XBOW, men = 3, range = 160, ammo = 360}}, enemies = {{x = 0, z = 20, men = 20}},
+		mct = {combat_one_man = false}})
+	local u = H.units[2]
+	local body = {id = 901, x = u._x, y = 0, z = u._z, hp = 100, hp_max = 100}
+	for _, m in ipairs(u._models) do m.mount = body end
+	H.select(u) H.tap("F2") H.step(0.1)
+	set_view(nil, math.rad(3)) H.step(0.5)
+	check(H.E.F.crew, "a crew")
+	H.down("Left mouse") H.step(2) H.up("Left mouse")
+	check(H.count("uc:attack_unit") == 0 and H.count("uc:attack_location") >= 1, "ground fire: "
+		.. H.count("uc:attack_unit") .. " unit orders, " .. H.count("uc:attack_location") .. " ground")
+end
+
+-- Part 3 (the 2026-10-20 design): the sprint into an enemy gives the played regiment, or unit of one, CA's charge - its
+-- attack order at the run, once, while the sprint lasts; one man and one chariot get none (the engine's charge on one
+-- man crashed the game, measured 2026-10-20)
+local function charging_on(o, enemies)
+	H.fresh({units = {{general = true}, o or {type = "wh_test_melee", men = 21}}, enemies = enemies or {{men = 20, x = 0, z = 20}},
+		mct = {combat_one_man = false}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+end
+T.a_sprint_into_an_enemy_orders_one_charge = function()
+	charging_on()
+	H.down("Shift") H.down("W") H.step(2) H.up("W") H.up("Shift")
+	local a = H.all("uc:attack_unit")
+	check(#a == 1 and a[1][3] == H.enemies[1] and a[1][5] == true, "one attack order on him, at the run: " .. #a)
+end
+T.a_unit_of_one_sprinting_into_an_enemy_keeps_direct_steering = function()
+	charging_on({type = "wh_test_lord", men = 1})
+	H.down("Shift") H.down("W") H.step(2) H.up("W") H.up("Shift")
+	check(H.count("uc:attack_unit") == 1, "native charge intent retained for collision damage")
+	check(H.count("steer") > 0 and not H.E.F.native_attack, "W keeps direct control")
+end
+T.a_single_entity_charge_returns_w_to_steering_at_contact = function()
+	charging_on({type = "wh_test_lord", men = 1})
+	H.down("Shift") H.down("W") H.step(1)
+	check(H.E.F.charge_order and not H.E.F.native_attack, "charge intent without autonomous swings on approach")
+	local steers = H.count("steer")
+	H.units[2]._melee = true
+	for _, m in ipairs(H.enemies[1]._models) do m.z = 1 end
+	H.step(1)
+	check(H.E.F.charge_order and not H.E.F.native_attack, "charge intent cannot take over steering or arm melee swings")
+	check(H.count("steer") > steers, "held W steers through contact")
+	check(H.count("uc:attack_unit") == 1, "holding sprint cannot repeat the charge order")
+	check(H.last("disarm"), "ordinary melee swings stay disabled")
+	H.up("W") H.up("Shift")
+end
+T.releasing_sprint_clears_the_native_attack_permission = function()
+	charging_on({type = "wh_test_lord", men = 1})
+	H.down("Shift") H.down("W") H.step(1)
+	H.up("Shift") H.up("W") H.step(0.6)
+	check(not H.E.F.native_attack, "released charge cannot keep auto attacks armed")
+end
+T.a_single_entity_can_click_its_charge_attack_during_native_charge_intent = function()
+	charging_on({type = "wh_test_lord", men = 1})
+	H.down("Shift") H.down("W") H.step(1)
+	H.tap("Left mouse")
+	check(H.E.F.next_charge > 0 and H.E.F.lock and H.E.F.lock.runs, "explicit click uses the moving charge attack")
+	H.up("W") H.up("Shift")
+end
+T.a_run_into_an_enemy_orders_no_charge = function()
+	charging_on()
+	H.down("W") H.step(2) H.up("W")
+	check(H.count("uc:attack_unit") == 0, "a run is a run: " .. H.count("uc:attack_unit"))
+end
+T.a_sprint_at_an_enemy_out_of_reach_orders_no_charge = function()
+	charging_on(nil, {{men = 20, x = 0, z = 70}})
+	H.down("Shift") H.down("W") H.step(2) H.up("W") H.up("Shift")
+	check(H.count("uc:attack_unit") == 0, "the enemy behind him: " .. H.count("uc:attack_unit"))
+end
+T.one_man_sprinting_gives_his_regiment_no_charge = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21}}, enemies = {{men = 20, x = 0, z = 20}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	check(H.E.F.model ~= nil, "one man")
+	H.down("Shift") H.down("W") H.step(2) H.up("W") H.up("Shift")
+	check(H.count("uc:attack_unit") == 0, "no order to his regiment")
+end
+T.the_charge_order_holds_the_steering_till_the_sprint_stops = function()
+	charging_on()
+	H.down("Shift") H.down("W") H.step(2)
+	local at
+	for i, c in ipairs(H.calls) do if c[1] == "uc:attack_unit" then at = i end end
+	check(at, "charged")
+	for i = at + 1, #H.calls do check(H.calls[i][1] ~= "uc:goto_location", "a move order over the charge") end
+	local moves = H.count("uc:goto_location")
+	H.up("Shift") H.step(1)
+	check(H.E.F.charge_order == nil, "the sprint let go: the charge is over")
+	check(H.count("uc:goto_location") > moves, "and W steers again")
+	H.up("W")
+end
+T.a_charge_cut_short_by_the_mode_key_leaves_none_behind = function()
+	charging_on()
+	H.down("Shift") H.down("W") H.step(1)
+	check(H.E.F.charge_order ~= nil, "charging")
+	H.tap("F2") H.step(0.3) H.tap("F2") H.step(0.6)
+	H.step(1)
+	check(H.count("uc:attack_unit") == 2, "charged again: " .. H.count("uc:attack_unit"))
+	H.up("W") H.up("Shift")
+end
+T.no_charge_held_on_a_target_that_hid = function()
+	charging_on()
+	H.down("Shift") H.down("W") H.step(1)
+	check(H.E.F.charge_order ~= nil, "charging")
+	H.enemies[1]._hidden = true H.step(0.5)
+	check(H.E.F.charge_order == nil, "the target hid: the charge is over")
+	H.up("W") H.up("Shift")
+end
+
+-- CA binds plain T to cycling the reinforcement spawn zone (default_keys.xml, read 2026-10-20): off while T turns pages
+T.the_games_t_shortcut_is_off_while_on = function()
+	pages_on({"a1"}, {"s1"})
+	local off = false
+	for _, c in ipairs(H.all("disable_shortcut")) do if c[2] == "cycle_next_spawn_zone" and c[3] == true then off = true end end
+	check(off, "cycle_next_spawn_zone is off")
+end
+
+T.proton_import_addresses_do_not_mean_memreader_is_missing = function()
+	H.real_platform = true
+	local M = assert(loadfile("/script/derpy_tp/platform"))()
+	H.real_platform = false
+	local P = M.build(fake_image(nil, 0x6fff * 2 ^ 32))
+	check(P.features.input, "non-null imports below Windows DLL range: " .. table.concat(P.problems, "; "))
+end
+
+T.null_input_imports_are_still_rejected = function()
+	H.real_platform = true
+	local M = assert(loadfile("/script/derpy_tp/platform"))()
+	H.real_platform = false
+	local mr = fake_image()
+	local read = mr.read_pointer
+	function mr.read_pointer(p, o)
+		local q = read(p, o)
+		if q.addr > 2 ^ 40 then return mr.add(mr.base, -mr.base.addr) end
+		return q
+	end
+	local P = M.build(mr)
+	check(not P.features.input and #mr.calls == 0, "null imports cannot reach mr.call")
+end
+
+T.a_single_entity_charge_keeps_steering_without_forced_clips = function()
+	charging_on({type = "wh_test_lord", men = 1})
+	H.down("Shift") H.down("W") H.step(2)
+	check(H.count("uc:attack_unit") == 1 and not H.E.F.native_attack, "charge intent without autonomous swings")
+	check(charges() == 0 and H.count("steer") > 0, "direct steering without forced clips over the native charge")
+	H.up("W") H.up("Shift")
+end
+
+T.a_running_single_entity_keeps_steering_when_an_enemy_enters_reach = function()
+	charging_on({type = "wh_test_lord", men = 1}, {{men = 20, x = 0, z = 70}})
+	H.down("Shift") H.down("W") H.step(0.6)
+	check(charges() > 0 and H.count("uc:attack_unit") == 0, "forced run before an enemy is within reach")
+	H.enemies[1]._z = 20
+	local at = #H.calls
+	H.step(4)
+	check(H.E.F.charge_order and H.count("uc:attack_unit") == 1, "native charge intent")
+	check(H.count("steer") > 0, "W keeps direct control as the enemy approaches")
+	for i = at + 1, #H.calls do
+		local c = H.calls[i]
+		check(c[1] ~= "arm", "sprint cannot enable autonomous attacks")
+	end
+	H.up("W") H.up("Shift")
+end
+
+T.a_drakeguns_own_gravity_keeps_a_level_shot_level = function()
+	local key = "wh_main_dwf_inf_irondrakes_0"
+	playing({type = key, men = 21, x = 40, range = 80, ammo = 100})
+	H.E.D.gravities = {[key] = 3}
+	H.tap("Left mouse")
+	check(H.E.F.shot and H.E.F.shot.pair == "level", "30 m/s, gravity 3: level fire, not the normal-gravity high pose")
+end
+
+T.a_zero_gravity_projectile_aims_along_the_sightline = function()
+	playing({type = EMPX, men = 21, x = 40, range = 250, ammo = 100})
+	H.E.D.gravities = {[EMPX] = 0}
+	H.tap("Left mouse")
+	check(H.E.F.shot and H.E.F.shot.pair == "level", "zero gravity has no ballistic rise")
+end
+
+-- 2026-10-21 (the author: "the instant turning to the cameras direction rather than smoothly"): standing, he turns toward
+-- the camera at the set turn rate from where he faces, never in one write
+T.standing_he_turns_to_the_camera_at_the_turn_rate = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.step(0.5)
+	local man = H.E.F.model
+	local from = H.E.P.heading(man)
+	set_view(H.E.rig.yaw + math.rad(90)) H.step(1 / 60)
+	local h = H.last("hold")
+	local d = math.abs((h[5] - from + math.pi) % (2 * math.pi) - math.pi)
+	check(d > 0 and d <= math.rad(360) / 60 + 1e-6, "one frame turns him at most the rate's frame, got " .. math.deg(d))
+	H.step(0.5)
+	check(near(H.last("hold")[5], H.E.rig.yaw, 0.01), "half a second on, facing the camera: " .. H.last("hold")[5])
+end
+
+-- a swing turns him to the crosshair too, smoothly and quickly: never the camera's yaw in one write, there before his clip
+T.a_swing_turns_him_to_the_crosshair_without_a_snap = function()
+	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 3, z = 3, men = 10}}})
+	H.tap("F2") H.step(0.6)
+	local man = H.units[1]._models[1]
+	local from = H.E.P.heading(man)
+	set_view(H.E.rig.yaw + 1.05) H.step(1 / 60)
+	H.report_ms = 300
+	local faces = H.count("face")
+	H.tap("Left mouse")
+	local all = H.all("face")
+	local first = all[faces + 1]
+	check(first and not near(first[3], H.E.rig.yaw, 0.05), "the first write is no snap: " .. tostring(first and first[3]))
+	H.step(0.25)
+	check(near(H.E.P.heading(man), H.E.rig.yaw, 0.01), "a quarter second on he faces the crosshair: "
+		.. tostring(H.E.P.heading(man)) .. " vs " .. H.E.rig.yaw .. " from " .. tostring(from))
+end
+
+-- the author, 2026-10-21, in game: Archaon's E "stand on his horse and do a default jumping attack as if he was on foot".
+-- Measured live the same day: JUMPING_ATTACK_2 on the rider, his horse idle. A mounted man's jump is his mount's, as his
+-- swing is: the rider's own clips are no picks
+T.a_mounted_jump_is_the_mounts_alone = function()
+	local u = playing({type = "wh_test_mount", men = 1, slots = {[454] = true, [489] = true, [490] = true, [491] = true}})
+	u._models[1].mount = {id = 999, slots = {[454] = true, [489] = true}}
+	for _ = 1, 3 do
+		H.tap("E") H.step(1 / 60)
+		H.step(H.E.S.jump_cooldown + 4)
+	end
+	local p = H.all("play")
+	local onrider = 0
+	for _, c in ipairs(p) do if c[2] ~= 999 then onrider = onrider + 1 end end
+	check(#p >= 3 and onrider == 0, "every jump on the mount, none on the rider: " .. #p .. " plays, " .. onrider .. " on him")
+end
+
+-- 2026-10-21, a player (Empire Engineer): "they never shoot when i want them to ... they move to god knows where".
+-- Measured live: ground fire held 15 s walked a unit of one 14.9 m and fired once; CA's attack order on the unit stood
+-- him still. A unit of one aimed at an enemy unit shoots it with that order, as a regiment does
+T.a_unit_of_one_aimed_at_an_enemy_attacks_that_unit = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_ranged_lord", men = 1, range = 160, ammo = 30}},
+		enemies = {{x = 0, z = 20, men = 20}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	set_view(nil, math.rad(3)) H.step(0.5)
+	H.down("Left mouse") H.step(3) H.up("Left mouse")
+	local a = H.all("uc:attack_unit")
+	check(#a == 1 and a[1][3] == H.enemies[1], "one order, on that unit: " .. #a)
+	check(H.count("uc:attack_location") == 0, "no ground fire: " .. H.count("uc:attack_location"))
+end
+
+-- and off the crosshair, still in its cone, the enemy nearest the aim: the view over a man's head misses a unit near by
+T.a_unit_of_one_aimed_near_an_enemy_attacks_it = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_ranged_lord", men = 1, range = 160, ammo = 30}},
+		enemies = {{x = 8, z = 60, men = 20}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	set_view(nil, math.rad(-10)) H.step(0.5) -- looking up: the ray meets nothing in his reach
+	H.tap("Left mouse") H.step(1)
+	check(H.count("uc:attack_unit") == 1 and H.count("uc:attack_location") == 0, "the order on the enemy ahead: units "
+		.. H.count("uc:attack_unit") .. ", ground " .. H.count("uc:attack_location"))
+end
+
+-- the author, 2026-10-21: "using the space bar is inconsistent when flying off and on". CA's button takes no click while
+-- the unit cannot toggle (CanToggleFlying false: its cooldown, a take-off or landing under way), and a click then was
+-- lost. The press waits for the button, then clicks once
+local function flyer(o)
+	local u = playing({type = "wh_test_melee", men = 1, x = 40, can_fly = true, flying = o.flying})
+	H.comp("button_toggle_flying", H.comp("porthole_parent", find_uicomponent(H.root, "hud_battle")))
+	H.cco.CanToggleFlying, H.cco.IsFlying, H.cco.ToggleFlyingCooldownTimer = o.can, o.mode, o.cool or 0
+	return u
+end
+local function fly_clicks()
+	local n = 0
+	for _, c in ipairs(H.all("click")) do if c[2] == "button_toggle_flying" then n = n + 1 end end
+	return n
+end
+
+T.a_fly_press_in_the_toggle_cooldown_waits_for_it = function()
+	local u = flyer({flying = true, can = false, mode = true, cool = 3})
+	H.tap("Space") H.step(0.5)
+	check(fly_clicks() == 0, "no click the button would drop: " .. fly_clicks())
+	H.cco.CanToggleFlying, H.cco.ToggleFlyingCooldownTimer = true, 0
+	H.step(0.1)
+	check(fly_clicks() == 1, "one click once it can: " .. fly_clicks())
+	H.cco.IsFlying, H.cco.CanToggleFlying = false, false -- landing
+	H.step(1)
+	u._flying = false
+	H.cco.CanToggleFlying = true
+	H.step(1)
+	check(fly_clicks() == 1, "landed, no more: " .. fly_clicks())
+end
+
+T.a_second_fly_press_takes_back_the_first = function()
+	flyer({flying = true, can = false, mode = true, cool = 3})
+	H.tap("Space") H.step(0.2) H.tap("Space") H.step(0.2)
+	H.cco.CanToggleFlying = true
+	H.step(1)
+	check(fly_clicks() == 0, "still flying, as asked last: " .. fly_clicks())
+end
+
+T.a_fly_press_on_the_ground_under_a_take_off_clicks_nothing = function()
+	flyer({flying = false, can = true, mode = true}) -- ordered up, not off the ground yet
+	H.tap("Space") H.step(1)
+	check(fly_clicks() == 0, "his take-off is not cancelled: " .. fly_clicks())
+end
+
+T.the_fly_button_shows_the_toggles_cooldown = function()
+	flyer({flying = true, can = false, mode = true, cool = 2.3})
+	H.step(0.1)
+	check(hud_part("act_fly_cool"):Visible() and hud_part("act_fly_cool").text == "3", "3 s: "
+		.. tostring(hud_part("act_fly_cool").text))
+	check(hud_part("act_fly_dim"):Visible(), "dimmed while it cannot")
+	H.cco.CanToggleFlying, H.cco.ToggleFlyingCooldownTimer = true, 0
+	H.step(0.1)
+	check(not hud_part("act_fly_cool"):Visible() and not hud_part("act_fly_dim"):Visible(), "clear once it can")
+end
+
+-- the author, 2026-10-21: "no cooldown indication". A recharging ability can still be performed by the engine's test,
+-- so its slot was never greyed; it greys as CA's button does, under its seconds
+T.a_slot_dims_while_its_ability_recharges = function()
+	hud_on({abilities = {"a1"}, secs = {a1 = 4.2}})
+	H.step(0.3)
+	check(hud_part("slot_1_dim"):Visible() and hud_part("slot_1_cool").text == "5", "recharging: grey, 5 s")
+	H.cco["BattleAbilityList.At(0).RechargeTimeRemainingSecs"] = 0 H.step(0.3)
+	check(not hud_part("slot_1_dim"):Visible(), "ready: lit")
+end
+
+-- the author, 2026-10-21: "how many times an ability can be used in the HUD"
+T.a_slot_shows_the_uses_its_ability_has_left = function()
+	hud_on({abilities = {"a1", "a2"}})
+	H.cco["BattleAbilityList.At(0).HasLimitedUses"], H.cco["BattleAbilityList.At(0).RemainingUses"] = true, 2
+	H.cco["BattleAbilityList.At(1).HasLimitedUses"], H.cco["BattleAbilityList.At(1).RemainingUses"] = false, -1
+	H.step(0.3)
+	check(hud_part("slot_1_uses"):Visible() and hud_part("slot_1_usesplate"):Visible() and hud_part("slot_1_uses").text == "2",
+		"two uses left: " .. tostring(hud_part("slot_1_uses").text))
+	check(not hud_part("slot_2_uses"):Visible() and not hud_part("slot_2_usesplate"):Visible(), "no count: nothing")
+	H.cco["BattleAbilityList.At(0).RemainingUses"] = 1 H.step(0.3)
+	check(hud_part("slot_1_uses").text == "1", "spent one: " .. tostring(hud_part("slot_1_uses").text))
 end
 
 return T

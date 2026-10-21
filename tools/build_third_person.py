@@ -32,6 +32,7 @@ FRAG = "derpy_third_person"
 # Every message the mod shows; E.say(key) in the Lua must name one of these and nothing else.
 LOC = {
     "derpy_tp_needs_memreader": "Third-Person Battles needs the mod memreader Plus. Subscribe to it, then restart the game.",
+    "derpy_tp_input_unavailable": "Third-Person Battles found memreader Plus but could not initialize keyboard and mouse input. The script log has the details.",
     "derpy_tp_multiplayer": "Third-Person Battles is off in multiplayer battles and replays.",
     "derpy_tp_switched_off": "Third-Person Battles ran into three errors and is off until this battle ends. The script log has the details.",
 }
@@ -195,6 +196,27 @@ def check_data():
     got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.strip()
     if got != "transform":
         bad.append("data.lua abilities: Yuan Bo's dragon form is %s, not a transform - run --gen" % got)
+    # a chariot is drawn by beasts and shoots nothing (main.lua chariot): the Seeker Chariots and Settra's are, the
+    # doomwheel (self-driven), the Tiranoc chariot (its crew shoot) and the steam tank are not
+    probe = ('local d = dofile([[%s]]) local c = d.chariots or {} print(c["wh3_main_sla_veh_seeker_chariot_0"], '
+             'c["wh2_dlc09_tmb_cha_settra_2"], c["wh2_main_skv_veh_doomwheel"], c["wh2_main_hef_cav_tiranoc_chariot"], '
+             'c["wh_main_emp_veh_steam_tank_driver"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["true", "true", "nil", "nil", "nil"]:
+        bad.append("data.lua chariots: Seeker, Settra, doomwheel, Tiranoc, steam tank %s - run --gen" % got)
+    # a spell's overcast and its cost (abilities.lua): Djaf's Cursed Blades 3 winds, overcast 5; an ability's skill upgrade
+    # costs nothing and is no overcast (the Tomb King's rally)
+    probe = ('local d = dofile([[%s]]) local o = d.overcasts or {} print(o["wh2_dlc09_spell_nehekhara_djafs_incantation_of_cursed_blades"], '
+             'o["wh2_dlc09_character_abilities_tomb_king_rally"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["5", "nil"]:
+        bad.append("data.lua overcasts: Djaf's Cursed Blades, the Tomb King's rally %s - run --gen" % got)
+    probe = ('local d = dofile([[%s]]) local g = d.gravities or {} '
+             'print(g["wh_main_dwf_inf_irondrakes_0"], g["wh3_main_tze_mon_flamers_0"], '
+             'g["wh3_main_cth_inf_jade_warrior_crossbowmen_1"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["3", "1", "nil"]:
+        bad.append("data.lua gravity overrides: Drakegun, Flamer, default crossbow %s - run --gen" % got)
     return bad
 
 def exe_stamp():
@@ -245,13 +267,15 @@ def gen():
         return out
 
     lu, mw, pr, aw = keyed("land_units"), keyed("missile_weapons"), keyed("projectiles"), keyed("audio_missile_weapon_types")
-    shots, speeds = {}, {}
+    shots, speeds, gravities = {}, {}, {}
     for key, land in lu.items():
         # keyed by the land unit: unit:type() returns a land_units key (CA's doc), and 176 main units sit on a land
         # unit of another name
         weapon = mw.get(land["primary_missile_weapon"])
         proj = weapon and pr.get(weapon["default_projectile"])
         if proj:
+            if float(proj["gravity"]) >= 0:
+                gravities[key] = float(proj["gravity"])
             bang = (aw.get(weapon["audio_type"]) or {}).get("fire_start_event") or ""
             shots[key] = (proj["key"], float(proj["base_reload_time"]), int(proj["projectile_number"]), bang)
             speeds[key] = float(proj["muzzle_velocity"])
@@ -271,7 +295,17 @@ def gen():
         r, h = round(r, 2), round(h, 2)
         if (r, h) != (0.5, 1.8):
             bodies[key] = (r, h)
-    kinds = {k: ability_kind(r) for k, r in keyed("unit_special_abilities").items() if not r["passive"]}
+    usa = keyed("unit_special_abilities")
+    kinds = {k: ability_kind(r) for k, r in usa.items() if not r["passive"]}
+    # a spell's overcast is its key + "_upgraded" (CA's own benchmark casts wh3_main_spell_tempest_hailstorm_upgraded); an
+    # ability's skill upgrade has the same suffix and costs nothing, so only one whose base spends winds
+    overcasts = {k: float(usa[k + "_upgraded"]["mana_cost"]) for k, r in usa.items()
+                 if not r["passive"] and float(r["mana_cost"]) > 0 and k + "_upgraded" in usa}
+    # a chariot (main.lua): a war machine drawn by beasts (its engine has a draught attachment point) that shoots
+    # nothing - the doomwheel drives itself, the steam tank and the Tiranoc chariot shoot (read 2026-10-20)
+    be_eng = keyed("battlefield_engines")
+    chariots = sorted(k for k, land in lu.items() if land["category"] == "war_machine" and not land["primary_missile_weapon"]
+                      and (be_eng.get(land["engine"]) or {}).get("draught_attachment_point"))
     TF = third_person_fires
     raises, runs, charges, blanks = {}, {}, {}, {}
     fires, fires_low, fires_high = TF.build((TF.FIRE, TF.GRENADIER, TF.RIDER_FIRE), (TF.FIRE_LOW,), (TF.FIRE_HIGH,), raises=raises,
@@ -285,6 +319,7 @@ def gen():
              "--   the installed mods' units too); fires_low, fires_high: the same off FIRE_LOW and FIRE_HIGH",
              "-- speeds: land unit key -> its projectile's muzzle_velocity, m/s (combat.lua picks the low, level or high",
              "--   clips by the angle the shot leaves at)",
+             "-- gravities: land unit key -> nonnegative projectile gravity override; absent uses normal gravity",
              "-- raises: land unit key -> {low, level, high}: each SHOOT_READY_TO_AIM clip's play time, s, off its .anim; 0,",
              "--   none (combat.lua sends fire just before the raise ends)",
              "-- runs: land unit key -> its longest MOVING_ATTACK clip, s (combat.lua ends a charge attack on the run there)",
@@ -293,6 +328,8 @@ def gen():
              "-- blanks: land unit key -> the slots of that body whose every clip is an empty file (none to play)",
              "-- bodies: land unit key -> {radius, height} of each man in m, off battle_entities (a rider: his mount's height",
              "--   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)",
+             "-- chariots: land unit keys of the war machines drawn by beasts that shoot nothing (main.lua plays one alone)",
+             "-- overcasts: spell key -> winds its <key>_upgraded overcast costs (abilities.lua)",
              "return {", "\tshots = {"]
     for k in sorted(shots):
         key, reload, n, bang = shots[k]
@@ -319,9 +356,18 @@ def gen():
     lines += ["\t},", "\tspeeds = {"]
     for k in sorted(speeds):
         lines.append('\t\t["%s"] = %g,' % (k, speeds[k]))
+    lines += ["\t},", "\tgravities = {"]
+    for k in sorted(gravities):
+        lines.append('\t\t["%s"] = %g,' % (k, gravities[k]))
     lines += ["\t},", "\tbodies = {"]
     for k in sorted(bodies):
         lines.append('\t\t["%s"] = {%g, %g},' % (k, bodies[k][0], bodies[k][1]))
+    lines += ["\t},", "\tchariots = {"]
+    for k in chariots:
+        lines.append('\t\t["%s"] = true,' % k)
+    lines += ["\t},", "\tovercasts = {"]
+    for k in sorted(overcasts):
+        lines.append('\t\t["%s"] = %g,' % (k, overcasts[k]))
     lines += ["\t},", "}", ""]
     with open(DATA, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))

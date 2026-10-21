@@ -14,9 +14,15 @@ return function(E)
 	local H = {}
 	local ui, last, dead, errors, off = nil, {}, {}, 0, false
 	local cco_id, cco_at, keys, slot_of, reload_cco = nil, 0, {}, {}, nil
+	local cooling = {} -- slot n's ability is recharging, as the last context read found it
 	local acts, act_at = {}, {} -- the action buttons this unit shows, in order, and each one's place in that order
 	local caster = false -- an ability of his spends winds: his army's pool and its bar show
 	local home -- CA's radar's holder and place while the radar is in this panel (H.map): {holder, x, y}
+	local pages, page, list_n = {}, 1, nil -- the bar's pages (build below), the one shown, CA's list's size they came from
+	local tab_text -- the page tab's words while it shows (show_page); H.place sizes the tab to them
+	local hint, cost -- why an overcast was refused {n, why, till}; the winds an armed spell would spend
+	local HINT_SECS = 2
+	local function clock() return bm:time_elapsed_ms() / 1000 end
 	local ACT_PARTS = {"frame", "icon", "active_l", "active_r", "dim", "coolplate", "cool", "keyplate", "key"}
 
 	local function part(id) return ui and find_uicomponent(ui, id) end
@@ -33,16 +39,17 @@ return function(E)
 
 	-- the parts a failure hides together
 	local GROUPS = {portrait = {"portrait", "name"}, health = {"health_back", "health_fill", "health_frame"},
-		hp = {"hp", "hp_icon"}, winds = {"winds", "winds_icon", "winds_back", "winds_fill", "winds_frame"},
+		hp = {"hp", "hp_icon"}, winds = {"winds", "winds_icon", "winds_back", "winds_fill", "winds_frame", "winds_cost"},
 		stamina = {"stamina", "stamina_icon", "stamina_back", "stamina_fill", "stamina_frame"},
 		men = {"men", "men_icon"}, ammo = {"ammo", "ammo_back", "ammo_fill", "ammo_frame"}, mode = {"mode"}, slots = {}, reload = {},
-		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}, bars = {"bars"}}
+		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}, bars = {"bars"},
+		hidden = {"hidden_plate", "hidden_icon", "hidden"}}
 	for _, a in ipairs(L.actions) do
 		for _, s in ipairs(ACT_PARTS) do GROUPS.actions[#GROUPS.actions + 1] = "act_" .. a .. "_" .. s end
 	end
 	for n = 1, L.slots do
-		for _, s in ipairs({"frame", "icon", "active_l", "active_r", "windup_l", "windup_r", "dim", "armed", "coolplate",
-			"cool", "keyplate", "key"}) do
+		for _, s in ipairs({"frame", "icon", "active_l", "active_r", "windup_l", "windup_r", "dim", "armed", "over", "coolplate",
+			"cool", "usesplate", "uses", "keyplate", "key"}) do
 			GROUPS.slots[#GROUPS.slots + 1] = "slot_" .. n .. "_" .. s
 		end
 	end
@@ -72,6 +79,12 @@ return function(E)
 		return val
 	end
 
+	-- a value off his unit's context; nil with none
+	function H.value(expr)
+		local ok, v = pcall(cco, expr)
+		if ok then return v end
+	end
+
 	-- every part from its group's corner; the scale is what the engine drew the probe part at against its design size
 	function H.place()
 		local sw, sh = core:get_screen_resolution()
@@ -82,7 +95,21 @@ return function(E)
 		-- the bar centres on the slots it shows, not on all ten: its full width less a pitch per empty slot
 		local shown = math.max(1, math.min(#keys, L.slots))
 		local bar_w = g.bar[1] - (L.slots - shown) * (L.at.slot_2_frame[2] - L.at.slot_1_frame[2])
-		local o = {left = {m, sh - m - g.left[2] * s}, bar = {(sw - bar_w * s) / 2, sh - m - g.bar[2] * s},
+		-- and the page tab hanging off its left end with it (a 200px tab beside ten slots met the portrait's plate), its
+		-- text and the padding wide (the author, 2026-10-20, in game: "too long"), a slot's gap left of slot 1
+		local gap = -L.at.tab_plate[2] - L.size.tab_plate[1]
+		local tab_w, tab_dw = 0, nil
+		local tp, tt = part("tab_plate"), part("tab")
+		if tab_text and tp and tt then
+			tab_dw = math.ceil(tt:TextDimensionsForText(tab_text) / s) + 2 * L.pad
+			for c, w in pairs({[tp] = tab_dw, [tt] = tab_dw - 2 * L.pad}) do
+				local _, h = c:Dimensions()
+				c:SetCanResizeWidth(true) c:SetCanResizeHeight(true)
+				c:Resize(math.floor(w * s + 0.5), h)
+			end
+			tab_w = tab_dw + gap
+		end
+		local o = {left = {m, sh - m - g.left[2] * s}, bar = {(sw - (bar_w + tab_w) * s) / 2 + tab_w * s, sh - m - g.bar[2] * s},
 			right = {sw - m - g.right[1] * s, sh - m - g.right[2] * s},
 			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}, toggle = {sw - m - g.toggle[1] * s, m},
 			screen = {0, 0}}
@@ -105,44 +132,130 @@ return function(E)
 			local dx, dy = at[2], at[3]
 			if not caster and L.lifted[id] then dy = dy + L.lift end -- no winds row: the rows above it drop into its place
 			if at[1] == "actions" then dx = dx + ((act_at[id:match("^act_(%a+)_")] or 1) - 1) * L.action_pitch end
+			if tab_dw and id == "tab_plate" then dx = -tab_w elseif tab_dw and id == "tab" then dx = -tab_w + L.pad end
 			if c then c:MoveTo(math.floor(o[at[1]][1] + dx * s), math.floor(o[at[1]][2] + dy * s)) end
 		end
 		H.s = s
 	end
 
-	-- the unit at the start of a session: its card's context, its portrait, and the hotbar in cast order. The
-	-- context and the slots' places in it are read even with the HUD off: abilities.lua casts through them
-	function H.unit()
-		local card = find_uicomponent(core:get_ui_root(), "cards_panel", tostring(F.unit:unique_ui_id()))
-		cco_id = card and card:GetContextObjectId("CcoBattleUnit") or nil
-		keys = F.unit:owned_non_passive_special_abilities() or {}
-		slot_of, caster = {}, false
+	-- the bar's pages (the 2026-10-20 design, Part 2): CA's own list in its order, each ability once - the owned list
+	-- holds every spell twice, its key and its overcast's (measured 2026-10-20) - abilities first, then spells (they cost
+	-- winds, CcoBattleAbility.ManaUsed), L.slots a page. No context: the owned list, its overcast copies dropped, one kind.
+	-- Each slot {key, i: its place in CA's list, up: the spell's overcast key}
+	local function build()
+		local owned, has = F.unit:owned_non_passive_special_abilities() or {}, {}
+		for _, k in ipairs(owned) do has[k] = true end
+		local entries = {}
 		local indexed, why = pcall(function()
-			local index = {}
-			for i = 0, cco("BattleAbilityList.Size") - 1 do
-				index[cco("BattleAbilityList.At(" .. i .. ").SetupAbilityContext.RecordKey")] = i
-				-- a spell is an ability that costs winds (CcoBattleAbility.ManaUsed); an ability without the field costs none
-				local ok, mana = pcall(cco, "BattleAbilityList.At(" .. i .. ").ManaUsed")
-				caster = caster or ok and mana > 0
+			local n = cco("BattleAbilityList.Size")
+			list_n = n
+			for i = 0, n - 1 do
+				local at = "BattleAbilityList.At(" .. i .. ")."
+				-- the passives lead CA's list (8 of the Exalted Keeper of Secrets' 22, measured 2026-10-20): nothing to cast
+				local okp, passive = pcall(cco, at .. "SetupAbilityContext.IsPassive")
+				-- an entry that cannot be read costs itself only, not the entries after it (the final review)
+				local okk, key = pcall(cco, at .. "SetupAbilityContext.RecordKey")
+				if not (okp and passive == true) and okk then
+					local ok, mana = pcall(cco, at .. "ManaUsed") -- an ability without the field costs none
+					entries[#entries + 1] = {key = key, i = i, spell = ok and mana > 0}
+				elseif not okk then E.once("hud_entry_" .. i, "HUD: ability " .. i .. " of CA's list unreadable: " .. tostring(key)) end
 			end
-			for n = 1, math.min(#keys, L.slots) do slot_of[n] = index[keys[n]] end
 		end)
+		-- no context, or CA's list holds none of what he owns: the owned list
+		if not indexed then list_n = nil end
+		if #entries == 0 then
+			for _, k in ipairs(owned) do entries[#entries + 1] = {key = k} end
+		end
+		local listed, kinds = {}, {{}, {}}
+		for _, e in ipairs(entries) do listed[e.key] = true end
+		for _, e in ipairs(entries) do
+			local base = e.key:match("^(.+)_upgraded$")
+			if not (base and listed[base]) then
+				-- only a spell overcasts: an ability's skill upgrade has the same suffix (data.lua overcasts)
+				local over = e.spell or E.D.overcasts and E.D.overcasts[e.key] ~= nil
+				e.up = over and has[e.key .. "_upgraded"] and e.key .. "_upgraded" or nil
+				table.insert(kinds[e.spell and 2 or 1], e)
+			end
+		end
+		pages = {}
+		for k, name in ipairs({"Abilities", "Spells"}) do
+			for p = 1, math.ceil(#kinds[k] / L.slots) do
+				local slots = {}
+				for j = (p - 1) * L.slots + 1, math.min(p * L.slots, #kinds[k]) do slots[#slots + 1] = kinds[k][j] end
+				pages[#pages + 1] = {name = p == 1 and name or name .. " " .. p, slots = slots}
+			end
+		end
+		caster = #kinds[2] > 0
+		return indexed, why
+	end
+
+	-- a caster's tall plate and winds rows, a non-caster's short plate; again after a rebuild, which can make him either
+	local function show_caster()
 		if off then return end
 		vis("plate_left", caster) vis("plate_left_short", not caster)
 		if not dead.winds then for _, id in ipairs(GROUPS.winds) do vis(id, caster) end end
+	end
+
+	-- the shown page into the slots: each one's key, place in CA's list, icon and key label
+	local function show_page(indexed, why)
+		keys, slot_of = {}, {}
+		for n, e in ipairs(pages[page] and pages[page].slots or {}) do keys[n], slot_of[n] = e.key, e.i end
+		if off then return end
+		for n = 1, L.slots do
+			local on = keys[n] ~= nil
+			for _, s in ipairs({"frame", "icon", "keyplate", "key", "cool"}) do vis("slot_" .. n .. "_" .. s, on) end
+			for _, s in ipairs({"dim", "coolplate", "armed", "over", "active_l", "active_r", "windup_l", "windup_r", "usesplate",
+				"uses"}) do
+				vis("slot_" .. n .. "_" .. s, false)
+			end
+			cooling[n] = nil
+			if on then text("slot_" .. n .. "_key", E.S.names["ability_" .. n] or "") end
+			text("slot_" .. n .. "_cool", "") -- the page before's seconds; this page's come at the next read
+		end
+		-- the tab names the page its key goes to next, the key in brackets (the author, 2026-10-20: mockup A, "(T)");
+		-- none with one page, or with the key unbound
+		local tab = #pages > 1 and E.S.names.page
+		vis("tab_plate", tab ~= nil and tab ~= false) vis("tab", tab ~= nil and tab ~= false)
+		tab_text = tab and "(" .. tab .. ") " .. H.page_name(1) or nil
+		if tab then text("tab", tab_text) end
+		guard("slots", function()
+			if not indexed then error(why, 0) end
+			for n, i in pairs(slot_of) do
+				img("slot_" .. n .. "_icon", cco("BattleAbilityList.At(" .. i .. ").SetupAbilityContext.IconPath"))
+			end
+		end)
+	end
+
+	function H.key(n) return keys[n] end
+	function H.upgraded(n) local e = pages[page] and pages[page].slots[n] return e and e.up end
+	-- the shown page's name (offset 0) or the next one's (1); nil with no abilities
+	function H.page_name(offset) return #pages > 0 and pages[(page - 1 + offset) % #pages + 1].name or nil end
+	-- the next page, round to the first; false with one page
+	function H.next_page()
+		if #pages < 2 then return false end
+		page = page % #pages + 1
+		show_page(list_n ~= nil, "no unit context for this unit")
+		H.place()
+		return true
+	end
+
+	-- the unit at the start of a session: its card's context, its portrait, and the bar's first page. The context and
+	-- the slots' places in it are read even with the HUD off: abilities.lua casts through them
+	function H.unit()
+		local card = find_uicomponent(core:get_ui_root(), "cards_panel", tostring(F.unit:unique_ui_id()))
+		cco_id = card and card:GetContextObjectId("CcoBattleUnit") or nil
+		page = 1
+		if F.armed then E.abilities.cancel() end -- the pages are built again below: page 1, other slots
+		local indexed, why = build()
+		show_page(indexed, why)
+		if off then return end
+		for _, id in ipairs(GROUPS.hidden) do vis(id, false) end -- till the first read says so
+		show_caster()
 		guard("portrait", function()
 			img("portrait", cco("IconPath"))
 			text("name", cco("Name"))
 			vis("portrait", true) vis("name", true)
 		end)
-		for n = 1, L.slots do
-			local on = keys[n] ~= nil
-			for _, s in ipairs({"frame", "icon", "keyplate", "key", "cool"}) do vis("slot_" .. n .. "_" .. s, on) end
-			for _, s in ipairs({"dim", "coolplate", "armed", "active_l", "active_r", "windup_l", "windup_r"}) do
-				vis("slot_" .. n .. "_" .. s, false)
-			end
-			if on then text("slot_" .. n .. "_key", E.S.names["ability_" .. n] or "") end
-		end
 		-- the action buttons: walk and sprint always, attack but for a gun, fire for a shooter, artillery too (its click
 		-- fires the gun), jump when his men have the clips; each with its key
 		local can = {walk = true, sprint = true, attack = not F.arty, fire = F.unit:missile_range() > 0
@@ -160,12 +273,6 @@ return function(E)
 		for _, s in ipairs({"frame", "icon", "keyplate", "key"}) do vis("hide_" .. s, true) vis("map_" .. s, true) end
 		text("hide_key", E.S.names.hide_ui or "")
 		text("map_key", E.S.names.minimap or "")
-		guard("slots", function()
-			if not indexed then error(why, 0) end
-			for n, i in pairs(slot_of) do
-				img("slot_" .. n .. "_icon", cco("BattleAbilityList.At(" .. i .. ").SetupAbilityContext.IconPath"))
-			end
-		end)
 	end
 
 	-- hotbar slot n's ability in the unit's context: a field of its record, or a command run on it. Both throw when the
@@ -186,8 +293,38 @@ return function(E)
 
 	-- the armed ability (abilities.lua): its slot shows CA's selected ring; nil clears every slot
 	function H.armed(n) for k = 1, L.slots do vis("slot_" .. k .. "_armed", k == n) end end
+	-- an armed spell overcast: CA's glow over its slot (hud_battle.twui.xml overcast_effect); off, every slot's
+	function H.overcast(n, on) for k = 1, L.slots do vis("slot_" .. k .. "_over", on == true and k == n) end end
+	-- why the overcast cannot go off, as CA's bar says it: the slot's invalid overlay and a line in the target label, for
+	-- HINT_SECS (the author, 2026-10-20: "should show UI hints as possible as the CA Vanilla design"); c: the overcast's
+	-- winds when they are the reason, previewed on the winds bar as long as the line shows
+	function H.refuse(n, why, c)
+		hint = {n = n, why = why, till = clock() + HINT_SECS, cost = c}
+		cco_at = 0
+		vis("slot_" .. n .. "_dim", true)
+		H.target(why)
+	end
+	-- the winds an armed spell would spend, previewed on the winds bar (CA's SpellPreviewRemainingMana); nil, none
+	function H.cost(c)
+		cost = c and c > 0 and c or nil
+		cco_at = 0 -- shown at the next frame, not the next read
+	end
+	-- slot n's winds cost (CcoBattleAbility.ManaUsed), 0 without one; the army's winds now, nil without a context
+	function H.mana(n)
+		local ok, c = pcall(function() return cco(ability_at(n) .. "ManaUsed") end)
+		return ok and type(c) == "number" and c or 0
+	end
+	function H.winds()
+		local ok, w = pcall(cco, "ArmyContext.WindsOfMagicPoolContext.CurrentWind")
+		if ok and type(w) == "number" then return w end
+		-- no context on his card: his army's own figure (CA's battle_army doc)
+		ok, w = pcall(function() return F.unit:army():winds_of_magic_current() end)
+		return ok and type(w) == "number" and w or nil
+	end
 	-- the label under the crosshair naming what an armed ability would hit; nil hides it
 	function H.target(s)
+		if s == nil then hint = nil -- disarmed: no refusal left to tell
+		elseif hint and clock() < hint.till then s = hint.why end
 		vis("target_plate", s ~= nil) vis("target", s ~= nil)
 		if s then text("target", s) end
 	end
@@ -446,11 +583,26 @@ return function(E)
 		guard("mode", function() img("mode", F.ranged and L.art.ranged or L.art.melee) vis("mode", true) end)
 		guard("slots", function()
 			for n = 1, math.min(#keys, L.slots) do
-				vis("slot_" .. n .. "_dim", not u:can_perform_special_ability(keys[n]))
+				-- recharging too: can_perform_special_ability stays true through a cooldown (measured 2026-10-21), and CA's
+				-- button greys out through it
+				vis("slot_" .. n .. "_dim", not u:can_perform_special_ability(keys[n]) or cooling[n]
+					or hint ~= nil and hint.n == n and now < hint.till)
 			end
 		end)
 		if now >= cco_at then
 			cco_at = now + CCO_EVERY
+			-- an ability granted or spent mid-battle: the pages again, on the page of the same name if it is still there
+			local okn, n = pcall(cco, "BattleAbilityList.Size")
+			if okn and list_n and n ~= list_n then
+				if F.armed then E.abilities.cancel() end -- an armed slot may hold another ability after (the final review)
+				local name = H.page_name(0)
+				local indexed, why = build()
+				page = 1
+				for p, pg in ipairs(pages) do if pg.name == name then page = p end end
+				show_page(indexed, why)
+				show_caster()
+				H.place()
+			end
 			guard("slots", function()
 				-- CA's timer ring states: winding up (the cast before it takes effect; -1 when not) the plain ring, running
 				-- the green one, each with its seconds left; then the cooldown's seconds
@@ -462,8 +614,26 @@ return function(E)
 					local secs = winding and windup or cco(at .. (active and "ActiveTimeRemainingSecs" or "RechargeTimeRemainingSecs"))
 					text("slot_" .. n .. "_cool", secs > 0 and tostring(math.ceil(secs)) or "")
 					vis("slot_" .. n .. "_coolplate", secs > 0)
+					cooling[n] = secs > 0 and not active and not winding
+					-- its uses left, of an ability that has a count (RemainingUses, -1 without one)
+					local okl, limited = pcall(cco, at .. "HasLimitedUses")
+					local left = okl and limited == true and cco(at .. "RemainingUses")
+					text("slot_" .. n .. "_uses", left and tostring(left) or "")
+					vis("slot_" .. n .. "_uses", left ~= false) vis("slot_" .. n .. "_usesplate", left ~= false)
 					vis("slot_" .. n .. "_active_l", active) vis("slot_" .. n .. "_active_r", active)
 					vis("slot_" .. n .. "_windup_l", winding) vis("slot_" .. n .. "_windup_r", winding)
+				end
+			end)
+			-- hidden (the 2026-10-20 design, Part 4: third person turns off CA's banners, which show it): unspottable is the
+			-- unit's own trait and CA shows it always; hidden is his cover, the context's IsHidden or "hidden in tall
+			-- grass/trees" (unit:is_hidden). Out of the enemy's sight is neither, and CA's banner shows it no more than this
+			guard("hidden", function()
+				local unspottable = cco("IsUnspottable") == true
+				local hidden = unspottable or cco("IsHidden") == true or u:is_hidden()
+				for _, id in ipairs(GROUPS.hidden) do vis(id, hidden) end
+				if hidden then
+					text("hidden", unspottable and "Unspottable" or "Hidden")
+					img("hidden_icon", unspottable and L.art.unspottable or L.art.hidden)
 				end
 			end)
 			-- the figures: his hit points, and a caster's army's winds (CcoBattleWindsOfMagicPool) with their bar
@@ -478,7 +648,11 @@ return function(E)
 					local p = "ArmyContext.WindsOfMagicPoolContext."
 					local cur, max = cco(p .. "CurrentWind"), cco(p .. "MaxWind")
 					text("winds", math.floor(cur) .. " / " .. math.floor(max))
-					width("winds_fill", max > 0 and cur / max or 0)
+					-- an armed spell: the fill is what the cast would leave, its cost shown up to the winds there are
+					local c = math.min((hint and now < hint.till and hint.cost) or cost or 0, cur)
+					width("winds_fill", max > 0 and (cur - c) / max or 0)
+					vis("winds_cost", c > 0)
+					if c > 0 then width("winds_cost", cur / max) end
 				end)
 			end
 			if F.ranged and not F.solo then
@@ -504,6 +678,8 @@ return function(E)
 			-- lit while on: the walk, the sprint, flight, the minimap (CA's green ring, as an ability's active time)
 			local function lit(a, on) if act_at[a] then vis("act_" .. a .. "_active_l", on) vis("act_" .. a .. "_active_r", on) end end
 			lit("walk", F.walking) lit("sprint", F.sprinting) lit("fly", u:is_currently_flying())
+			-- flight's toggle: CA's own seconds and test (hud_battle.twui.xml button_toggle_flying)
+			if act_at.fly then show("fly", H.value("ToggleFlyingCooldownTimer"), H.value("CanToggleFlying") == false) end
 			vis("map_active_l", home ~= nil) vis("map_active_r", home ~= nil)
 			local frac = reload_frac(now)
 			local base = E.D.shots[F.utype] and E.D.shots[F.utype][2] * E.S.reload_factor

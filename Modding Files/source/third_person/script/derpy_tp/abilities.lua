@@ -70,8 +70,7 @@ return function(E)
 
 	-- slot n's ability key when it can go off now; nil and why when not
 	local function ready(n)
-		local list = F.unit:owned_non_passive_special_abilities()
-		local key = list and list[n]
+		local key = E.hud.key(n) -- slot n of the page shown (hud.lua)
 		if not key then return nil, "no ability in slot " .. n end
 		if not F.unit:can_perform_special_ability(key) then return nil, key .. " cannot be cast now" end
 		-- can_perform stays true through a cooldown (measured): the order went out anyway
@@ -79,7 +78,9 @@ return function(E)
 		return key
 	end
 
-	function A.cast(n)
+	-- over: the spell's overcast, its <key>_upgraded, through the controller as CA's own scripts cast one
+	-- (battle_benchmark.lua: perform_special_ability("wh3_main_spell_tempest_hailstorm_upgraded", ...))
+	function A.cast(n, over)
 		local key, why = ready(n)
 		if not key then return why end
 		-- a transformation replaces his unit with another (docs/BATTLE_UNIT_SWAPS.md 7): played on, the old unit's man
@@ -95,7 +96,9 @@ return function(E)
 			return nil
 		end
 		local kind = kind_of(n, key)
+		local up = over and E.hud.upgraded(n)
 		local ok, err, via_context
+		key = up or key
 		if kind == "ground" then
 			local x, _, z = E.combat.aim_point(reach(n))
 			if not x then return "no aim yet" end
@@ -106,6 +109,8 @@ return function(E)
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, target)
 		elseif kind == "friend" then -- no ally on the crosshair: himself (the engine refuses it if he cannot be)
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, nearest_to_ray(false, reach(n)) or F.unit)
+		elseif kind == "none" and up then -- CA's activation knows no overcast: the controller, on himself
+			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, F.unit)
 		elseif kind == "none" then -- no target at all: any unit order is refused, so activate it as CA's button does
 			ok, err = pcall(E.hud.ability_command, n, "PerformAbilityForOwner")
 			via_context = ok
@@ -137,24 +142,71 @@ return function(E)
 		if not F.armed then return end
 		F.armed = nil
 		E.hud.armed(nil)
+		E.hud.overcast(nil, false)
+		E.hud.cost(nil)
 		E.hud.target(nil)
 		E.hud.mark(nil)
 	end
+	-- the winds slot n's spell spends, overcast or not (data.lua overcasts: the overcast's own record); why its overcast
+	-- cannot go off
+	local function cost(n, over)
+		local up = over and E.D.overcasts and E.D.overcasts[E.hud.key(n)]
+		return up or E.hud.mana(n)
+	end
+	-- the overcast's winds go with the winds' reason, for the bar to preview (hud.lua H.refuse)
+	local function refuse(n)
+		local c, w = E.D.overcasts and E.D.overcasts[E.hud.key(n)], E.hud.winds()
+		if c and w and w < c then E.hud.refuse(n, "Not enough winds to overcast", c)
+		else E.hud.refuse(n, "Cannot overcast now") end
+	end
+	-- the engine's answer does not count the winds: an 8-wind overcast with 6 in the pool read true, and the click cast
+	-- nothing and spent nothing (measured 2026-10-20)
+	local function can_over(n)
+		local c, w = E.D.overcasts and E.D.overcasts[E.hud.key(n)], E.hud.winds()
+		return F.unit:can_perform_special_ability(E.hud.upgraded(n)) and not (c and w and w < c)
+	end
+	-- Overcast (the author, 2026-10-20: "pressing the spell twice can upgrade the spells", "third press of 1"): the first
+	-- press arms at normal power, the second overcasts a spell that has one - or says why it cannot, and it stays armed
+	-- at normal power - the third disarms. Without an overcast the second disarms, as before. One that needs no target
+	-- arms when it has an overcast, so the second press can ask for it; else it goes off on its key
 	function A.press(n, now)
-		if F.armed and F.armed.n == n then A.cancel() return nil end
+		local a = F.armed
+		if a and a.n == n then
+			local up = E.hud.upgraded(n)
+			if not up or a.over then A.cancel() return nil end
+			if can_over(n) then
+				a.over = true
+				E.hud.overcast(n, true)
+				E.hud.cost(cost(n, true))
+			else
+				refuse(n)
+			end
+			return nil
+		end
 		local key, why = ready(n)
 		if not key then return why end
 		local kind = kind_of(n, key)
-		if not AIMED[kind] then A.cancel() return A.cast(n) end
+		if not AIMED[kind] and not E.hud.upgraded(n) then A.cancel() return A.cast(n) end
 		E.combat.stand_down(now) -- the author: "stop melee or shooting"
 		F.armed = {n = n, kind = kind, label_at = -1e9, range = reach(n)}
 		E.hud.armed(n)
+		E.hud.overcast(n, false)
+		E.hud.cost(cost(n, false))
 		return nil
 	end
+	-- the click: an overcast the winds no longer pay for drops to normal power and says why, and waits for the next
 	function A.fire()
-		local n = F.armed and F.armed.n
+		local a = F.armed
+		if not a then return end
+		if a.over and not can_over(a.n) then
+			a.over = false
+			E.hud.overcast(a.n, false)
+			E.hud.cost(cost(a.n, false))
+			refuse(a.n)
+			return nil
+		end
 		A.cancel()
-		if n then return A.cast(n) end
+		return A.cast(a.n, a.over)
 	end
 	-- the label and the unit it names are picked every LABEL_EVERY; the arrow over him follows the view every frame
 	function A.update(now)
@@ -164,7 +216,9 @@ return function(E)
 			a.label_at = now
 			a.unit = nil
 			local s
-			if a.kind == "ground" then
+			if a.kind == "self" then s = "On himself"
+			elseif a.kind == "none" then s = "Click to cast"
+			elseif a.kind == "ground" then
 				local x, _, z = E.combat.aim_point(a.range)
 				local q = F.unit:position()
 				s = x and ("Ground, " .. math.floor(math.sqrt((x - q:get_x()) ^ 2 + (z - q:get_z()) ^ 2) + 0.5) .. " m")

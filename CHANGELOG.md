@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-10-21
+
+- Mounted lords jump and charge-attack on their mount; the rider no longer plays the jump on a standing horse.
+- A unit of one (an Engineer, a hero, a lord) shoots the enemy on the crosshair, or the one nearest it, by unit order:
+  ground fire at the aim's far point walked him off.
+- He turns to the camera at the set turn rate (twice it for swings, jumps and shots) instead of snapping.
+- Space asks to fly or land and waits for CA's toggle (its cooldown, a landing under way) up to 20 s; a second press
+  takes it back.
+- The fly button shows the toggle's cooldown and dims while it cannot be used.
+- Ability slots grey out while recharging, and show the uses left of an ability that has a count.
+- Known: on a siege wall, one man the deployment placed gets no path until his regiment has made one native move.
+
+## 2026-10-20
+
+- One man of a chariot unit drives one chariot.
+- The ability bar has pages, abilities and spells, on a key (T; MCT can change it). Passives take no slot.
+- A spell pressed twice overcasts, a third time cancels; the bar says why an overcast cannot go off.
+- Hidden and Unspottable show on the unit panel.
+- A ranged regiment aimed at an enemy unit fires at it.
+- Sprinting into an enemy charges it, for regiments and units of one; regiments no longer freeze while sprinting.
+- Large single entities keep their native charge clips; aiming poses use each projectile's gravity.
+- Input set-up no longer refuses an address layout only Windows gives (Wine/Proton, untested there), and says so when it
+  fails instead of reporting memreader Plus missing.
+
 ## 2026-10-19
 
 - Lords and monsters can't be hurt during jump attacks, charge attacks and blocks.
