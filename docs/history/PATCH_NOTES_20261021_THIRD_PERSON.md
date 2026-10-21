@@ -14,3 +14,7 @@ Steam change note for item 3822187184, build `b26a623e`. Casual tone, one line p
 [*] Still on it: on siege walls one man can't walk until his unit has moved once, so give them a move order before F2
 [/list]
 ```
+
+Uploaded 2026-10-21 09:05 Manila through the steamworks binding (`updateItem`, contentPath + changeNote only):
+Steam log `Uploaded new content ( ManifestID 6904358734782827152 )`, `Upload finished ... : OK`. Title and tags unchanged.
+Repo push `ad947b6`.
