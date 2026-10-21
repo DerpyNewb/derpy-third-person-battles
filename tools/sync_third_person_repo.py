@@ -45,6 +45,8 @@ TOOLS = [
     "third_person_cave.py",
     # the harness that runs the shipped modules, its tests and the preview's scene
     "third_person_harness.lua", "third_person_tests.lua", "third_person_hud_dump.lua",
+    # the two-machine lockstep simulation of multiplayer and its tests
+    "third_person_lockstep.lua", "third_person_lockstep_tests.lua",
     # audits
     "check_lua_api.py", "check_lua_literal_left.py",
     # the import closure of the above
@@ -59,7 +61,7 @@ TOOLS = [
 ]
 SPECS = ["2026-10-13-third-person-pack-design.md", "2026-10-14-third-person-hud-design.md"]
 # 2026-10-14-third-person-hud.md is left out: it names a Windows profile (a memory file path, line 46).
-PLANS = ["2026-10-13-third-person-pack-core.md"]
+PLANS = ["2026-10-13-third-person-pack-core.md", "2026-10-21-third-person-multiplayer.md"]
 HISTORY = ["HANDOFF_20261008_THIRD_PERSON_LORD_CONTROL.md", "HANDOFF_20261013_THIRD_PERSON_HELD_FIRE_MOUNTED_IDLE.md",
            "HANDOFF_20261013_THIRD_PERSON_PACK_LIVE.md", "HANDOFF_20261013_THIRD_PERSON_STEERING_COMMANDS.md",
            "HANDOFF_20261014_THIRD_PERSON_F2_STOP.md", "HANDOFF_20261016_THIRD_PERSON_FIXES.md",
@@ -68,7 +70,7 @@ HISTORY = ["HANDOFF_20261008_THIRD_PERSON_LORD_CONTROL.md", "HANDOFF_20261013_TH
            "SCOPE_20261019_THIRD_PERSON_UNIT_BARS.md", "PATCH_NOTES_20261018_THIRD_PERSON.md",
            "PATCH_NOTES_20261019_THIRD_PERSON.md",
            "PATCH_NOTES_20261020_THIRD_PERSON.md", "PATCH_NOTES_20261020_THIRD_PERSON_REPORT_FIXES.md",
-           "PATCH_NOTES_20261021_THIRD_PERSON.md"]
+           "PATCH_NOTES_20261021_THIRD_PERSON.md", "MP_FEASIBILITY_20261021_THIRD_PERSON.md"]
 # reference docs, at the same path in the repo
 REFERENCE = ["BATTLE_ENGINE_RE.md"]
 LEDGER = ".superpowers/sdd/2026-10-14-third-person-hud/progress.md"

@@ -2,6 +2,7 @@
 
     py tools/build_third_person.py --gen        write script/derpy_tp/data.lua from db.pack (RPFM may be shut)
     py tools/build_third_person.py --selftest   compile checks, the Lua harness, data.lua, the loc keys and the HUD files
+    py tools/build_third_person.py --check      only the loc keys: every E.say key has a row and every row is said
     py tools/build_third_person.py --bridge     write probes/zz_tp_load.lua, which loads the modules into a running battle
     py tools/build_third_person.py              selftest, then pack through RPFM (needs RPFM open) and read it back
 
@@ -24,6 +25,8 @@ LUA = r"C:\Program Files (x86)\Lua\5.1\lua.exe"
 LUAC = r"C:\Program Files (x86)\Lua\5.1\luac.exe"
 HARNESS = os.path.join(ROOT, "tools", "third_person_harness.lua")
 TESTS = os.path.join(ROOT, "tools", "third_person_tests.lua")
+# the two-machine lockstep simulation's tests (tools/third_person_lockstep.lua): same harness, own process
+LOCKSTEP_TESTS = os.path.join(ROOT, "tools", "third_person_lockstep_tests.lua")
 EXE = r"F:\SteamLibrary\steamapps\common\Total War WARHAMMER III\Warhammer3.exe"
 PACK = os.path.join(ROOT, "Modding Files", "Modpacks", "derpy_third_person.pack")
 BRIDGE_OUT = os.path.join(ROOT, "Modding Files", "source", "lord_control", "probes", "zz_tp_load.lua")
@@ -33,7 +36,7 @@ FRAG = "derpy_third_person"
 LOC = {
     "derpy_tp_needs_memreader": "Third-Person Battles needs the mod memreader Plus. Subscribe to it, then restart the game.",
     "derpy_tp_input_unavailable": "Third-Person Battles found memreader Plus but could not initialize keyboard and mouse input. The script log has the details.",
-    "derpy_tp_multiplayer": "Third-Person Battles is off in multiplayer battles and replays.",
+    "derpy_tp_multiplayer": "Third-Person Battles is off in replays. In multiplayer it needs an up-to-date memreader Plus and a supported game version on every machine; the script log has the details.",
     "derpy_tp_switched_off": "Third-Person Battles ran into three errors and is off until this battle ends. The script log has the details.",
 }
 
@@ -61,12 +64,16 @@ def pack_files():
 
 
 def run_harness(only=None):
-    cmd = [LUA, HARNESS, SRC.replace(os.sep, "/"), TESTS] + ([only] if only else [])
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    print(r.stdout, end="")
-    if r.stderr:
-        print(r.stderr, end="")
-    return r.returncode == 0
+    """Both test files, each in its own lua.exe; False when either fails."""
+    ok = True
+    for tests in (TESTS, LOCKSTEP_TESTS):
+        cmd = [LUA, HARNESS, SRC.replace(os.sep, "/"), tests] + ([only] if only else [])
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        print(r.stdout, end="")
+        if r.stderr:
+            print(r.stderr, end="")
+        ok = ok and r.returncode == 0
+    return ok
 
 
 def selftest(only=None):
@@ -535,12 +542,18 @@ def main(argv):
     if argv[:1] == ["--bridge"]:
         bridge(argv[1:])
         return 0
+    if argv[:1] == ["--check"]:
+        bad = check_loc()
+        for b in bad:
+            print("FINDING: %s" % b)
+        print("loc keys: %d shipped" % len(LOC) if not bad else "loc keys do not match the Lua")
+        return 1 if bad else 0
     if not argv:
         return pack()
     if argv[:1] == ["--gen"]:
         gen()
         return 0
-    raise SystemExit("usage: build_third_person.py --gen | --selftest [test] | --bridge | (no flag: pack)")
+    raise SystemExit("usage: build_third_person.py --gen | --selftest [test] | --check | --bridge | (no flag: pack)")
 
 
 if __name__ == "__main__":

@@ -2654,7 +2654,8 @@ HALL_ICON = {(g, t): "derpy_gg_hall_%s%s" % (g, t)
                        "_chs"]}
 # Races whose halls draw one icon PER LEVEL (2026-10-08, Medieval II-style: the building
 # grows with each upgrade), staged by make_guild_icons.py under the level's own key.
-HALL_LEVEL_ICON_TAGS = ("_emp", "_dwf", "", "_brt")
+# Empty since 2026-10-21: the author asked for CA's own building icons back on every race.
+HALL_LEVEL_ICON_TAGS = ()
 
 
 def hall_icon(guild, n, tag):
@@ -8348,11 +8349,9 @@ def selftest():
     assert by_lv["derpy_gg_hall_brass_2"]["primary_slot_building_building_level_requirement"] == "4"
     assert by_lv["derpy_gg_hall_brass_2"]["create_cost"] == "6000"
     var_icon = {r["building"]: r["icon"] for r in ht["building_culture_variants"]}
-    assert var_icon["derpy_gg_hall_khanate_2_emp"] == "derpy_gg_hall_khanate_2_emp", "per level"
-    assert var_icon["derpy_gg_hall_khanate_2_dwf"] == "derpy_gg_hall_khanate_2_dwf", "per level"
-    assert var_icon["derpy_gg_hall_khanate_2"] == "derpy_gg_hall_khanate_2", "per level"
-    assert var_icon["derpy_gg_hall_khanate_2_brt"] == "derpy_gg_hall_khanate_2_brt", "per level"
-    assert var_icon["derpy_gg_hall_khanate_2_cth"] == "derpy_gg_hall_khanate_cth", "per chain"
+    # Every race draws one CA icon per chain (2026-10-21).
+    for t in ("_emp", "_dwf", "", "_brt", "_cth"):
+        assert var_icon["derpy_gg_hall_khanate_2" + t] == "derpy_gg_hall_khanate" + t, "per chain"
     edges ={(r["from"], r["to"]) for r in ht["building_upgrades_junction"]}
     assert ("derpy_gg_hall_slavers_0", "derpy_gg_hall_slavers_1") in edges and len(edges) == 14 * len(HALL_TAGS)
     inst = {r["key"]: r["num_instances"] for r in ht["building_instances"]}

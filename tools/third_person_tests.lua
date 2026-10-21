@@ -27,6 +27,22 @@ T.settings_reads_mct = function()
 	check(settings_with({camera_shoulder = "top"}).shoulder == 0, "top: neither shoulder")
 end
 
+-- a player, 2026-10-21: "I bound F2 to another key in MCT, but at the start of every battle, I have to press F2 once
+-- first". In battle MCT reads its saved values on ScriptEventAllModsLoaded, after the entry has run, so at load every
+-- option is its default (groovy_mct mct:init, Registry:load); it says so with MctInitialized. Reproduced live that day
+T.settings_read_again_when_mct_loads = function()
+	local saved = {}
+	H.fresh({mct = saved}) -- the entry reads MCT before it has loaded: nothing saved yet
+	saved.key_toggle = "F3"
+	H.trigger("MctInitialized")
+	H.tap("F3") H.step(0.1)
+	check(H.E.F.on, "the rebound key turns it on with no F2 first")
+	H.tap("F3") H.step(0.1)
+	check(not H.E.F.on, "and off")
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.on, "F2 is no longer the toggle")
+end
+
 -- the author, 2026-10-15: "add camera customizations in the mct option, maybe add attack cooldown and other effects"
 T.settings_camera_and_combat_tuning = function()
 	local S = settings_with(nil)
@@ -488,7 +504,7 @@ T.mouse_turns_the_camera = function()
 	check(near(H.E.rig.yaw, yaw, 1e-3) and near(H.E.rig.pitch, pitch, 1e-3), "all of it soon after: 0.004 rad/px, "
 		.. H.E.rig.yaw .. ", " .. H.E.rig.pitch)
 	H.down("Middle mouse")
-	H.step(0.1)
+	H.step(0.4) -- past the lock-on click
 	check(not H.E.F.dragging, "the middle button frees the mouse")
 end
 
@@ -516,13 +532,92 @@ T.errors_switch_it_off_after_three = function()
 	check(H.logged("test: position() failed"), "the error is in the script log")
 end
 
-T.multiplayer_and_replays_do_nothing = function()
-	for _, opts in ipairs({{mp = true}, {replay = true}}) do
-		H.fresh(opts)
+T.replays_still_do_nothing = function()
+	H.fresh({replay = true})
+	H.tap("F2")
+	check(H.count("disable_orders") == 0, "nothing starts")
+end
+
+-- net mode on ONE machine, writing locally (H.net_unrouted): the platform a 6acec6f4 multiplayer battle has. It is set for
+-- fn only; the two-machine proof that it holds in step is tools/third_person_lockstep_tests.lua
+local function in_net_mode(fn)
+	H.net, H.net_unrouted = true, true
+	local ok, err = pcall(fn)
+	H.net, H.net_unrouted = nil, nil
+	if not ok then error(err, 0) end
+end
+
+local function told_multiplayer()
+	for _, s in ipairs(H.all("subtitle")) do if s[2] == "derpy_tp_multiplayer" then return true end end
+	return false
+end
+
+-- multiplayer on a build the mod can carry commands on (P.features.net): F2 starts it, as it does alone
+T.multiplayer_starts = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		check(H.P.features.net, "the platform is in net mode")
+		H.phase.Deployed()
 		H.tap("F2")
-		check(H.count("disable_orders") == 0, "nothing starts")
-		check(H.last("subtitle") and H.last("subtitle")[2] == "derpy_tp_multiplayer", "the player is told")
-	end
+		check(H.E.F.on, "F2 starts it")
+		check(H.count("disable_orders") >= 1 and H.last("disable_orders")[2] == true, "player orders off")
+		check(not told_multiplayer(), "and nobody is told it is off")
+	end)
+end
+
+-- before "Deployed" no machine has the fragment table its disarm reads: F2 waits, saying and logging nothing
+-- (the record's Ruling 20). A table that failed to build never sets P.net_ready, so it waits for the battle (the
+-- platform test of that is platform_net_a_copy_table_that_throws_leaves_net_play_off)
+T.multiplayer_waits_for_deployed = function()
+	in_net_mode(function()
+		H.fresh({mp = true, mct = {debug_log = true}})
+		local said, logged, calls = H.count("subtitle"), #H.log, #H.calls
+		H.tap("F2")
+		check(not H.E.F.on, "F2 before Deployed does nothing")
+		check(H.count("subtitle") == said and #H.log == logged, "nothing said, nothing logged: " .. tostring(H.log[#H.log]))
+		check(H.count("disable_orders") == 0 and H.count("uc:halt") == 0, "nothing changed in the battle")
+		check(#H.calls == calls, "no call at all")
+		H.phase.Deployed()
+		H.tap("F2")
+		check(H.E.F.on, "after Deployed it starts")
+	end)
+end
+
+-- any other build has no net mode (platform.lua features.net false): multiplayer is today's message and nothing starts
+T.another_build_keeps_mp_off = function()
+	H.fresh({mp = true, features = {input = true, anim = true, wheel = true, net = false}})
+	check(not H.P.features.net, "no net mode on this build")
+	H.tap("F2")
+	check(H.count("disable_orders") == 0 and not H.E.F.on, "nothing starts")
+	check(told_multiplayer(), "the player is told: " .. tostring(H.last("subtitle") and H.last("subtitle")[2]))
+end
+
+-- a replay of a multiplayer battle has net mode too; there is no player to play it
+T.a_replay_stays_off_in_net_mode = function()
+	in_net_mode(function()
+		H.fresh({mp = true, replay = true})
+		check(H.P.features.net, "the platform is in net mode")
+		H.tap("F2")
+		check(H.count("disable_orders") == 0 and not H.E.F.on, "nothing starts")
+		check(told_multiplayer(), "and F2 says it is off")
+	end)
+end
+
+-- the player is told only that multiplayer could not start; the platform's reason (P.problems) goes to the
+-- script log, once. A replay is off for its own reason and says nothing about multiplayer
+T.a_refused_multiplayer_says_why_in_the_log = function()
+	H.fresh({mp = true, problems = {"net: test: the carrier cave is refused"}})
+	check(not H.P.features.net, "no net mode")
+	check(H.logged("multiplayer is off: net: test: the carrier cave is refused"), "the cause is in the script log")
+	H.tap("F2")
+	check(told_multiplayer(), "and the player is still told it is off")
+	H.fresh({replay = true})
+	check(not H.logged("multiplayer is off"), "a replay of a single-player battle logs nothing about multiplayer")
+	in_net_mode(function()
+		H.fresh({mp = true, replay = true})
+		check(H.P.features.net, "the platform is in net mode")
+		check(not H.logged("multiplayer is off"), "a replay in net mode logs nothing about multiplayer")
+	end)
 end
 
 T.needs_memreader = function()
@@ -1409,7 +1504,7 @@ T.looking_hides_the_battle_interface = function()
 	local n = H.count("cinematic_ui")
 	H.step(0.5)
 	check(H.count("cinematic_ui") == n, "switched on change only, not every frame")
-	H.down("Middle mouse") H.step(0.1)
+	H.down("Middle mouse") H.step(0.4) -- past the lock-on click
 	c = H.last("cinematic_ui")
 	check(c[2] == false and c[3] == true, "the freed mouse brings the interface and cursor back")
 	H.up("Middle mouse") H.step(0.1)
@@ -2071,6 +2166,20 @@ T.a_swing_that_never_plays_gives_him_back_after_lock_max = function()
 	check(H.count("disarm") > n, "disarmed past LOCK_MAX")
 end
 
+-- in multiplayer the clip comes back P.net_delay later: kept armed for it that much longer (combat.lua late())
+T.a_swing_that_never_plays_waits_the_queue_delay_more_in_multiplayer = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.P.features.net = true
+	H.report_ms = 60000 -- never
+	H.tap("Left mouse")
+	H.step(2.9)
+	local n = H.count("disarm")
+	H.step(0.25)
+	check(H.count("disarm") == n, "still armed 3.15 s after the send")
+	H.step(0.3)
+	check(H.count("disarm") > n, "disarmed past LOCK_MAX and the delay")
+end
+
 -- the author, 2026-10-15: "the unit being controlled bugs out and will not respond if near an enemy". The recorder: W let
 -- go and pressed again 0.4 s later; the walk order went out and the engine kept him ordered to his own spot, idle, for as
 -- long as W was held. It drops an order within 0.5 s of the one before (the halt), and nothing sent it again
@@ -2274,6 +2383,563 @@ T.platform_pattern_route_reads_displacements_exactly = function()
 	check(mr.writes[1].addr == BASE + CMD, "the command carries its type")
 end
 
+-- the mailbox (tools/third_person_cave.py, whose --selftest runs the cave's bytes under an emulator): a code cave at the
+-- top of his update makes the stop's and the walk builder's calls on the battle thread, and the script only posts
+-- requests into its block. The carrier cave sits at the RELOAD_TIME float read (exe+2ecfcb7). memreader Plus's patcher,
+-- game_alloc, hook_info and read_original, as far as it uses them; a cave's bytes land in memory, so a second platform on
+-- the same fake (the next battle of the session) finds it
+local UPDATE_AT, UPDATE_START = 0x3086f04, {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x10}
+local CARRIER_AT, CARRIER_SITE = 0x2ecfcb7, {0xf3, 0x0f, 0x10, 0x44, 0x24, 0x30}
+local function with_plus(mr, put, BASE, site, csite)
+	for i, b in ipairs(site or UPDATE_START) do put(BASE + UPDATE_AT + i - 1, b, 1) end
+	for i, b in ipairs(csite or CARRIER_SITE) do put(BASE + CARRIER_AT + i - 1, b, 1) end
+	mr.caves, mr.cave_calls, mr.game_allocs = {}, {}, 0
+	local next_cave, next_block = BASE + 0x4f00000, BASE + 0x4e00000
+	function mr.read_original(p, o, n)
+		local t = {} for i = 0, n - 1 do t[#t + 1] = string.char(mr.read_uint8(p, o + i)) end return table.concat(t)
+	end
+	function mr.hook_info(p) local c = mr.caves[p.addr] return c and {kind = "cave", cave = c.at} end
+	function mr.game_alloc() mr.game_allocs = mr.game_allocs + 1 next_block = next_block + 0x1000 return mr.add(mr.base, next_block - BASE) end
+	function mr.patcher(owner)
+		return {cave = function(_, name, at, bytes)
+			mr.cave_calls[#mr.cave_calls + 1] = {owner = owner, name = name, at = at.addr, bytes = bytes}
+			if mr.refuse then return nil, mr.refuse end
+			local c = mr.caves[at.addr]
+			if c then
+				if c.bytes ~= bytes then return nil, "the name is already used for a different change" end
+				return c.at
+			end
+			next_cave = next_cave + 0x1000
+			for i = 1, #bytes do put(next_cave + i - 1, bytes:byte(i), 1) end
+			mr.caves[at.addr] = {bytes = bytes, at = mr.add(mr.base, next_cave - BASE)}
+			return mr.caves[at.addr].at
+		end}
+	end
+end
+
+-- the order gate (exe+3087378, platform.lua P.gate) and memreader's patch, which writes only over the bytes it expects: the
+-- net platform has the gate's code, because install_net puts the gate in at build. gate_platform, further down, tests the
+-- toggle itself. jump: the byte the branch holds, 0x5c the game's own and 0x52 the gate in; returns a reader of the image
+local GATE_AT = 0x3087378
+local GATE = {0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09, 0x44, 0x38, 0xbf, 0, 0x06, 0, 0, 0x75, 0x5c}
+local function with_patch(mr, put, BASE, jump)
+	for i, b in ipairs(GATE) do put(BASE + GATE_AT + i - 1, b, 1) end
+	if jump then put(BASE + GATE_AT + #GATE - 1, jump, 1) end
+	local function bytes(a, n) local s = {} for i = 0, n - 1 do s[#s + 1] = mr.read_uint8(mr.base, a - BASE + i) end return s end
+	mr.patches = {}
+	function mr.patch(p, expected, new)
+		mr.patches[#mr.patches + 1] = p.addr
+		local now = bytes(p.addr, #expected)
+		local function same(s) for i = 1, #s do if now[i] ~= s:byte(i) then return false end end return true end
+		if same(new) then return new end
+		if not same(expected) then return nil, "other bytes" end
+		for i = 1, #new do put(p.addr + i - 1, new:byte(i), 1) end
+		return expected
+	end
+	return bytes
+end
+
+-- multiplayer: the real platform on a 6acec6f4 image with a battle, its queue and the three registered command types, and
+-- a recording mr.call standing in for the exe. N.fail: the field write overflows (the writer's error byte at +0);
+-- N.throw: the registry lookup throws; N.csite: the bytes at the carrier cave's site; N.jump: the byte at the gate's
+-- branch (N.gate() reads it back); N.net_rules: stands in for M.net_rules, which install_net calls right after the gate
+-- went in
+local function net_platform(N)
+	N = N or {}
+	H.fresh()
+	H.ground = function() return 7 end
+	H.real_platform = true
+	local M = assert(loadfile("/script/derpy_tp/platform"))()
+	H.real_platform = false
+	if N.net_rules then M.net_rules = N.net_rules end
+	local mr, put, BASE = fake_image(0x6acec6f4)
+	mr.int32 = mr.uint8
+	local G, B, Q, E0 = BASE + 0x5000000, BASE + 0x5100000, BASE + 0x5200000, BASE + 0x5300000
+	put(BASE + 0x4480da0, G, 8) put(G + 0x468, B, 8) put(B + 0x644e8, Q, 8)
+	-- each type's id as its registration sets it, and its registry entry: the version at +0x10
+	local VER = {[0x406c798] = 0, [0x406cea8] = 0, [0x406cda4] = 1}
+	for g, ver in pairs(VER) do put(BASE + g, 0x200 + g % 0x100, 4) put(E0 + g % 0x1000 + 0x10, ver, 1) end
+	local calls = {}
+	function mr.call(f, _, ...)
+		local rva = f.addr - BASE
+		calls[#calls + 1] = {rva = rva, args = {...}}
+		if rva == 0x1bb1924 then -- the record as it was written: every push writes the one buffer
+			local a, cells = {...}, {}
+			for o = 0, a[4] - 1 do cells[o] = mr.wrote[a[3].addr + o] end
+			calls[#calls].cells = cells
+		end
+		if rva == 0x668ad4 then
+			if N.throw then error("test: the registry lookup threw") end
+			return mr.add(mr.base, 0x5300000 + ((...).addr - BASE) % 0x1000)
+		end
+		if rva == 0x303b744 then return 2 end -- his unit's speed for the gait
+		if rva == 0x1bca278 then put((...).addr, 0, 1) end -- the header starts the writer clean
+		if rva == 0x1bb1924 and N.fail then put((...).addr, 1, 1) end
+		return 1
+	end
+	with_plus(mr, put, BASE, nil, N.csite) -- the mailbox and carrier caves install on this fake, as in the real game
+	local bytes = with_patch(mr, put, BASE, N.jump)
+	function N.gate() return bytes(BASE + GATE_AT, #GATE)[#GATE] end
+	local told, seen = {}, {} -- the entry's E.once: once a tag
+	local P = M.build(mr, true, function(tag, text) if not seen[tag] then seen[tag] = true told[#told + 1] = tag .. ": " .. text end end)
+	N.M, N.P, N.mr, N.put, N.BASE, N.Q, N.calls, N.told = M, P, mr, put, BASE, Q, calls, told
+	-- a man at 0x6300000, id 1001, his unit's object at 0x6400000
+	N.man = BASE + 0x6300000
+	put(N.man + 0x258, 1001, 2) put(N.man + 0x2e8, BASE + 0x6400000, 8)
+	N.m = mr.add(mr.base, 0x6300000)
+	-- the record pushed by the last header, field, length triple: {type global, version, first tag, size, cells}
+	function N.record()
+		local n = #calls
+		local h, f, l = calls[n - 2], calls[n - 1], calls[n]
+		check(h.rva == 0x1bca278 and f.rva == 0x1bb1924 and l.rva == 0x1bcd5e4, "header, field, length")
+		check(h.args[2].addr == Q + 8 and h.args[1].addr == f.args[1].addr and l.args[1].addr == f.args[1].addr, "one writer, the queue's buffer")
+		return {g = h.args[3].addr - BASE, ver = h.args[4], tag = f.args[2], size = f.args[4], at = f.cells}
+	end
+	-- the FOLLOW command the last call pushed through CA's pusher, cell by cell
+	function N.follow()
+		local c = calls[#calls]
+		check(c.rva == 0x2d919dc and c.args[1].addr == Q, "FOLLOW through CA's pusher, into the queue")
+		local cmd = {}
+		for o = 0, 0x8c do cmd[o] = mr.wrote[c.args[2].addr + o] end
+		return cmd
+	end
+	-- the headers pushed since call n, by type global
+	function N.pushed(n, g)
+		local k = 0
+		for i = n + 1, #calls do if calls[i].rva == 0x1bca278 and calls[i].args[3].addr == BASE + g then k = k + 1 end end
+		return k
+	end
+	function N.tick() H.game_ms = H.game_ms + 100 end
+	return N
+end
+local function same(want, got, what)
+	for o, val in pairs(want) do check(got[o] == val, what .. " +" .. o .. ": " .. tostring(got[o]) .. ", not " .. tostring(val)) end
+end
+
+-- the real platform's MOVE, HALT, FOLLOW and carrier, record by record against the recipe in MP_FEASIBILITY_20261021_THIRD_PERSON.md
+-- (MP_FEASIBILITY_20261021_THIRD_PERSON.md, "O4, pushing one"; zz_tp_mp_override.lua forged the same live), and nothing
+-- written to the man himself
+T.platform_net_forges_the_recipe = function()
+	local N = net_platform()
+	local P, M, mr, BASE, m, man = N.P, N.M, N.mr, N.BASE, N.m, N.man
+	check(P.features.net, "net mode on 6acec6f4: " .. table.concat(P.problems, "; "))
+	check(P.net_delay == 0.2, "the provisional delay")
+	P.steer(m, 10, 20, true, 1.0, 1.5)
+	local r = N.record()
+	check(r.g == 0x406c798 and r.ver == 0 and r.tag == 0x23 and r.size == 37, "MOVE: its type, version 0, 37 bytes after the man's tag")
+	same({[0] = 1001, [2] = 0, [4] = 0x0c, [5] = 10, [9] = 7, [13] = 20, [17] = 0x26, [18] = 0, [22] = 0x27, [23] = 0,
+		[27] = 4, [28] = 1, [32] = 0x0a, [33] = 3}, r.at, "MOVE")
+	N.tick()
+	P.hold(m, 10, 20, 1.0)
+	r = N.record()
+	check(r.g == 0x406cea8 and r.ver == 0 and r.tag == 0x23 and r.size == 4 and r.at[0] == 1001 and r.at[2] == 0, "HALT: the man alone")
+	N.tick()
+	P.face(m, math.pi / 2)
+	local cmd = N.follow()
+	check(cmd[0].addr == BASE + 0x3ab25a8 and cmd[8].addr == man, "its vtable and the man")
+	same({[0x30] = 16384, [0x48] = 0, [0x78] = -1, [0x80] = 0x81, [0x84] = 0, [0x88] = 1.0}, cmd, "FOLLOW")
+	P.guard(m)
+	r = N.record()
+	local d = M.uncarrier(r.at[2], r.at[0])
+	check(r.g == 0x406cda4 and r.ver == 1 and r.tag == 0x0a and r.size == 4, "the carrier: RELOAD_TIME, version 1, one float")
+	check(d and d.op == "GUARD_ON" and d.id == 1001, "the word, low half first")
+	-- nothing written to him: no steering copies, no +0xb0
+	for a in pairs(mr.wrote) do check(a < man or a >= man + 0x1000, "a write to the man at +" .. (a - man)) end
+	-- an id past 16 bits: nothing sent, said once
+	N.put(man + 0x25a, 1, 2)
+	local n = #N.calls
+	P.disarm(m, true, false)
+	P.disarm(m, false, false)
+	check(#N.calls == n, "nothing pushed for him")
+	check(#N.told == 1 and N.told[1]:find("^carrier_id"), "said once: " .. table.concat(N.told, "; "))
+	-- any other build keeps today's message: no net mode
+	local P2 = M.build(fake_image(), true)
+	check(not P2.features.net and P2.problems[#P2.problems]:find("6ac6d907"), "6ac6d907 has no route")
+end
+
+-- a rider: MOVE, HALT, FOLLOW and the guard name his mount (record O2: a queued action on a rider is marked done at once,
+-- so a MOVE naming him moves nothing), the disarm both, and the clip whoever single player's P.play names
+T.platform_net_drives_a_rider_through_his_mount = function()
+	local N = net_platform()
+	local P, M, mr, BASE, m, man = N.P, N.M, N.mr, N.BASE, N.m, N.man
+	local horse = BASE + 0x6500000
+	N.put(man + 0x2e0, horse, 8)
+	N.put(horse + 0x258, 2002, 2) N.put(horse + 0x2e8, BASE + 0x6400000, 8)
+	P.steer(m, 10, 20, false, 1.0)
+	check(N.record().at[0] == 2002, "MOVE names the mount")
+	N.tick()
+	P.hold(m, 10, 20)
+	local r = N.record()
+	check(r.g == 0x406cea8 and r.at[0] == 2002, "HALT names the mount")
+	N.tick()
+	P.face(m, 1.0)
+	check(N.follow()[8].addr == horse, "FOLLOW names the mount")
+	P.guard(m)
+	local d = N.M.uncarrier(N.record().at[2], N.record().at[0])
+	check(d.op == "GUARD_ON" and d.id == 2002, "the guard names the mount")
+	local n = #N.calls
+	P.disarm(m, false, false)
+	local ids = {}
+	for i = n + 1, #N.calls do
+		local c = N.calls[i].cells
+		if c then ids[#ids + 1] = M.uncarrier(c[2], c[0]).id end
+	end
+	check(#ids == 2 and ids[1] == 2002 and ids[2] == 1001, "the disarm names the mount, then him")
+	check(P.check_anim(), "the battle reached")
+	N.tick()
+	P.play(m, 1941, 6)
+	local c = N.calls[#N.calls]
+	check(c.rva == 0x2e9b974 and mr.wrote[c.args[2].addr + 8].addr == man, "the clip names him, as single player's P.play does")
+end
+
+-- a push the writer flags (the record overflowed and was rewound) did not go: the guard and the hold are sent again,
+-- not marked sent for the session
+T.platform_net_resends_what_did_not_go = function()
+	local N = net_platform({fail = true})
+	local P, m = N.P, N.m
+	local n = #N.calls
+	P.guard(m)
+	P.hold(m, 10, 20)
+	check(N.pushed(n, 0x406cda4) == 1 and N.pushed(n, 0x406cea8) == 1, "pushed once each, and flagged")
+	N.fail = false
+	N.tick()
+	n = #N.calls
+	P.guard(m)
+	P.hold(m, 10, 20)
+	check(N.pushed(n, 0x406cda4) == 1 and N.pushed(n, 0x406cea8) == 1, "both sent again")
+	N.tick()
+	n = #N.calls
+	P.guard(m)
+	P.hold(m, 10, 20)
+	check(N.pushed(n, 0x406cda4) == 0 and N.pushed(n, 0x406cea8) == 0, "and, gone, not again")
+end
+
+-- a throw while net mode is set up is no net mode, never a lost load: the entry goes on to its multiplayer guard and
+-- the player is still told
+T.platform_net_setup_that_throws_is_no_net_mode = function()
+	local N = net_platform({throw = true})
+	check(N.P.features.input and not N.P.features.net, "input on, net mode off")
+	check(N.P.problems[#N.P.problems]:find("registry lookup threw"), "the throw is the problem: " .. tostring(N.P.problems[#N.P.problems]))
+	check(type(N.P.steer) == "function" and type(N.P.unguard) == "function", "the single-player platform stands")
+end
+
+-- the carrier cave and the copy table install in net mode: a second cave at the RELOAD_TIME float read, sharing the
+-- mailbox block, and the block's skip/map_lookup pointers written. The guard table scan (the update cave) and the carrier
+-- decode are the cave selftest's (tools/third_person_cave.py); here we check the Lua installs them and builds the table
+T.platform_net_installs_the_carrier_cave = function()
+	local N = net_platform()
+	local P, M, mr, BASE = N.P, N.M, N.mr, N.BASE
+	check(P.features.net, "net mode: " .. table.concat(P.problems, "; "))
+	-- two caves installed by derpy_tp: the mailbox (update) and the carrier, each at its site, sharing the block
+	local sites = {}
+	for _, c in ipairs(mr.cave_calls) do sites[c.name] = c.at - BASE end
+	check(sites.mailbox == 0x3086f04 and sites.carrier == 0x2ecfcb7, "both caves at their sites: " .. tostring(sites.carrier))
+	local block = P.mailbox.addr
+	check(mr.wrote[block + M.MB.skip].addr == BASE + 0x2ecfcc5, "the carrier skips the store at exe+2ecfcc5")
+	check(mr.wrote[block + M.MB.map_lookup].addr == BASE + 0x17aece4, "the map lookup pointer is written")
+	check(type(P.build_copy_table) == "function", "the copy-table builder is registered at Deployed")
+end
+
+-- a unit of the fake image for the copy-table tests: its object, its men (one per fragment) at obj + 0x2000 + i * 0x2000,
+-- each on fragment frags[i], and on a horse on fragment horse when given
+local function copy_unit(put, ud, obj, frags, horse)
+	put(ud + 8, obj, 8) put(obj + 0xa4, #frags, 4) put(obj + 0xa8, obj + 0x1000, 8)
+	for i, fr in ipairs(frags) do
+		local m = obj + 0x2000 + i * 0x2000
+		put(obj + 0x1000 + (i - 1) * 8, m, 8)
+		put(m + 0x308, fr, 8)
+		if horse then
+			local h = obj + 0x10000 + i * 0x2000
+			put(m + 0x2e0, h, 8) put(h + 0x308, horse, 8)
+		end
+	end
+	return {_addr = ud}
+end
+-- bm:alliances() over {{army units, ...}, ...}, one list per alliance, one army each. whose(): what an army's
+-- is_player_controlled answers
+local function copy_alliances(lists, whose)
+	return function()
+		local function army(units) return {is_player_controlled = whose,
+			units = function() return {count = function() return #units end, item = function(_, i) return units[i] end} end} end
+		return {count = function() return #lists end, item = function(_, i)
+			local a = army(lists[i])
+			return {armies = function() return {count = function() return 1 end, item = function() return a end} end} end}
+	end
+end
+
+-- every army's fragments, an AI army's too: what is_player_controlled means on each machine is unmeasured, and a fragment
+-- one machine left out desyncs the first DISARM naming it (the record's Ruling 16). And the guard table is the build's to
+-- clear, not this: a clear at Deployed runs beside the battle's threads (the record's Ruling 20)
+T.platform_net_builds_the_copy_table_for_every_army = function()
+	local N = net_platform()
+	local P, M, mr, put, BASE = N.P, N.M, N.mr, N.put, N.BASE
+	local block = P.mailbox.addr
+	-- a human unit of three men: two share fragment FA, one has FB; a human cavalry unit of two riders on horses that
+	-- share FH (P.mount, +0x2e0: DISARM names the horse's fragment too), the riders on FA and FC; and an AI army's unit
+	-- on FE
+	local FA, FB, FE, FH, FC = BASE + 0x6a00000, BASE + 0x6b00000, BASE + 0x6c00000, BASE + 0x6d00000, BASE + 0x6e00000
+	local human = copy_unit(put, BASE + 0x7000000, BASE + 0x7100000, {FA, FA, FB})
+	local cavalry = copy_unit(put, BASE + 0x7400000, BASE + 0x7500000, {FA, FC}, FH)
+	local ai = copy_unit(put, BASE + 0x7200000, BASE + 0x7300000, {FE})
+	-- no army is asked whose it is: the answer may differ machine to machine
+	local alliances = copy_alliances({{human, cavalry}, {ai}}, function() error("test: is_player_controlled asked") end)
+	-- the build runs beside the battle, which moves on 300 model ms while it does
+	bm.alliances = function(...) H.game_ms = H.game_ms + 300 return alliances(...) end
+	local touched, write = {}, mr.write
+	function mr.write(p, o, v)
+		local a = p.addr + o
+		if a >= block + M.MB.count and a < block + M.MB.count + 4 or a >= block + M.MB.guards and a < block + M.MB.size then
+			touched[#touched + 1] = string.format("+0x%x", a - block)
+		end
+		return write(p, o, v)
+	end
+	check(not P.net_ready, "net play waits for Deployed")
+	H.phase.Deployed()
+	mr.write = write
+	check(P.net_ready, "net play may start once the table is built: " .. table.concat(N.told, "; "))
+	check(#touched == 0, "the guard table is left alone at Deployed: " .. table.concat(touched, " "))
+	-- the fake mr writes to mr.wrote (what the code wrote), reads from mem; the net tests read mr.wrote. A value comes
+	-- back as a number, a pointer as its address
+	local function W(addr) local v = mr.wrote[addr] if type(v) == "table" then return v.addr end return v end
+	check(W(block + M.MB.nfrags) == 5, "five distinct fragments, deduped (FA three times, FB, FH twice, FC, FE), got "
+		.. tostring(W(block + M.MB.nfrags)))
+	local tab = W(block + M.MB.fragtab)
+	-- each row: orig then four copies, in the battle's order (alliance, army, unit, each man, then his horse); the copies
+	-- distinct and non-null, attacks removed. The AI army's FE is the last row
+	local want = {FA, FB, FH, FC, FE}
+	for i = 0, 4 do
+		local orig = W(tab + i * 0x28)
+		check(orig == want[i + 1], "row " .. i .. " is the " .. (i + 1) .. "th fragment met, in ipairs order")
+		for j = 1, 4 do
+			local c = W(tab + i * 0x28 + j * 8)
+			check(c ~= 0 and c ~= orig, "row " .. i .. " column " .. j .. " is a distinct copy")
+			check(W(c + 0x50 + 454 * 2) == 0xffff, "the copy has its attack slot removed")
+		end
+	end
+	-- how long it took in model time, said once (a peer still building drops the DISARMs it is sent)
+	check(#N.told == 1 and N.told[1]:find("^copy_table_ms: the fragment table took 300 model ms %(%d+ real ms%), 5 fragments$"),
+		"the build's time: " .. table.concat(N.told, "; "))
+end
+
+-- a table that throws (a unit with no object) leaves net play off for the battle, said once: a machine with no table
+-- drops every DISARM, so it never sends one (the record's Ruling 20)
+T.platform_net_a_copy_table_that_throws_leaves_net_play_off = function()
+	local N = net_platform()
+	bm.alliances = function() error("test: a unit with no object") end
+	H.phase.Deployed()
+	H.phase.Deployed()
+	check(not N.P.net_ready, "net play stays off")
+	check(#N.told == 2 and N.told[1]:find("^copy_table_ms: ") and N.told[2]:find("^copy_table: ")
+		and N.told[2]:find("a unit with no object", 1, true), "said once each, its time and the reason: " .. table.concat(N.told, "; "))
+end
+
+-- a unit the builder cannot read is left out of the table, not the whole table: every army is in it now, a
+-- reinforcement army off the field among them. A null object, and a read that faults (memreader turns a fault into a
+-- Lua error); both are the battle's state, so every machine leaves out the same units
+T.platform_net_an_unreadable_unit_is_left_out_of_the_copy_table = function()
+	local N = net_platform()
+	local P, M, mr, put, BASE = N.P, N.M, N.mr, N.put, N.BASE
+	local FA, FB, FE = BASE + 0x6a00000, BASE + 0x6b00000, BASE + 0x6c00000
+	local human = copy_unit(put, BASE + 0x7000000, BASE + 0x7100000, {FA, FA, FB})
+	local ai = copy_unit(put, BASE + 0x7200000, BASE + 0x7300000, {FE})
+	local no_object = {_addr = BASE + 0x7600000} -- nothing at +8: its object pointer is null
+	local unreadable = {} -- no address: reading it faults
+	bm.alliances = copy_alliances({{human}, {no_object, unreadable, ai}})
+	-- the null page faults, as in the game
+	local read_int32, read_pointer = mr.read_int32, mr.read_pointer
+	function mr.read_int32(p, o) if p.addr < 0x10000 then error("test: a read at a null object") end return read_int32(p, o) end
+	function mr.read_pointer(p, o) if p.addr < 0x10000 then error("test: a read at a null object") end return read_pointer(p, o) end
+	H.phase.Deployed()
+	check(P.net_ready, "net play on: " .. table.concat(N.told, "; "))
+	local n = mr.wrote[P.mailbox.addr + M.MB.nfrags]
+	check(n == 3, "the readable units' fragments, FA, FB and FE: " .. tostring(n))
+	check(#N.told == 1 and N.told[1]:find(", 3 fragments", 1, true), "only the time said: " .. table.concat(N.told, "; "))
+end
+
+-- the next battle in the process finds the last one's guard table: the build zeroes the 16 entries, count, nfrags and
+-- fragtab before that battle runs (check_mailbox), the only clear there is since the record's Ruling 20. A stale man
+-- pointer would stop a new model allocated at its address, on one machine
+T.platform_net_the_next_battle_starts_with_an_empty_guard_table = function()
+	local N = net_platform()
+	local M, mr, put = N.M, N.mr, N.put
+	local block = N.P.mailbox.addr
+	-- the last battle's: a man in every entry, a count, a copy table
+	for o = M.MB.guards, M.MB.size - 8, 8 do put(block + o, N.BASE + 0x6000000 + o, 8) end
+	put(block + M.MB.count, 16, 4) put(block + M.MB.nfrags, 9, 4) put(block + M.MB.fragtab, N.BASE + 0x6f00000, 8)
+	mr.wrote = {}
+	local P2 = M.build(mr, true, function() end)
+	check(P2.features.net and P2.mailbox.addr == block, "the next battle, the same block: " .. table.concat(P2.problems, "; "))
+	local left = {}
+	local function zeroed(o) if mr.wrote[block + o] ~= 0 then left[#left + 1] = string.format("+0x%x", o) end end
+	for o = M.MB.guards, M.MB.size - 4, 4 do zeroed(o) end
+	for _, o in ipairs({M.MB.count, M.MB.nfrags, M.MB.fragtab, M.MB.fragtab + 4}) do zeroed(o) end
+	check(#left == 0, "not zeroed at the build: " .. table.concat(left, " "))
+end
+
+-- the clip's ARM goes through the queue, ahead of the clip, and nothing is written to the man: his +0x308 written on
+-- the owner's machine alone gave him his swings there two ticks before every other machine, and a lasting melee desynced
+-- on the first click. Single player's unpoint is tested by his_own_swing_is_pushed_on_his_own_fragment
+T.platform_net_a_swing_arms_him_through_the_queue = function()
+	local N = net_platform()
+	local P, M, mr, put, BASE, m, man = N.P, N.M, N.mr, N.put, N.BASE, N.m, N.man
+	local FA = BASE + 0x6a00000
+	put(man + 0x308, FA, 8)
+	local obj = BASE + 0x7100000
+	put(BASE + 0x7000000 + 8, obj, 8) put(obj + 0xa4, 1, 4) put(obj + 0xa8, obj + 0x1000, 8) put(obj + 0x1000, man, 8)
+	bm.alliances = copy_alliances({{{_addr = BASE + 0x7000000}}})
+	P.build_copy_table()
+	local copy = mr.wrote[mr.wrote[P.mailbox.addr + M.MB.fragtab].addr + 8].addr
+	check(P.check_anim(), "the battle reached")
+	P.disarm(m, false, false) -- a DISARM carrier: the cave points him at the copy on every machine
+	put(man + 0x308, copy, 8) -- as the cave would
+	local n = #N.calls
+	check(P.play(m, 454, 6), "the swing is pushed")
+	check(mr.wrote[man + 0x308] == nil, "nothing written to his fragment pointer")
+	local arm, clip
+	for i = n + 1, #N.calls do
+		local c = N.calls[i]
+		if c.rva == 0x1bca278 and c.args[3].addr == BASE + 0x406cda4 then
+			local d = M.uncarrier(N.calls[i + 1].cells[2], N.calls[i + 1].cells[0])
+			if d and d.op == "ARM" and d.id == 1001 then arm = arm or i end
+		end
+		if c.rva == 0x2e9b974 then clip = clip or i end
+	end
+	check(arm and clip and arm < clip, "a RELOAD_TIME carrying ARM, then the clip: " .. tostring(arm) .. ", " .. tostring(clip))
+	-- main.lua arms him that frame too (F.lock): no second ARM
+	n = #N.calls
+	P.arm(m)
+	check(N.pushed(n, 0x406cda4) == 0, "no second ARM in the frame")
+end
+
+-- GUARD_OFF goes by the id GUARD_ON went with, read off nothing: the man may be dead, his model freed. Once only
+T.platform_net_unguard_goes_by_the_id_it_guarded_with = function()
+	local N = net_platform()
+	local P, M, m, man = N.P, N.M, N.m, N.man
+	P.guard(m)
+	N.put(man + 0x258, 4321, 2) -- his model's memory reused: whatever is there now is not his
+	local n = #N.calls
+	P.unguard()
+	check(N.pushed(n, 0x406cda4) == 1, "one GUARD_OFF")
+	local d = M.uncarrier(N.record().at[2], N.record().at[0])
+	check(d and d.op == "GUARD_OFF" and d.id == 1001, "by the id he was guarded with: " .. tostring(d and d.id))
+	n = #N.calls
+	P.unguard()
+	check(N.pushed(n, 0x406cda4) == 0, "not twice")
+end
+
+-- the carrier cave stays in for the session, so the next battle's check_mailbox clears the block under it: a zero on a
+-- field a cave calls or jumps through (M.FUNCS) is a jmp 0 or call 0 the moment a carrier arrives. And install_net
+-- writes the carrier's two pointers before it asks for the cave
+T.platform_net_next_battle_never_zeroes_a_pointer_a_cave_goes_through = function()
+	local N = net_platform()
+	local M, mr, BASE = N.M, N.mr, N.BASE
+	local block = N.P.mailbox.addr
+	local zeros, write = {}, mr.write
+	function mr.write(p, o, v)
+		if p.addr == block and v == 0 then zeros[#zeros + 1] = o end
+		return write(p, o, v)
+	end
+	local patcher, at_cave = mr.patcher, nil
+	function mr.patcher(owner)
+		local pt = patcher(owner)
+		local cave = pt.cave
+		pt.cave = function(self, name, a, bytes)
+			if name == "carrier" then at_cave = {mr.wrote[block + M.MB.skip], mr.wrote[block + M.MB.map_lookup]} end
+			return cave(self, name, a, bytes)
+		end
+		return pt
+	end
+	mr.wrote = {}
+	local P2 = M.build(mr, true, function() end)
+	check(P2.features.net and P2.mailbox.addr == block, "the next battle: the same block, net mode: " .. table.concat(P2.problems, "; "))
+	check(#zeros > 0, "the next battle's check_mailbox cleared the block")
+	local bad = {}
+	for _, k in ipairs(M.FUNCS) do
+		for _, o in ipairs(zeros) do
+			if o < M.MB[k] + 8 and o + 4 > M.MB[k] then bad[#bad + 1] = string.format("a zero at +0x%x lands on %s", o, k) end
+		end
+	end
+	local skip, map = at_cave and at_cave[1], at_cave and at_cave[2]
+	if not (type(skip) == "table" and skip.addr == BASE + 0x2ecfcc5 and type(map) == "table" and map.addr == BASE + 0x17aece4) then
+		bad[#bad + 1] = "skip and map_lookup are not in before the carrier cave is asked for"
+	end
+	check(#bad == 0, table.concat(bad, "; "))
+end
+
+-- the carrier cave is put in (or refused) before any single-player function is swapped for its net one: a refusal is no
+-- net mode with single player's steer still in place, never a half-swapped platform
+T.platform_net_a_refused_carrier_cave_leaves_single_player_standing = function()
+	local N = net_platform({csite = {0xe9, 0, 0, 0, 0, 0x90}})
+	local P = N.P
+	check(not P.features.net, "no net mode")
+	check(table.concat(P.problems, "; "):find("RELOAD_TIME", 1, true), "the reason is kept: " .. table.concat(P.problems, "; "))
+	local n = #N.calls
+	P.steer(N.m, 10, 20, true, 1.0, 1.5)
+	check(N.pushed(n, 0x406c798) == 0, "steer is single player's: no MOVE pushed")
+end
+
+-- the order gate changes the simulation: a man's queued action beats the order his regiment gives him each tick of a melee
+-- (measured live, the record's "The overrides, live"). In a lockstep battle every machine has it from the first tick and
+-- keeps it to the end, so install_net puts it in at build; main.lua leaves it alone in net mode (the lockstep tests)
+T.platform_net_puts_the_gate_in_at_build = function()
+	local N = net_platform()
+	check(N.P.features.net, "net mode: " .. table.concat(N.P.problems, "; "))
+	check(N.gate() == 0x52, "in at build: his action update, got " .. string.format("%x", N.gate()))
+	-- a new game process has the game's own branch; the next battle's build puts it in again
+	N.put(N.BASE + GATE_AT + #GATE - 1, 0x5c, 1)
+	local P2 = N.M.build(N.mr, true, function() end)
+	check(P2.features.net and N.gate() == 0x52, "and the next battle's build: " .. string.format("%x", N.gate()))
+end
+
+-- a second multiplayer battle in the same game process: nothing takes the gate out at Complete, so the first battle left the
+-- game's branch at 0x52 and the next build finds it in. It must come out and go in again, with net mode on and no refusal;
+-- and the build must not lean on memreader's patch accepting bytes that are already the new ones. The real patch is
+-- documented as accepting them (BATTLE_ENGINE_RE.md section 9); the strict patch below is a stand-in that refuses them,
+-- so only the build's own P.gate(false) lets the third battle in
+T.platform_net_a_second_battle_in_the_same_process_keeps_net_mode = function()
+	local N = net_platform()
+	check(N.gate() == 0x52, "the first battle left the gate in")
+	local P2 = N.M.build(N.mr, true, function() end)
+	check(P2.features.net, "net mode: " .. table.concat(P2.problems, "; "))
+	check(#P2.problems == 0, "no refusal: " .. table.concat(P2.problems, "; "))
+	check(N.gate() == 0x52, "and the gate is in: " .. string.format("%x", N.gate()))
+	local patch = N.mr.patch
+	function N.mr.patch(p, expected, new)
+		if N.gate() == new:byte(#new) then return nil, "other bytes" end
+		return patch(p, expected, new)
+	end
+	local P3 = N.M.build(N.mr, true, function() end)
+	check(P3.features.net, "a third battle, with a patch that refuses bytes already new: " .. table.concat(P3.problems, "; "))
+	check(N.gate() == 0x52, "and the gate is in: " .. string.format("%x", N.gate()))
+end
+
+-- code the gate does not know: a machine without it would reset a melee MOVE that the others run, so there is no net mode
+-- there. Nothing is written over that code and single player's steer stays in place
+T.platform_net_without_the_gate_is_no_net_mode = function()
+	local N = net_platform({jump = 0x33})
+	check(not N.P.features.net, "no net mode")
+	check(table.concat(N.P.problems, "; "):find("gate", 1, true), "the reason is kept: " .. table.concat(N.P.problems, "; "))
+	check(N.gate() == 0x33, "nothing written over code it does not know")
+	local n = #N.calls
+	N.P.steer(N.m, 10, 20, true, 1.0, 1.5)
+	check(N.pushed(n, 0x406c798) == 0, "steer is single player's: no MOVE pushed")
+end
+
+-- a refusal after the gate went in (here the rules, which install_net builds right after it, throw) leaves the gate out
+-- again: a machine whose mod is off keeps none, since it would reset a melee MOVE that the peers run. A refusal before the
+-- gate touches nothing of it
+T.a_refused_net_build_takes_the_gate_out = function()
+	local O = {}
+	O.net_rules = function() O.in_at_refusal = O.gate() error("test: the rules threw") end
+	local N = net_platform(O)
+	check(O.in_at_refusal == 0x52, "the gate was in when the refusal came: " .. tostring(O.in_at_refusal))
+	check(not N.P.features.net, "no net mode")
+	check(table.concat(N.P.problems, "; "):find("the rules threw", 1, true), "the reason is kept: " .. table.concat(N.P.problems, "; "))
+	check(N.gate() == 0x5c, "the gate is out again: " .. string.format("%x", N.gate()))
+	local C = net_platform({csite = {0xe9, 0, 0, 0, 0, 0x90}})
+	check(not C.P.features.net and C.gate() == 0x5c, "a refusal before the gate leaves the game's branch: " .. string.format("%x", C.gate()))
+end
+
 local function real_platform()
 	H.real_platform = true
 	local M = assert(loadfile("/script/derpy_tp/platform"))()
@@ -2399,37 +3065,6 @@ T.steering_leaves_the_aim_point_alone = function()
 		check(mr.wrote[m.addr + 0x1e0] == -37.5 and mr.wrote[m.addr + 0x1e8] == 294.8, "the steering point")
 		check(mr.wrote[m.addr + 0x194] == -37.5 and mr.wrote[m.addr + 0x198] == 294.8, "its copy")
 		check(mr.wrote[m.addr + 0x368] == nil and mr.wrote[m.addr + 0x370] == nil, "non-walk command untouched")
-	end
-end
-
--- the mailbox (tools/third_person_cave.py, whose --selftest runs the cave's bytes under an emulator): a code cave at the
--- top of his update makes the stop's and the walk builder's calls on the battle thread, and the script only posts
--- requests into its block. memreader Plus's patcher, game_alloc, hook_info and read_original, as far as it uses them; a
--- cave's bytes land in memory, so a second platform on the same fake (the next battle of the session) finds it
-local UPDATE_AT, UPDATE_START = 0x3086f04, {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x10}
-local function with_plus(mr, put, BASE, site)
-	for i, b in ipairs(site or UPDATE_START) do put(BASE + UPDATE_AT + i - 1, b, 1) end
-	mr.caves, mr.cave_calls, mr.game_allocs = {}, {}, 0
-	local next_cave, next_block = BASE + 0x4f00000, BASE + 0x4e00000
-	function mr.read_original(p, o, n)
-		local t = {} for i = 0, n - 1 do t[#t + 1] = string.char(mr.read_uint8(p, o + i)) end return table.concat(t)
-	end
-	function mr.hook_info(p) local c = mr.caves[p.addr] return c and {kind = "cave", cave = c.at} end
-	function mr.game_alloc() mr.game_allocs = mr.game_allocs + 1 next_block = next_block + 0x1000 return mr.add(mr.base, next_block - BASE) end
-	function mr.patcher(owner)
-		return {cave = function(_, name, at, bytes)
-			mr.cave_calls[#mr.cave_calls + 1] = {owner = owner, name = name, at = at.addr, bytes = bytes}
-			if mr.refuse then return nil, mr.refuse end
-			local c = mr.caves[at.addr]
-			if c then
-				if c.bytes ~= bytes then return nil, "the name is already used for a different change" end
-				return c.at
-			end
-			next_cave = next_cave + 0x1000
-			for i = 1, #bytes do put(next_cave + i - 1, bytes:byte(i), 1) end
-			mr.caves[at.addr] = {bytes = bytes, at = mr.add(mr.base, next_cave - BASE)}
-			return mr.caves[at.addr].at
-		end}
 	end
 end
 
@@ -2738,8 +3373,6 @@ end
 -- probes/zz_tp_melee_spam.lua, Teutogen Guard under two units, a click every 2.4 s): his update (exe+3086f04) resets a
 -- queued action on a tick an order reached him, 4 and 0 of 10 swings started; its jump at exe+3087388 sent to his
 -- action update instead, 10 and 10. memreader's patch writes only over the bytes it expects
-local GATE_AT = 0x3087378
-local GATE = {0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09, 0x44, 0x38, 0xbf, 0, 0x06, 0, 0, 0x75, 0x5c}
 -- the camera's raycast height (exe+2ee841c) and the terrain's (exe+2ec2710), and the raycast's first five bytes
 local FLOOR_AT, FLOOR_TO, PROLOGUE = 0x2ee841c, 0x2ec2710, {0x48, 0x8b, 0xc4, 0x48, 0x89}
 local function gate_platform(jump, stamp, floor)
@@ -2747,20 +3380,8 @@ local function gate_platform(jump, stamp, floor)
 	local M = assert(loadfile("/script/derpy_tp/platform"))()
 	H.real_platform = false
 	local mr, put, BASE = fake_image(stamp or 0x6acec6f4)
-	for i, b in ipairs(GATE) do put(BASE + GATE_AT + i - 1, b, 1) end
-	if jump then put(BASE + GATE_AT + #GATE - 1, jump, 1) end
+	local bytes = with_patch(mr, put, BASE, jump)
 	for i, b in ipairs(floor or PROLOGUE) do put(BASE + FLOOR_AT + i - 1, b, 1) end
-	local function bytes(a, n) local s = {} for i = 0, n - 1 do s[#s + 1] = mr.read_uint8(mr.base, a - BASE + i) end return s end
-	mr.patches = {}
-	function mr.patch(p, expected, new)
-		mr.patches[#mr.patches + 1] = p.addr
-		local now = bytes(p.addr, #expected)
-		local function same(s) for i = 1, #s do if now[i] ~= s:byte(i) then return false end end return true end
-		if same(new) then return new end
-		if not same(expected) then return nil, "other bytes" end
-		for i = 1, #new do put(p.addr + i - 1, new:byte(i), 1) end
-		return expected
-	end
 	return M.build(mr), mr, BASE, function() return bytes(BASE + GATE_AT, #GATE) end,
 		function() return bytes(BASE + FLOOR_AT, #PROLOGUE) end
 end
@@ -3192,12 +3813,6 @@ T.a_context_read_that_gives_nothing_hides_its_part = function()
 	t.IconPath = nil
 	hud_on({cco = t})
 	check(not hud_part("portrait"):Visible() and H.logged("HUD part portrait is off"), "no card path: the portrait hides")
-end
-
-T.no_hud_in_multiplayer = function()
-	H.fresh({mp = true})
-	H.tap("F2")
-	check(not find_uicomponent(H.root, "derpy_tp_hud"), "no panel in multiplayer")
 end
 
 T.the_health_bar_follows_hitpoints = function()
@@ -4926,7 +5541,7 @@ T.p_hides_all_the_interface_even_paused = function()
 	H.paused = true
 	H.tap("P") H.step(0.1)
 	check(not hud:Visible() and not crosshair_up(), "P, paused: both hidden")
-	H.down("Middle mouse") H.step(0.1)
+	H.down("Middle mouse") H.step(0.4) -- past the lock-on click
 	local c = H.last("cinematic_ui")
 	check(c[2] == true and c[3] == true, "the freed mouse shows the cursor, not CA's interface")
 	H.up("Middle mouse") H.step(0.1)
@@ -5585,6 +6200,17 @@ T.a_shot_whose_clip_never_plays_gives_up = function()
 	local steers = H.count("steer")
 	H.down("W") H.step(0.6) H.up("W")
 	check(H.count("steer") > steers, "and he walks again")
+end
+
+-- in multiplayer a shot's clip may land P.net_delay later: the shot waits that much longer before giving up
+T.a_shot_waits_the_queue_delay_more_in_multiplayer = function()
+	crossbowmen()
+	H.E.P.features.net = true
+	H.report_ms = 5000
+	H.tap("Left mouse") H.step(1.1)
+	check(H.E.F.shot ~= nil, "still waiting 1.1 s after the send")
+	H.step(0.2)
+	check(H.E.F.shot == nil, "given up past LOCK_WAIT and the delay")
 end
 
 -- an action drops a shot under way: a jump in the raise does not fire the old shot after it lands
@@ -7172,6 +7798,154 @@ T.a_slot_shows_the_uses_its_ability_has_left = function()
 	check(not hud_part("slot_2_uses"):Visible() and not hud_part("slot_2_usesplate"):Visible(), "no count: nothing")
 	H.cco["BattleAbilityList.At(0).RemainingUses"] = 1 H.step(0.3)
 	check(hud_part("slot_1_uses").text == "1", "spent one: " .. tostring(hud_part("slot_1_uses").text))
+end
+
+-- a player, 2026-10-21: "a lock-on feature so that we can target and attack small-sized enemy lords and heroes within a
+-- crowd"; the author: "maybe middle mouse button click? configurable using mct", then "the lock-in should be a smooth
+-- pan and not strictly on the model or target". A hero 18 deg right behind a regiment straight ahead
+local function locked_on(o)
+	H.fresh({units = {o or {general = true, men = 1}}, enemies = {{x = 0, z = 15, men = 20}, {x = 10, z = 30, men = 1}}})
+	H.tap("F2") H.step(0.6)
+	H.tap("Middle mouse")
+	return H.enemies[2], math.atan2(10, 30)
+end
+
+T.the_lock_on_shares_the_middle_button_with_the_free_mouse = function()
+	local S = settings_with(nil)
+	check(S.keys.lock == 0x04 and S.keys.look_free == 0x04, "both on the middle button")
+	check(#S.conflicts == 0, "no conflict: " .. #S.conflicts)
+	S = settings_with({key_lock = "Q"})
+	check(S.keys.lock == 0x51 and S.keys.look_free == 0x04, "moved in MCT: " .. tostring(S.keys.lock))
+end
+
+T.a_lock_on_click_takes_the_hero_over_the_regiment_in_front = function()
+	local hero = locked_on()
+	check(H.E.F.target == hero, "the hero: " .. tostring(H.E.F.target and H.E.F.target:unique_ui_id()))
+	local hl = H.last("uc:highlight")
+	check(hl and hl[2] == hero._id and hl[3] == true, "marked under him with the guide off")
+end
+
+T.the_lock_on_pans_smoothly_and_stops_short_of_him = function()
+	local _, at = locked_on()
+	local R = H.E.rig
+	check(R.yaw > 0 and R.yaw < at - math.rad(12) - 0.01, "a frame on, part way: " .. math.deg(R.yaw))
+	H.step(3)
+	check(near(R.yaw, at - math.rad(12), 0.01), "settled at the slack's edge, not on him: " .. math.deg(R.yaw))
+	-- the mouse still turns the view; the pan brings it back
+	H.mouse = {-100, 0} H.step(1 / 60) H.step(0.1)
+	check(R.yaw < at - math.rad(12) - 0.1, "the mouse turned it away: " .. math.deg(R.yaw))
+	H.step(3)
+	check(near(R.yaw, at - math.rad(12), 0.01), "and back to the edge: " .. math.deg(R.yaw))
+	H.mouse = {60, 0} H.step(3) -- inside the slack: left where the mouse put it
+	check(R.yaw > at - math.rad(12) + 0.1, "inside the slack, no pull: " .. math.deg(R.yaw))
+end
+
+T.a_held_middle_button_frees_the_mouse_and_locks_nothing = function()
+	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 10, z = 30, men = 1}}})
+	H.tap("F2") H.step(0.6)
+	H.down("Middle mouse") H.step(0.5)
+	check(not H.E.F.dragging, "the mouse is free while held")
+	H.up("Middle mouse") H.step(0.1)
+	check(H.E.F.target == nil, "a hold is no click")
+end
+
+-- the author, 2026-10-21: "the cursor keep popping off and its inconsistent in disappearing when using the middle mouse
+-- button" - each click freed the mouse for its frames, and CA's interface faded in and out with the cursor
+T.a_lock_on_click_never_shows_the_cursor = function()
+	H.fresh({units = {{general = true, men = 1}}, enemies = {{x = 10, z = 30, men = 1}}})
+	H.tap("F2") H.step(0.6)
+	local ui = H.count("cinematic_ui")
+	H.down("Middle mouse")
+	for _ = 1, 12 do H.step(1 / 60) check(H.E.F.dragging, "the mouse stays parked through the click") end
+	H.up("Middle mouse") H.step(0.1)
+	check(H.E.F.target ~= nil, "the click locked on")
+	check(H.count("cinematic_ui") == ui, "the cursor never shown: " .. H.count("cinematic_ui") - ui .. " switches")
+end
+
+-- measured live 2026-10-21 (GetCursorInfo, real clicks): two frames after a middle-button release the game shows its
+-- cursor itself, and no cinematic UI call hides it again; SetCursor(NULL) does. So every parked frame hides it, and a
+-- freed mouse never
+T.a_parked_mouse_hides_the_cursor_every_frame = function()
+	H.fresh({units = {{general = true, men = 1}}})
+	H.tap("F2") H.step(0.5)
+	local n = H.count("hide_cursor")
+	H.step(0.5)
+	check(H.count("hide_cursor") - n >= 25, "each frame while looking: " .. H.count("hide_cursor") - n)
+	H.down("Middle mouse") H.step(0.4)
+	n = H.count("hide_cursor")
+	H.step(0.3)
+	check(H.count("hide_cursor") == n, "none while the mouse is free")
+	H.up("Middle mouse") H.focus = false H.step(0.3)
+	check(H.count("hide_cursor") == n, "none with the game in the background")
+end
+
+T.the_lock_on_lets_go_on_a_second_click_or_his_death = function()
+	locked_on()
+	H.tap("Middle mouse")
+	check(H.E.F.target == nil, "a second click")
+	local hero = locked_on()
+	check(H.E.F.target == hero, "locked again")
+	hero._models[1].alive = false H.step(0.6)
+	check(H.E.F.target == nil, "dead, let go")
+	local hl = H.last("uc:highlight")
+	check(hl and hl[2] == hero._id and hl[3] == false, "and his marker off")
+end
+
+T.a_locked_swing_faces_him_not_the_crosshair = function()
+	local _, at = locked_on()
+	H.step(3)
+	H.tap("Left mouse")
+	check(H.E.F.lock and near(H.E.F.lock.yaw, at, 0.01), "the swing's facing: " .. tostring(H.E.F.lock and math.deg(H.E.F.lock.yaw)))
+end
+
+T.a_locked_shooter_attacks_him_not_the_unit_on_the_crosshair = function()
+	local hero = locked_on({general = true, type = "wh_test_ranged_lord", men = 1, range = 160, ammo = 30})
+	set_view(0, math.rad(3)) H.step(1 / 60) -- the crosshair back on the regiment
+	H.down("Left mouse") H.step(3) H.up("Left mouse")
+	local a = H.all("uc:attack_unit")
+	check(#a >= 1 and a[1][3] == hero, "the order on the hero: " .. #a)
+end
+
+T.the_carrier_round_trips = function()
+	local M = H.platform_module()
+	for _, c in ipairs({{"GUARD_ON", 1}, {"GUARD_OFF", 65535}, {"DISARM", 4265, {shots = true, charge = true}},
+		{"DISARM", 7, {shots = false, charge = true}}, {"ARM", 0}}) do
+		local d = M.uncarrier(M.carrier(c[1], c[2], c[3]))
+		check(d and d.op == c[1] and d.id == c[2], c[1] .. " " .. c[2])
+		check(d.shots == (c[3] and c[3].shots or false) and d.charge == (c[3] and c[3].charge or false), "flags")
+	end
+end
+
+-- the cave decodes these bits: a round trip alone would pass a layout the cave does not read
+T.the_carrier_word_layout_is_the_caves = function()
+	local M = H.platform_module()
+	local function is(hi, lo, op, id, flags)
+		local h, l = M.carrier(op, id, flags)
+		check(h == hi and l == lo, string.format("%s: %X %X", op, h, l))
+	end
+	is(0xD710, 1, "GUARD_ON", 1)
+	is(0xD720, 65535, "GUARD_OFF", 65535)
+	is(0xD733, 4265, "DISARM", 4265, {shots = true, charge = true})
+	is(0xD732, 7, "DISARM", 7, {charge = true})
+	is(0xD740, 0, "ARM", 0)
+	is(0xD750, 9, "HELLO", 9)
+	for hi = 0, 0xFFFF do -- fed arbitrary floats' bits: never an error, a table only under the magic
+		local d = M.uncarrier(hi, 0xFFFF)
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X", hi))
+	end
+end
+
+T.vanilla_reload_times_are_not_carriers = function()
+	local M = H.platform_module()
+	check(M.uncarrier(0x3E4C, 0xCCCD) == nil, "0.2")
+	check(M.uncarrier(0xBF80, 0x0000) == nil, "-1.0")
+end
+
+T.an_id_past_16_bits_is_refused = function()
+	local M = H.platform_module()
+	check(pcall(M.carrier, "GUARD_ON", 65535), "the last id that fits is accepted") -- a nil carrier would also "refuse" below
+	check(not pcall(M.carrier, "GUARD_ON", 65536), "refused, never wrapped onto another man")
+	check(not pcall(M.carrier, "GUARD_ON", -1), "a negative id is refused too")
 end
 
 return T

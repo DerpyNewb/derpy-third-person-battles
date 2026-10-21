@@ -425,11 +425,13 @@ return function(E)
 	end
 	local function unmark() for _, m in pairs(marked) do if m.on then m.on = false m.uc:highlight(false) m.uc:release_control() end end end
 
-	local guide_was = false
+	local guide_was, target_was = false, nil
 	local function bars(now)
-		-- the guide key answers at once, not at the next refresh
-		if now < bars_at and (F.guide or false) == guide_was then return end
-		bars_at, guide_was = now + BARS_EVERY, F.guide or false
+		-- the guide key and the lock-on answer at once, not at the next refresh; the locked enemy is marked with the
+		-- guide off too (combat.lua C.target)
+		local target = F.target and F.target:unique_ui_id()
+		if now < bars_at and (F.guide or false) == guide_was and target == target_was then return end
+		bars_at, guide_was, target_was = now + BARS_EVERY, F.guide or false, target
 		local holder = E.S.bars and part("bars")
 		if E.S.bars and not holder then error("no unit bar holder in the panel") end
 		local made, seen = 0, {}
@@ -441,7 +443,9 @@ return function(E)
 		local reach = E.S.bars_range >= 1000 and math.huge or E.S.bars_range * E.S.bars_range
 		each_unit(function(u, enemy)
 			local alive = u:number_of_men_alive() > 0
-			if not u:is_player_controlled() then mark(u, guide_was and alive and (not enemy or u:is_valid_target())) end
+			if not u:is_player_controlled() then
+				mark(u, (guide_was or u:unique_ui_id() == target) and alive and (not enemy or u:is_valid_target()))
+			end
 			if not holder then return end
 			local id = tostring(u:unique_ui_id())
 			seen[id] = true

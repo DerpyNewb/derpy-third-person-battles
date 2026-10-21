@@ -18,3 +18,16 @@ Steam change note for item 3822187184, build `b26a623e`. Casual tone, one line p
 Uploaded 2026-10-21 09:05 Manila through the steamworks binding (`updateItem`, contentPath + changeNote only):
 Steam log `Uploaded new content ( ManifestID 6904358734782827152 )`, `Upload finished ... : OK`. Title and tags unchanged.
 Repo push `ad947b6`.
+
+## Second update, build `85c03b3b`
+
+```
+[list]
+[*] Rebinding the third person key in MCT works right away now, no more pressing F2 once at the start of every battle
+[/list]
+```
+
+Uploaded 2026-10-21 12:25 Manila, same route (`updateItem`, contentPath + changeNote only, folder = pack + preview):
+Steam log `Uploaded new content ( ManifestID 9146204254954982259 )`, `Upload finished ... : OK`.
+`GetPublishedFileDetails`: file_size 2552909 (pack 1583924 + preview 968985), time_updated 04:25:26 UTC, title, tags
+and visibility unchanged. Public repo not synced.

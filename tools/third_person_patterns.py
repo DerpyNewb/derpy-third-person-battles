@@ -23,14 +23,22 @@ def read_lua(text):
     block = block[:block.index("\n\n")]
     pattern = "".join(re.findall(r'"([^"]*)"', block))
     builds = {}
-    for m in re.finditer(r'\["([0-9a-f]{8})"\] = \{([^}]*)\}', text):
-        builds[m.group(1)] = {k: int(v, 16) for k, v in re.findall(r"(\w+) = 0x([0-9a-f]+)", m.group(2))}
+    # a row may hold {high, low} pairs: an RVA float32 would round, written in two parts (platform.lua's at())
+    for m in re.finditer(r'\["([0-9a-f]{8})"\] = \{((?:[^{}]|\{[^{}]*\})*)\}', text):
+        row = {k: int(v, 16) for k, v in re.findall(r"(\w+) = 0x([0-9a-f]+)", m.group(2))}
+        for k, hi, lo in re.findall(r"(\w+) = \{0x([0-9a-f]+), 0x([0-9a-f]+)\}", m.group(2)):
+            row[k] = (int(hi, 16), int(lo, 16))
+        builds[m.group(1)] = row
     return pattern, builds
 
 
 def inexact(row):
-    """the fields game Lua would round: its numbers are float32, so a literal needs 24 significant bits or fewer"""
-    return [k for k, v in row.items() if struct.unpack("<f", struct.pack("<f", v))[0] != v]
+    """the fields game Lua would round: its numbers are float32, so a literal needs 24 significant bits or fewer. A
+    {high, low} pair is exact when both are and high is whole 0x10000s, low under it (M.split's shape)"""
+    def exact(v):
+        return struct.unpack("<f", struct.pack("<f", v))[0] == v
+    return [k for k, v in row.items() if not (all(map(exact, v)) and v[0] % 0x10000 == 0 and v[1] < 0x10000
+                                              if isinstance(v, tuple) else exact(v))]
 
 
 def regex(pattern):
@@ -71,7 +79,8 @@ def check():
         return 1
     got = resolve(code, va, hits[0])
     print("  at exe+0x%x: %s" % (va + hits[0], ", ".join("%s = 0x%x" % (k, got[k]) for k in FIELDS)))
-    bad = ["%s %s: 0x%x rounds in float32 game Lua" % (b, k, row[k]) for b, row in builds.items() for k in inexact(row)]
+    bad = ["%s %s: %s rounds in float32 game Lua" % (b, k, tuple(map(hex, row[k])) if isinstance(row[k], tuple) else hex(row[k]))
+           for b, row in builds.items() for k in inexact(row)]
     row = builds.get("%08x" % stamp)
     if row is None:
         for b in bad:
@@ -109,6 +118,11 @@ def selftest():
     assert p == "48 8D 05 ??" and b["6ac6d907"]["cmd_push"] == 0x2e969ac, (p, b)
     assert inexact({"cmd_push": 0x2e969ac, "queue": 0x644e8}) == [], "24 significant bits are exact in float32"
     assert inexact({"battle": 0x2e969ad}) == ["battle"], "26 significant bits are not"
+    _, b = read_lua('local BUILDS = {\n\t["6acec6f4"] = {queue = 0x644e8, g = {0x4060000, 0xcda4}, after = 0x10},\n}\n'
+                    'local PATTERN = "48"\n\n')
+    assert b["6acec6f4"] == {"queue": 0x644e8, "g": (0x4060000, 0xcda4), "after": 0x10}, b
+    assert inexact({"g": (0x4060000, 0xcda4)}) == [], "a split pair is exact"
+    assert inexact({"g": (0x406cd00, 0xa4)}) == ["g"], "a high part that is not whole 0x10000s is no split"
     print("selftest ok")
     return 0
 

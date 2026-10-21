@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased (not on the Workshop)
+
+- Multiplayer mode: every change goes through the game's own battle command queue, so both machines run the same
+  battle. Built and tested offline in a two-machine simulation; not yet run on two machines.
+- In multiplayer it needs the mod and memreader Plus on every machine; without them it stays off and says why in the
+  script log.
+- The multiplayer message no longer blames the game version for every refusal.
+
 ## 2026-10-21
 
 - Mounted lords jump and charge-attack on their mount; the rider no longer plays the jump on a standing horse.

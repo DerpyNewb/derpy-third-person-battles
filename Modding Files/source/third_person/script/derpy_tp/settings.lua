@@ -1,7 +1,8 @@
 -- One session's settings, read again at every toggle: MCT's finalized values, or the defaults when MCT
 -- is absent or an option is missing. return function(mct, K) -> S.
 -- Two actions on one key: the later one falls back to its own default; when that default is taken too,
--- the action stays unbound. Each case goes into S.conflicts, and main.lua logs it once.
+-- the action stays unbound. Each case goes into S.conflicts, and main.lua logs it once. K.shares names the
+-- pairs that may sit on one key (a click and a hold).
 return function(mct, K)
 	local mod = mct and mct:get_mod_by_key("derpy_third_person")
 	local function get(key, default)
@@ -16,7 +17,7 @@ return function(mct, K)
 	for _, action in ipairs(K.order) do
 		local name = get("key_" .. action, K.defaults[action])
 		if K.vk[name] == nil then name = K.defaults[action] end
-		if owner[name] then
+		if owner[name] and owner[name] ~= K.shares[action] then
 			local fallback = K.defaults[action]
 			local now = not owner[fallback] and fallback or nil
 			S.conflicts[#S.conflicts + 1] = {action = action, key = name, taken_by = owner[name], now = now}

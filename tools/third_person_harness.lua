@@ -33,6 +33,9 @@ function loadfile(path)
 	return real_loadfile(path)
 end
 
+-- the shipped platform.lua's table, whatever H.real_platform says: for its pure functions (carrier, split)
+function H.platform_module() return assert(real_loadfile(file("script/derpy_tp/platform")))() end
+
 -- vectors ------------------------------------------------------------------------------------------
 local VEC = {}
 VEC.__index = VEC
@@ -126,8 +129,11 @@ UC.__index = function(self, name)
 		-- ordered to his own spot, idle, for as long as W was held)
 		local u = self._u
 		if ORDERS[name] then
-			local dropped = H.T - (u._order_t or -1e9) < 0.5 - 1e-9 -- 30 frames of 1/60 sum to under 0.5
-			u._order_t = H.T
+			-- in net mode the order lands at delivery on every machine, so it is timed by the model clock they share; the
+			-- frame clock differs from machine to machine
+			local now = H.net and H.model_ms() / 1000 or H.T
+			local dropped = now - (u._order_t or -1e9) < 0.5 - 1e-9 -- 30 frames of 1/60 sum to under 0.5
+			u._order_t = now
 			if dropped then rec("dropped_order", u._id, name)
 			elseif name == "goto_location" or name == "goto_location_angle_width" then local p = ... u._ordered = {p.x, p.z}
 			else u._ordered = nil end
@@ -168,7 +174,11 @@ local function make_bm()
 	function B:show_subtitle(key, full, force) rec("subtitle", key, full, force) end
 	function B:hide_subtitles() rec("hide_subtitles") end
 	function B:trigger_projectile_launch(key, from, to) rec("launch", key, from, to) end
-	function B:register_phase_change_callback(name, fn) H.phase[name] = fn end
+	-- every callback registered for the phase runs, in order, as CA's list (lib_battle_manager.lua)
+	function B:register_phase_change_callback(name, fn)
+		local before = H.phase[name]
+		H.phase[name] = before and function() before() fn() end or fn
+	end
 	function B:register_unit_selection_callback(u, fn) H.selection_cbs[#H.selection_cbs + 1] = {u, fn} end
 	function B:num_units_selected() local n = 0 for _ in pairs(H.sel) do n = n + 1 end return n end
 	function B:clear_selection() rec("clear_selection") H.select(nil) end
@@ -178,6 +188,16 @@ local function make_bm()
 	end
 	function B:get_non_player_alliance()
 		return {armies = function() return listof({{units = function() return listof(H.enemies) end}}) end}
+	end
+	-- every alliance and its armies, as the real bm does: the player's and the allies' armies are human, the enemies' not.
+	-- Used by the multiplayer copy-table builder, which takes every army's fragments
+	function B:alliances()
+		local function army(units, human) return {is_player_controlled = function() return human end,
+			units = function() return listof(units) end} end
+		return listof({
+			{armies = function() return listof({army(H.units, true), army(H.allies, true)}) end},
+			{armies = function() return listof({army(H.enemies, false)}) end},
+		})
 	end
 	return B
 end
@@ -309,7 +329,23 @@ end
 -- and NOT in _G (measured 2026-10-19: _G.cco nil, the bare name a callable table)
 H.env = setmetatable({cco = function(kind, id) return {kind = kind, id = id} end}, {__index = _G, __newindex = _G})
 core = {get_env = function() return H.env end, get_ui_root = function() return H.root end,
-	get_screen_resolution = function() return H.screen[1], H.screen[2] end}
+	get_screen_resolution = function() return H.screen[1], H.screen[2] end,
+	add_listener = function(_, name, event, cond, fn, persist)
+		H.listeners[#H.listeners + 1] = {name = name, event = event, cond = cond, fn = fn, persist = persist}
+	end,
+	remove_listener = function(_, name)
+		for i = #H.listeners, 1, -1 do if H.listeners[i].name == name then table.remove(H.listeners, i) end end
+	end}
+H.listeners = {}
+-- core's event: each listener for it whose condition holds runs, and one not persistent goes after its first run
+function H.trigger(event, context)
+	for _, l in ipairs({unpack(H.listeners)}) do
+		if l.event == event and (l.cond == true or l.cond(context)) then
+			if not l.persist then core:remove_listener(l.name) end
+			l.fn(context)
+		end
+	end
+end
 function out(msg) H.log[#H.log + 1] = tostring(msg) end
 -- CA's unit context, by expression: H.cco[expr] is the value, or a function that returns it or throws
 common = {get_context_value = function(kind, id, expr)
@@ -350,8 +386,14 @@ end
 -- the fake platform: same interface as platform.lua's build(), driven by H.keys, H.focus, H.mouse
 local function fake_platform()
 	local P = {features = {}, problems = {}, build = 0x6ac6d907}
+	H.gate_on, H.gates = false, {}
 	for k, val in pairs(H.features) do P.features[k] = val end
 	P.features.steer = H.features.steer ~= false
+	P.features.net = H.net == true -- net mode, as platform.lua's in a multiplayer battle
+	for i, text in ipairs(H.problems or {}) do P.problems[i] = text end -- what the real platform recorded (opts.problems)
+	P.net_delay = 0.2
+	-- net play waits for "Deployed", where platform.lua builds its fragment table (P.net_ready)
+	if H.net then bm:register_phase_change_callback("Deployed", function() P.net_ready = true end) end
 	-- "unchecked": not in until check_mailbox, as in the game, where the first start that wants it puts it in
 	P.features.mailbox = H.features.mailbox ~= false and H.features.mailbox ~= "unchecked"
 	if not P.features.input then P.problems[1] = "input: test" return P end
@@ -377,6 +419,7 @@ local function fake_platform()
 	end
 	function P.look_begin() rec("look_begin") H.mouse = {0, 0} end -- parking the cursor drops what moved before
 	function P.look_delta() local dx, dy = H.mouse[1], H.mouse[2] H.mouse = {0, 0} return dx, dy end
+	function P.hide_cursor() rec("hide_cursor") end
 	function P.check_anim()
 		if H.features.anim then return true end
 		P.features.anim = false
@@ -409,9 +452,14 @@ local function fake_platform()
 	function P.command(m) return m.command or "walk" end
 	function P.walk_ended(m) return m.walk_ended == true end -- a test plays the engine ending his walk
 	function P.guard(m) rec("guard", m and m.id) return false end
+	function P.unguard(m) rec("unguard", m and m.id) end
+	function P.net_reset() end
+	function P.watch() end
 	function P.disarm(m, shots) rec("disarm", m and m.id, shots) end
 	function P.arm(m) rec("arm", m and m.id) end
-	function P.gate(on) rec("gate", on) return true end
+	-- the order gate (platform.lua P.gate): its state, and every time it was set with the model clock. In a lasting melee
+	-- the fake engine of tools/third_person_lockstep.lua starts a queued action for a man only while it is in
+	function P.gate(on) rec("gate", on) H.gate_on = on H.gates[#H.gates + 1] = {ms = H.model_ms(), on = on} return true end
 	function P.terrain_floor(on) rec("terrain_floor", on) return true end
 	function P.anim_slot(m)
 		if m.anim_end and H.model_ms() >= m.anim_end and not H.anim_hold then m.anim_slot = nil end
@@ -434,6 +482,32 @@ local function fake_platform()
 	function P.alive(unit, m) return m.alive ~= false and m.hp > 0 end
 	function P.same(a, b) return a == b end
 	function P.check_men(unit) if unit._men_ok == false then return false, "test: men off" end return true end
+	-- net mode (H.net, set by tools/third_person_lockstep.lua): every change to the battle goes out as a queued command
+	-- through H.send and is applied on every machine at delivery, with the functions above (P.apply); nothing is written
+	-- here directly. H.net_unrouted: net mode without the routing, the platform writing on its own machine (the oracle's
+	-- own test)
+	if H.net then P.apply = {move = P.steer, halt = P.hold, follow = P.face, play = P.play} end
+	-- platform.lua install_net puts the order gate in at build, on every machine; H.net_gate == false is a machine that does
+	-- not (a peer without the mod, or the test of what the gate is for: tools/third_person_lockstep.lua L.new's gate = false)
+	if H.net and H.net_gate ~= false then P.gate(true) end
+	-- When to send is platform.lua's own M.net_rules, the lines the real platform runs; what goes out is H.send's
+	if H.net and not H.net_unrouted then
+		local M = H.platform_module()
+		local R = M.net_rules(P, {
+			move = function(b, x, z, run, yaw, speed) H.send("move", b.id, {x = x, z = z, run = run, yaw = yaw, speed = speed}) return true end,
+			halt = function(b, x, z) H.send("halt", b.id, {x = x, z = z}) return true end,
+			follow = function(b, yaw) H.send("follow", b.id, {yaw = yaw}) return true end,
+			carrier = function(b, op, flags, id) -- id: one sent before, and b is not read (GUARD_OFF)
+				id = id or b.id
+				local hi, lo = M.carrier(op, id, flags)
+				H.send("carrier", id, {hi = hi, lo = lo})
+				return true, id
+			end,
+			play = function(m, slot, mask) H.send("play", m.id, {slot = slot, mask = mask}) return true end,
+		}, function(b) return b end)
+		P.steer, P.hold, P.face, P.guard, P.unguard, P.disarm, P.arm = R.steer, R.hold, R.face, R.guard, R.unguard, R.disarm, R.arm
+		P.net_reset, P.play, P.watch = R.reset, R.play, R.watch
+	end
 	return P
 end
 
@@ -443,13 +517,15 @@ os.clock = function() return H.T end
 -- bm:time_elapsed_ms() a whole tenth, sampled each frame); H.tick_ms steps it here, smooth without
 function H.model_ms() return H.tick_ms and math.floor(H.game_ms / H.tick_ms + 1e-9) * H.tick_ms or H.game_ms end
 
+-- H.fps: frames a second, 60 unless a lockstep machine (tools/third_person_lockstep.lua) runs at another rate
 function H.step(seconds)
-	for _ = 1, math.max(1, math.floor(seconds * 60 + 0.5)) do
-		H.T = H.T + 1 / 60
-		if not H.paused then H.game_ms = H.game_ms + 1000 / 60 end
+	local fps = H.fps or 60
+	for _ = 1, math.max(1, math.floor(seconds * fps + 0.5)) do
+		H.T = H.T + 1 / fps
+		if not H.paused then H.game_ms = H.game_ms + 1000 / fps end
 		if not H.paused then for _, u in ipairs(H.units) do if u._prior_walk then
-			u._z = u._z + 1 / 60
-			for _, m in ipairs(u._models) do m.z = m.z + 1 / 60 end
+			u._z = u._z + 1 / fps
+			for _, m in ipairs(u._models) do m.z = m.z + 1 / fps end
 		end end end
 		local due = {}
 		for id, t in pairs(H.timers) do if H.T >= t.at - 1e-9 then due[#due + 1] = id end end
@@ -476,17 +552,18 @@ function H.down(name) H.keys[code(name)] = true end
 function H.up(name) H.keys[code(name)] = nil end
 function H.tap(name) H.down(name) H.step(1 / 60) H.up(name) H.step(1 / 60) end
 
--- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, features
+-- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, features, problems
 function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
 	H.T, H.calls, H.timers, H.keys, H.focus, H.mouse, H.wheel_notches = 100, {}, {}, {}, true, {0, 0}, 0
-	H.log, H.phase, H.selection_cbs, H.selected, H.sel = {}, {}, {}, nil, {}
+	H.log, H.phase, H.selection_cbs, H.selected, H.sel, H.listeners = {}, {}, {}, nil, {}, {}
 	H.units, H.enemies, H.allies, next_id = {}, {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
 	H.mp, H.replay = opts.mp or false, opts.replay or false
 	H.screen, H.tick_ms = opts.screen or {1920, 1080}, opts.tick_ms
 	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold, H.report_ms = 0, false, false, false, false, 0
 	H.features = opts.features or {input = true, anim = true, wheel = true}
+	H.problems = opts.problems
 	H.root = comp("root")
 	H.pinned = {}
 	H.cco, H.cco_ids, H.w2s = H.default_cco(), nil, nil
@@ -524,6 +601,8 @@ end
 
 -- run -----------------------------------------------------------------------------------------------
 H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
+-- the two-machine simulation, L, beside this file
+dofile((arg[0]:match("^(.*)[/\\]") or ".") .. "/third_person_lockstep.lua")
 local T = assert(real_loadfile(TESTS))()
 local names = {}
 for name in pairs(T) do if not ONLY or name == ONLY then names[#names + 1] = name end end

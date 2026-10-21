@@ -11,6 +11,12 @@ local LOCK_MAX, LOCK_WAIT = 3, 1
 local TURN_DEG, TURN_WAIT_MS, MAX_MODELS = 25, 350, 160
 local AIM_COS, AIM_RANGE, AIM_CLOSE = 0.707, 150, 8 -- a melee target: inside 45 deg and 150 m, or 8 m any way
 local CHARGE_REACH = 30 -- the sprint's charge: an enemy this near ahead
+-- the lock-on (a player, 2026-10-21: "lock-on ... so that we can target and attack small-sized enemy lords and heroes
+-- within a crowd"): a click takes the enemy ahead out to TARGET_REACH, a unit of one (a lord, a hero, a monster) before
+-- any regiment. The camera pans toward him and the mouse still turns it (the author, 2026-10-21: "a smooth pan and not
+-- strictly on the model or target"): inside TARGET_SLACK of him nothing pulls, past it the view eases back to that edge
+-- at TARGET_PULL a second. He is let go past TARGET_BREAK, dead, routing or out of sight
+local TARGET_REACH, TARGET_BREAK, TARGET_SLACK, TARGET_PULL = 150, 200, math.rad(12), 4
 local AIM_STEP, FIRE_REAIM, FIRE_ARC, FIRE_COMMIT, STEER_GAP = 2, 5, 20, 4, 0.5 -- AIM_STEP: m a march step of the view
 -- s a ground-fire shot's clip may run on past the shot leaving before it is halted anyway: a fire clip runs to 9.5 s
 -- (the Necrofex Colossus's flame, 6.8 s of it after the flame leaves; Ku'gath's throw 5.7)
@@ -69,6 +75,9 @@ return function(E)
 	local C = {}
 	local aim_len = {} -- unit type and raise slot -> s the raise runs, measured on the first whole one
 	local turn = {} -- slot list -> the next in its rotation
+	-- s more a clip waits to be seen in multiplayer: the queue's delay (platform.lua P.net_delay), longer than the one
+	-- tick these windows were measured with
+	local function late() return P.features.net and P.net_delay or 0 end
 
 	-- his models: the one man, a unit of one's (a crew's first man: the rest ride the same body), or every man of the
 	-- unit up to MAX_MODELS
@@ -133,11 +142,32 @@ return function(E)
 		if best < t_max then return best, best_u end
 	end
 
+	-- the locked enemy while he can still be fought, else nil
+	local function held_target()
+		local t = F.target
+		if t and t:number_of_men_alive() > 0 and t:is_valid_target() and not t:is_routing() then return t end
+	end
+
+	-- where he stands: the one man, else his unit
+	local function my_xz()
+		if F.model then local x, _, z = P.model_pos(F.model) return x, z end
+		local q = F.unit:position()
+		return q:get_x(), q:get_z()
+	end
+
 	function C.aim_point(reach)
 		local R = E.rig
 		if not R.ex then return nil end
-		local ux, uz
-		if F.model then local x, _, z = P.model_pos(F.model) ux, uz = x, z else local q = F.unit:position() ux, uz = q:get_x(), q:get_z() end
+		local ux, uz = my_xz()
+		-- locked on and in reach: his middle, wherever the crosshair is in the lock's slack
+		local held = held_target()
+		if held then
+			local p = held:position()
+			if (p:get_x() - ux) ^ 2 + (p:get_z() - uz) ^ 2 <= reach * reach then
+				local body = E.D.bodies and E.D.bodies[held:type()]
+				return p:get_x(), p:get_y() + (body and body[2] or 1.8) / 2, p:get_z(), held
+			end
+		end
 		local dx, dy, dz = R.lx - R.ex, R.ly - R.ey, R.lz - R.ez
 		local n = math.sqrt(dx * dx + dy * dy + dz * dz)
 		dx, dy, dz = dx / n, dy / n, dz / n
@@ -154,13 +184,19 @@ return function(E)
 	end
 
 	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and reach (AIM_RANGE, a gun's its range), or
-	-- AIM_CLOSE any way; distance weighted by how far off the aim it is
-	local function pick_target(reach)
+	-- AIM_CLOSE any way; distance weighted by how far off the aim it is. The locked enemy first, while in reach.
+	-- ones: a unit of one beats any regiment (the lock-on's pick)
+	local function pick_target(reach, ones)
 		reach = reach or AIM_RANGE
 		local q = F.unit:position()
 		local qx, qz = q:get_x(), q:get_z()
+		local held = not ones and held_target()
+		if held then
+			local p = held:position()
+			if (p:get_x() - qx) ^ 2 + (p:get_z() - qz) ^ 2 <= reach * reach then return held end
+		end
 		local fx, fz = math.sin(E.rig.yaw), math.cos(E.rig.yaw)
-		local best, best_score
+		local best, best_score, best_tier
 		local armies = bm:get_non_player_alliance():armies()
 		for a = 1, armies:count() do
 			local list = armies:item(a):units()
@@ -173,12 +209,45 @@ return function(E)
 					local c = (dx * fx + dz * fz) / math.max(d, 0.01)
 					if d < AIM_CLOSE or (c > AIM_COS and d < reach) then
 						local score = d * (2 - c)
-						if not best_score or score < best_score then best, best_score = e, score end
+						local tier = ones and e:initial_number_of_men() > 1 and 1 or 0
+						if not best_score or tier < best_tier or tier == best_tier and score < best_score then
+							best, best_score, best_tier = e, score, tier
+						end
 					end
 				end
 			end
 		end
 		return best
+	end
+
+	-- the lock-on key's click: on the enemy ahead, or off
+	function C.target()
+		if F.target then F.target = nil E.log("lock-on off") return end
+		F.target = pick_target(TARGET_REACH, true)
+		if F.target then E.log("lock-on " .. F.target:type()) end
+	end
+
+	-- each frame: the camera's pan toward the locked enemy, in real time (dt)
+	function C.track(dt)
+		local t = held_target()
+		if not t then
+			local f = F.target
+			if f then
+				E.log("lock-on lost: men " .. f:number_of_men_alive() .. ", valid " .. tostring(f:is_valid_target()) .. ", routing "
+					.. tostring(f:is_routing()))
+				F.target = nil
+			end
+			return
+		end
+		local mx, mz = my_xz()
+		local p = t:position()
+		local dx, dz = p:get_x() - mx, p:get_z() - mz
+		if dx * dx + dz * dz > TARGET_BREAK * TARGET_BREAK then F.target = nil E.log("lock-on out of reach") return end
+		local R = E.rig
+		local off = (math.atan2(dx, dz) - R.want_yaw + math.pi) % (2 * math.pi) - math.pi
+		if math.abs(off) <= TARGET_SLACK then return end
+		off = off - (off > 0 and TARGET_SLACK or -TARGET_SLACK)
+		R.want_yaw = R.want_yaw + off * (1 - math.exp(-TARGET_PULL * dt))
 	end
 
 	-- an order inside STEER_GAP of the last is dropped by the engine (a click just after the walk's halt attacked nothing):
@@ -267,7 +336,17 @@ return function(E)
 		-- the clip turns him (measured 2026-10-15, Chosen ATTACK_2: 21 deg right, then 28-46 deg left through the blow, then
 		-- back), and a facing held over it put the blow 30-45 deg right of the crosshair ("WHY IS IT SWINGING TO THE RIGHT")
 		-- (the click's swing is the one held to a cooldown; jump and charge attacks, not measured, keep the camera's facing)
-		if now then F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = E.rig.yaw, turns = hold ~= nil} end
+		-- locked on, at him: the pan's slack leaves the crosshair up to TARGET_SLACK off him
+		local yaw, held = E.rig.yaw, held_target()
+		if held then
+			local mx, mz = my_xz()
+			local p = held:position()
+			yaw = math.atan2(p:get_x() - mx, p:get_z() - mz)
+		end
+		if now then F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = yaw, turns = hold ~= nil} end
+		-- when the clip is given up on: the F.pending till C.locked sets for one never seen (multiplayer: nothing is sent
+		-- for him until then or until it shows, platform.lua M.net_rules)
+		local give_up = now and now + LOCK_MAX + late()
 		-- the model that carries the clip, and its slot; nil when he has none
 		local function play(m)
 			local mount = P.mount(m)
@@ -276,21 +355,21 @@ return function(E)
 				if F.unit:is_currently_flying() and slot >= 454 and slot <= 463 then
 					chosen = P.has_slot(mount, slot + 40) and slot + 40 or 494
 				end
-				if P.has_slot(mount, chosen) then P.play(mount, chosen, mask) return mount, chosen end
-				if P.has_slot(m, slot) then P.play(m, slot, mask) return m, slot end -- an artillery crewman's parent is his gun
+				if P.has_slot(mount, chosen) then P.play(mount, chosen, mask, give_up) return mount, chosen end
+				if P.has_slot(m, slot) then P.play(m, slot, mask, give_up) return m, slot end -- an artillery crewman's parent is his gun
 				return
 			end
 			if F.unit:is_currently_flying() and slot >= 454 and slot <= 463 and P.has_slot(m, slot + 40) then
-				P.play(m, slot + 40, mask) return m, slot + 40 -- FLY_ATTACK_n, as a mount's
+				P.play(m, slot + 40, mask, give_up) return m, slot + 40 -- FLY_ATTACK_n, as a mount's
 			end
 			local rider = slot + 1447 -- ATTACK_1 -> RIDER_ATTACK_1
 			local chosen = slot
 			if F.unit:is_currently_flying() and P.has_slot(m, 1941) then chosen = P.has_slot(m, rider + 40) and rider + 40 or 1941
 			elseif P.has_slot(m, 1901) then chosen = P.has_slot(m, rider) and rider or 1901 end
 			if chosen ~= slot then
-				P.play(m, chosen, 6)
+				P.play(m, chosen, 6, give_up)
 				return m, chosen
-			elseif P.has_slot(m, slot) then P.play(m, slot, mask) return m, slot end
+			elseif P.has_slot(m, slot) then P.play(m, slot, mask, give_up) return m, slot end
 		end
 		local function go()
 			local any = false
@@ -441,7 +520,8 @@ return function(E)
 	-- A queued request is not an animation start; idle and hit reactions cannot complete a reload. Aim and
 	-- reload hold the full body (mask 6); fire keeps mask 0 for its animation events.
 	local function play_phase(shot, phase, slot, now)
-		if not P.play(shot.model, slot, phase == "fire" and 0 or 6) then return false end
+		-- given up on once LOCK_WAIT and the queue's delay pass unstarted (C.solo)
+		if not P.play(shot.model, slot, phase == "fire" and 0 or 6, now + LOCK_WAIT + late()) then return false end
 		shot.phase, shot.slot, shot.started, shot.sent = phase, slot, false, now
 		return true
 	end
@@ -565,7 +645,7 @@ return function(E)
 		-- longer holds the next shot past its end
 		if shot and shot.phase == "reload" and E.S.reload_factor < 1 and now >= F.ready_at then F.shot, shot = nil, nil end
 		-- a clip sent and never started (replaced before it played) gives up after LOCK_WAIT: he is not rooted (round 25)
-		if shot and not shot.started and now >= shot.sent + LOCK_WAIT then C.drop(now) shot = nil end
+		if shot and not shot.started and now >= shot.sent + LOCK_WAIT + late() then C.drop(now) shot = nil end
 		if shot then
 			local clip = P.anim_slot(shot.model)
 			if clip ~= shot.seen then shot.seen = clip E.log("shot clip " .. tostring(clip) .. " in " .. shot.phase) end
@@ -714,7 +794,7 @@ return function(E)
 		local slot = L.m and P.anim_slot(L.m)
 		-- no clip sent yet (a turn order's wait) is nothing reported: read as seen, the lock ended as the clip was sent
 		if L.m and slot == L.slot then L.seen = true end
-		local over = now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT)
+		local over = now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT + late())
 		if not over then return true end
 		-- a charge attack thrown on the run stays latched under the walk (measured 2026-10-16): freed here, or by the charge
 		-- (charge_run) when he sprints on
@@ -725,7 +805,7 @@ return function(E)
 				.. tostring(slot))
 			-- still his: a block (DEFEND, 474-483) holds a queued clip back until it ends, which ran past LOCK_WAIT 3 times in
 			-- 10 (measured 2026-10-16, probes/zz_tp_melee_spam.lua); main.lua keeps him armed for it, LOCK_MAX from its send
-			F.pending = {m = L.m, slot = L.slot, till = L.from + LOCK_MAX}
+			F.pending = {m = L.m, slot = L.slot, till = L.from + LOCK_MAX + late()}
 		end
 		F.lock, F.man_hold = nil, nil -- he stands where the clip left him (the jump carries him ~4.5 m)
 		return false
@@ -768,7 +848,7 @@ return function(E)
 		each(function(m)
 			m = P.mount(m) or m
 			if P.has_slot(m, slot) then
-				P.play(m, slot)
+				P.play(m, slot, nil, now + LOCK_MAX + late()) -- given up on as a swing is
 				if not F.lock.m then F.lock.m, F.lock.slot, F.swung = m, slot, {m, slot} end
 			end
 		end)

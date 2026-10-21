@@ -13,7 +13,7 @@ the command at +0x328/+0x330 that a worker may be running. Crashes exe+0x305B39A
 (2026-10-17, reading FFFFFFFFFFFFFFFF in a command's destructor, the script log's last line P.guard). The cave makes the
 same calls, with the same tests, from the start of his own update, where the engine itself changes his command.
 
-The block (game_alloc, 0x100 bytes, kept for the session: the cave holds its address, and a later battle reads it back
+The block (game_alloc, 0x200 bytes, kept for the session: the cave holds its address, and a later battle reads it back
 from the cave's first instruction, mov rax, <block>):
 
     man        the model the requests are for (the mount of a rider); 0 nobody
@@ -22,7 +22,19 @@ from the cave's first instruction, mov rax, <block>):
     walk       1 hold: stop a walk; 2 steer: update his own walk in place, else build one from buf (unless near)
     stops, met counters: the guard's stops, and the updates the cave matched him in (for probes)
     has_angle  steer: write buf's angle in place; near: steer: he is at the point, build no walk
+    count      multiplayer: how many guard entries are claimed (0 in single player, so the table scan is skipped whole)
+    nfrags, fragtab   the copy table's row count, and a pointer to it (its own game_alloc); DISARM/ARM read it
+    find       scratch: the 16-bit id the carrier cave resolves, so &id can be passed to the map lookup
+    skip, map_lookup   the carrier cave's two baked pointers: the store-skip target (exe+2ecfcc5) and exe+17aece4
     buf        the walk builder's 0x60-byte parameter block (platform.lua fills it as it always did)
+    guards     multiplayer: ENTRIES entries of {man pointer, his +0x258 id}, claimed by GUARD_ON, freed by GUARD_OFF/death
+
+Two caves share this block. The UPDATE cave (ASM, exe+3086f04) guards the one man played in single player from man/guard/
+walk as it always has, and in multiplayer also scans the guard table and stops the engine's four orders on every man with
+an entry. The CARRIER cave (CARRIER_ASM, exe+2ecfcb7) decodes the carrier word riding a forged RELOAD_TIME command on
+every machine: GUARD_ON claims an entry, GUARD_OFF frees it, DISARM points the man's fragment at the copy of its kind and
+ARM points it back, then it skips the global's store; a word without the magic resumes untouched. It must never disagree
+with M.uncarrier (--selftest proves it, running M.uncarrier under lua.exe over a sample and the cave over the same words).
 
 Needs keystone-engine (assembling) and unicorn (the selftest), both pip packages; capstone for the comments.
 """
@@ -40,7 +52,28 @@ PLACEHOLDER = 0x1122334455667788
 
 MB = {"man": 0x00, "walk_a": 0x08, "move_a": 0x10, "move_b": 0x18, "melee": 0x20, "walk_b": 0x28, "walk_stop": 0x30,
       "walk_start": 0x38, "guard": 0x40, "walk": 0x44, "stops": 0x48, "met": 0x4c, "has_angle": 0x50, "near": 0x51,
-      "buf": 0x80, "size": 0x100}
+      "count": 0x54, "nfrags": 0x58, "fragtab": 0x60, "find": 0x68, "buf": 0x80, "skip": 0xe8, "map_lookup": 0xf0,
+      "guards": 0x100, "size": 0x200}
+# the fields a cave calls or jumps through: written over, never zeroed (a cave already past its match goes through
+# them), so platform.lua keeps them outside every range check_mailbox zeroes; a harness test pins it
+FUNCS = ("walk_a", "move_a", "move_b", "melee", "walk_b", "walk_stop", "walk_start", "skip", "map_lookup")
+# multiplayer guard table: ENTRIES entries of GE bytes at MB guards, {man pointer (+0), his +0x258 id (u32, +8)}.
+# count (MB count) is how many are claimed, so single player (count 0) skips the scan with no register traffic.
+# The fragment copy table is its OWN game_alloc (platform makes the copies, byte-identical to single player's), and the
+# block holds nfrags rows and a pointer to them at MB fragtab: FRAG_ROW bytes each, {orig, plain, shots, charge,
+# shots_charge} fragment pointers. The cave picks a column by DISARM's two flags and writes it to the man's +0x308.
+ENTRIES, GE, FRAG_ROW, FRAG = 16, 0x10, 0x28, 0x308
+# carrier cave: the RELOAD_TIME handler's float read (exe+2ecfcb7, movss xmm0,[rsp+0x30]). The record is in rbx, the
+# carrier word is the 32 bits at [rsp+0x30]. A non-carrier re-runs the movss and resumes at the store (RESUME_RVA); a
+# carrier skips the store (SKIP_RVA epilogue). Neither 0x2ecfcb7 nor 0x2ecfcbd is float32-exact, so both go through M.split
+CARRIER_RVA, RESUME_RVA, SKIP_RVA = 0x2ecfcb7, 0x2ecfcbd, 0x2ecfcc5
+CARRIER_SITE = bytes.fromhex("f30f10442430")  # movss xmm0, dword ptr [rsp + 0x30]
+MAGIC = 0xD7
+OPS = {"GUARD_ON": 1, "GUARD_OFF": 2, "DISARM": 3, "ARM": 4, "HELLO": 5}
+# the record's battle object and the map lookup the MOVE/HALT handlers use (exe+2eaf094 reads a tag-0x23 model id, then
+# resolves it in battle+0x80 through exe+17aece4(map, &id) -> &value, value the model). The carrier carries no 0x23 field,
+# so the cave resolves its own 16-bit id the same way: battle = [record+0x30], map = battle+0x80, lookup by &id.
+REC_BATTLE, MAP_OFF, MAP_LOOKUP_RVA = 0x30, 0x80, 0x17aece4
 # the walk builder's parameter block (platform.lua) and the man's fields the in-place steer writes (docs section 3)
 BUF = {"x": 0x0, "z": 0x8, "run": 0x28, "speed": 0x2c, "angle": 0x30, "gait": 0x46}
 MAN = {"cmd": 0x330, "hp": 0xb1c, "x": 0x368, "z": 0x370, "run": 0x390, "speed": 0x394, "angle": 0x398,
@@ -52,7 +85,7 @@ MAN = {"cmd": 0x330, "hp": 0xb1c, "x": 0x368, "z": 0x370, "run": 0x390, "speed":
 ASM = """
     mov rax, {placeholder}
     cmp rcx, qword ptr [rax + {man}]
-    jne done
+    jne sec_b
     push rbx
     push rsi
     push rcx
@@ -160,7 +193,256 @@ restore:
     pop rcx
     pop rsi
     pop rbx
+    jmp done
+sec_b:
+    cmp dword ptr [rax + {count}], 0
+    je done
+    push rbx
+    push rsi
+    push rcx
+    push rdx
+    push r8
+    push r9
+    sub rsp, 0x68
+    movdqu xmmword ptr [rsp + 0x20], xmm0
+    movdqu xmmword ptr [rsp + 0x30], xmm1
+    movdqu xmmword ptr [rsp + 0x40], xmm2
+    movdqu xmmword ptr [rsp + 0x50], xmm3
+    mov rbx, rax
+    mov rsi, rcx
+    lea rdx, [rbx + {guards}]
+    mov r8d, {entries}
+b_loop:
+    cmp qword ptr [rdx], rsi
+    je b_found
+    add rdx, {ge}
+    dec r8d
+    jnz b_loop
+    jmp b_restore
+b_found:
+    cmp dword ptr [rsi + {m_hp}], 0
+    jg b_alive
+    mov rax, rsi
+    xor ecx, ecx
+    lock cmpxchg qword ptr [rdx], rcx
+    jne b_restore
+    lock dec dword ptr [rbx + {count}]
+    jmp b_restore
+b_alive:
+    mov rax, qword ptr [rsi + {m_cmd}]
+    cmp rax, qword ptr [rbx + {walk_a}]
+    je b_stop
+    cmp rax, qword ptr [rbx + {move_a}]
+    je b_stop
+    cmp rax, qword ptr [rbx + {move_b}]
+    je b_stop
+    cmp rax, qword ptr [rbx + {melee}]
+    jne b_restore
+b_stop:
+    mov rcx, rsi
+    call qword ptr [rbx + {walk_stop}]
+    inc dword ptr [rbx + {stops}]
+b_restore:
+    movdqu xmm0, xmmword ptr [rsp + 0x20]
+    movdqu xmm1, xmmword ptr [rsp + 0x30]
+    movdqu xmm2, xmmword ptr [rsp + 0x40]
+    movdqu xmm3, xmmword ptr [rsp + 0x50]
+    add rsp, 0x68
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rsi
+    pop rbx
 done:
+"""
+
+# The carrier cave at exe+2ecfcb7. rbx is the record reader, [rsp+0x30] is the carrier word (read before any push). A
+# word whose top byte is not the magic falls through to memreader's epilogue (the displaced movss, then the store at
+# exe+2ecfcbd): vanilla reload times are untouched. The magic with an op out of 1..4 is dropped unresolved (jumps to the
+# store-skip): M.uncarrier's nil, and HELLO, which asks the cave for nothing. Flag bits 2-3 (word bits 18-19) are masked
+# off, never acted on. The id is resolved in the battle map the MOVE/HALT handlers use, except id 0, which the engine
+# itself takes for no man (exe+2eaf0eb) and is never looked up; a man who is gone or dead has his entry freed and
+# nothing else done, whatever the op. count is changed with lock inc/dec: the update cave frees entries from the workers.
+# Both caves free an entry the same way (Ruling 18 of MP_FEASIBILITY_20261021_THIRD_PERSON.md): lock cmpxchg its man
+# pointer, as read, for 0, and count down only when the exchange won. Two frees of one entry at once (a dead man's
+# update and his GUARD_OFF) count it down once.
+CARRIER_ASM = """
+    mov rax, {placeholder}
+    mov r11d, dword ptr [rsp + 0x30]
+    mov r10d, r11d
+    shr r10d, 24
+    cmp r10d, {magic}
+    jne not_ours
+    mov r10d, r11d
+    shr r10d, 20
+    and r10d, 0xf
+    cmp r10d, 1
+    jb skip_it
+    cmp r10d, 4
+    ja skip_it
+    push rsi
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 0x20
+    mov r12, rax
+    mov r13d, r11d
+    mov r14d, r10d
+    movzx r15d, r13w
+    test r15d, r15d
+    jz resolved_null
+    mov rax, qword ptr [rbx + {rec_battle}]
+    test rax, rax
+    jz resolved_null
+    lea rcx, [rax + {map_off}]
+    mov dword ptr [r12 + {find}], r15d
+    lea rdx, [r12 + {find}]
+    call qword ptr [r12 + {map_lookup}]
+    test rax, rax
+    jz resolved_null
+    mov rsi, qword ptr [rax]
+    jmp have_model
+resolved_null:
+    xor esi, esi
+have_model:
+    cmp r14d, 1
+    je op_guard_on
+    cmp r14d, 2
+    je op_guard_off
+    cmp r14d, 3
+    je op_disarm
+    jmp op_arm
+op_guard_on:
+    test rsi, rsi
+    jz free_by_id
+    cmp dword ptr [rsi + {m_hp}], 0
+    jle free_by_id
+    xor edi, edi
+    lea rdx, [r12 + {guards}]
+    mov ecx, {entries}
+go_scan:
+    mov rax, qword ptr [rdx]
+    test rax, rax
+    jz go_free
+    cmp dword ptr [rdx + 8], r15d
+    je go_existing
+    jmp go_next
+go_free:
+    test rdi, rdi
+    jnz go_next
+    mov rdi, rdx
+go_next:
+    add rdx, {ge}
+    dec ecx
+    jnz go_scan
+    test rdi, rdi
+    jz done_frame
+    mov qword ptr [rdi], rsi
+    mov dword ptr [rdi + 8], r15d
+    lock inc dword ptr [r12 + {count}]
+    jmp done_frame
+go_existing:
+    mov qword ptr [rdx], rsi
+    jmp done_frame
+op_guard_off:
+free_by_id:
+    lea rdx, [r12 + {guards}]
+    mov ecx, {entries}
+fb_scan:
+    mov rax, qword ptr [rdx]
+    test rax, rax
+    jz fb_next
+    cmp dword ptr [rdx + 8], r15d
+    jne fb_next
+    xor r10d, r10d
+    lock cmpxchg qword ptr [rdx], r10
+    jne done_frame
+    lock dec dword ptr [r12 + {count}]
+    jmp done_frame
+fb_next:
+    add rdx, {ge}
+    dec ecx
+    jnz fb_scan
+    jmp done_frame
+op_disarm:
+    test rsi, rsi
+    jz done_frame
+    cmp dword ptr [rsi + {m_hp}], 0
+    jle done_frame
+    mov rax, qword ptr [rsi + {m_frag}]
+    mov rcx, qword ptr [r12 + {fragtab}]
+    mov edx, dword ptr [r12 + {nfrags}]
+    test edx, edx
+    jz done_frame
+dis_row:
+    cmp rax, qword ptr [rcx]
+    je dis_found
+    cmp rax, qword ptr [rcx + 8]
+    je dis_found
+    cmp rax, qword ptr [rcx + 0x10]
+    je dis_found
+    cmp rax, qword ptr [rcx + 0x18]
+    je dis_found
+    cmp rax, qword ptr [rcx + 0x20]
+    je dis_found
+    add rcx, {frag_row}
+    dec edx
+    jnz dis_row
+    jmp done_frame
+dis_found:
+    mov eax, r13d
+    shr eax, 16
+    and eax, 3
+    lea rax, [rax * 8 + 8]
+    mov rax, qword ptr [rcx + rax]
+    mov qword ptr [rsi + {m_frag}], rax
+    jmp done_frame
+op_arm:
+    test rsi, rsi
+    jz done_frame
+    cmp dword ptr [rsi + {m_hp}], 0
+    jle done_frame
+    mov rax, qword ptr [rsi + {m_frag}]
+    mov rcx, qword ptr [r12 + {fragtab}]
+    mov edx, dword ptr [r12 + {nfrags}]
+    test edx, edx
+    jz done_frame
+arm_row:
+    cmp rax, qword ptr [rcx]
+    je arm_found
+    cmp rax, qword ptr [rcx + 8]
+    je arm_found
+    cmp rax, qword ptr [rcx + 0x10]
+    je arm_found
+    cmp rax, qword ptr [rcx + 0x18]
+    je arm_found
+    cmp rax, qword ptr [rcx + 0x20]
+    je arm_found
+    add rcx, {frag_row}
+    dec edx
+    jnz arm_row
+    jmp done_frame
+arm_found:
+    mov rax, qword ptr [rcx]
+    mov qword ptr [rsi + {m_frag}], rax
+    jmp done_frame
+done_frame:
+    mov rax, qword ptr [r12 + {skip}]
+    add rsp, 0x20
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    pop rsi
+    jmp rax
+skip_it:
+    mov rax, qword ptr [rax + {skip}]
+    jmp rax
+not_ours:
 """
 
 
@@ -169,6 +451,8 @@ def fields():
     f.update({"b_" + k: hex(MB["buf"] + v) for k, v in BUF.items()})
     f.update({"m_" + k: hex(v) for k, v in MAN.items()})
     f["placeholder"] = hex(PLACEHOLDER)
+    f.update({"entries": hex(ENTRIES), "ge": hex(GE), "frag_row": hex(FRAG_ROW), "m_frag": hex(FRAG),
+              "magic": hex(MAGIC), "rec_battle": hex(REC_BATTLE), "map_off": hex(MAP_OFF)})
     return f
 
 
@@ -184,41 +468,62 @@ def assemble(asm=ASM):
     return code[:at] + bytes(8) + code[at + 8:], at
 
 
-def lua_text(code, at):
+def _disasm_lines(code, at):
     import capstone
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    lines = [BEGIN + " from its assembly (--check, --selftest)",
-             "-- the block's offsets (platform.lua writes them, the cave reads them) and the cave's bytes, its block at CAVE_BLOCK",
-             "local MB = {" + ", ".join("%s = 0x%x" % (k, MB[k]) for k in MB) + "}",
-             "local CAVE_BLOCK = %d" % at,
-             "local CAVE_SITE = {" + ", ".join("0x%02x" % b for b in SITE_BYTES) + "} -- the bytes its jump displaces",
-             "local CAVE = {"]
+    lines = []
     for ins in md.disasm(code, 0):
         text = "%s %s" % (ins.mnemonic, ins.op_str)
         if ins.address == at - 2:
             text = "mov rax, <block>"
         lines.append("\t" + ", ".join("0x%02x" % b for b in ins.bytes) + ", -- %s" % text.strip())
+    return lines
+
+
+def lua_text(code, at, ccode, cat):
+    lines = [BEGIN + " from its assembly (--check, --selftest)",
+             "-- the block's offsets (platform.lua writes them, the cave reads them) and the two caves' bytes:",
+             "-- the update cave (block at CAVE_BLOCK) and the carrier cave (block at CARRIER_BLOCK)",
+             "local MB = {" + ", ".join("%s = 0x%x" % (k, MB[k]) for k in MB) + "}",
+             "local FUNCS = {" + ", ".join('"%s"' % k for k in FUNCS) + "} -- called or jumped through: never zeroed",
+             "local CAVE_BLOCK = %d" % at,
+             "local CAVE_SITE = {" + ", ".join("0x%02x" % b for b in SITE_BYTES) + "} -- the bytes its jump displaces",
+             "local CAVE = {"]
+    lines += _disasm_lines(code, at)
+    lines += ["}",
+              "local CARRIER_BLOCK = %d" % cat,
+              "local CARRIER_SITE = {" + ", ".join("0x%02x" % b for b in CARRIER_SITE) + "} -- the displaced movss",
+              "local CARRIER = {"]
+    lines += _disasm_lines(ccode, cat)
     lines += ["}", END]
     return "\n".join(lines)
 
 
+def _parse_table(region, name):
+    start = region.find("local %s = {" % name)
+    table = region[start:start + region[start:].find("\n}")]
+    return bytes(int(h, 16) for h in re.findall(r"0x([0-9a-f]{2}),", re.sub(r"--[^\n]*", "", table)))
+
+
 def shipped():
-    """(bytes, block offset, MB) parsed out of platform.lua: what the pack actually carries."""
+    """(code, block offset, carrier code, carrier block offset, MB) parsed out of platform.lua."""
     s = open(PLATFORM, encoding="utf-8", newline="").read()
     i, j = s.find(BEGIN), s.find(END)
     if i < 0 or j < 0:
         raise SystemExit("platform.lua carries no cave (markers %r .. %r)" % (BEGIN, END))
     region = s[i:j]
-    table = region[region.find("local CAVE = {"):]
-    code = bytes(int(h, 16) for h in re.findall(r"0x([0-9a-f]{2}),", re.sub(r"--[^\n]*", "", table)))
+    code = _parse_table(region, "CAVE")
+    ccode = _parse_table(region, "CARRIER")
     at = int(re.search(r"local CAVE_BLOCK = (\d+)", region).group(1))
+    cat = int(re.search(r"local CARRIER_BLOCK = (\d+)", region).group(1))
     mb = {k: int(v, 16) for k, v in re.findall(r"(\w+) = 0x([0-9a-f]+)", re.search(r"local MB = \{([^}]*)\}", region).group(1))}
-    return code, at, mb
+    return code, at, ccode, cat, mb
 
 
 def write():
     code, at = assemble()
-    text = lua_text(code, at)
+    ccode, cat = assemble(CARRIER_ASM)
+    text = lua_text(code, at, ccode, cat)
     s = open(PLATFORM, encoding="utf-8", newline="").read()
     nl = "\r\n" if "\r\n" in s else "\n"
     text = text.replace("\n", nl)
@@ -227,27 +532,37 @@ def write():
         raise SystemExit("put the two marker lines into platform.lua first: %r and %r" % (BEGIN, END))
     s = s[:i] + text + s[j + len(END):]
     open(PLATFORM, "w", encoding="utf-8", newline="").write(s)
-    print("wrote %d cave bytes, block at +%d, into %s" % (len(code), at, PLATFORM))
+    print("wrote update cave %d bytes (block +%d), carrier cave %d bytes (block +%d), into %s"
+          % (len(code), at, len(ccode), cat, PLATFORM))
 
 
 def check():
     sys.path.insert(0, HERE)
     import exe_re
     code, at = assemble()
-    got, gat, mb = shipped()
+    ccode, cat = assemble(CARRIER_ASM)
+    got, gat, gccode, gcat, mb = shipped()
     bad = []
     if (got, gat) != (code, at):
-        bad.append("platform.lua's cave is not this file's assembly: run py tools/third_person_cave.py")
+        bad.append("platform.lua's update cave is not this file's assembly: run py tools/third_person_cave.py")
+    if (gccode, gcat) != (ccode, cat):
+        bad.append("platform.lua's carrier cave is not this file's assembly: run py tools/third_person_cave.py")
     if mb != MB:
         bad.append("platform.lua's block offsets differ: %r" % mb)
+    s = open(PLATFORM, encoding="utf-8").read()
+    funcs = re.search(r"local FUNCS = \{([^}]*)\}", s[s.find(BEGIN):s.find(END)])
+    if not funcs or tuple(re.findall(r'"(\w+)"', funcs.group(1))) != FUNCS:
+        bad.append("platform.lua's FUNCS is not this file's: run py tools/third_person_cave.py")
     exe_re.pe()
-    on_disk = exe_re._pe[exe_re.off(SITE_RVA):exe_re.off(SITE_RVA) + len(SITE_BYTES)]
-    if on_disk != SITE_BYTES:
-        bad.append("exe+%x reads %s, not %s: a patch moved his update" % (SITE_RVA, on_disk.hex(" "), SITE_BYTES.hex(" ")))
+    for rva, want, what in ((SITE_RVA, SITE_BYTES, "his update"), (CARRIER_RVA, CARRIER_SITE, "the RELOAD_TIME float read")):
+        on_disk = exe_re._pe[exe_re.off(rva):exe_re.off(rva) + len(want)]
+        if on_disk != want:
+            bad.append("exe+%x reads %s, not %s: a patch moved %s" % (rva, on_disk.hex(" "), want.hex(" "), what))
     for b in bad:
         print("FAIL " + b)
     if not bad:
-        print("ok: %d bytes, block at +%d, site exe+%x as expected" % (len(code), at, SITE_RVA))
+        print("ok: update cave %d bytes (block +%d), carrier cave %d bytes (block +%d); sites exe+%x and exe+%x as expected"
+              % (len(code), at, len(ccode), cat, SITE_RVA, CARRIER_RVA))
     return not bad
 
 
@@ -264,7 +579,27 @@ WRECK = ("mov rcx, -1; mov rdx, -2; mov r8, -3; mov r9, -4; mov r10, -5; mov r11
          "pcmpeqd xmm5, xmm5; ret")
 
 
-def run(code, at, setup, rcx=HIM):
+def _race(uc, race, count_at, st):
+    """The other free, on another thread: race = (entry, value, count delta). Once the cave has read the entry's man
+    pointer, the instruction after that read finds the entry already holding value (0: freed; a man: freed and claimed
+    again) and count moved by delta, as if the other thread got there between the cave's read and its free."""
+    import unicorn
+    entry, value, delta = race
+
+    def on_read(u, access, addr, size, v, _):
+        st["read"] = True
+
+    def on_code(u, addr, size, _):
+        if st["read"] and not st["raced"]:
+            st["raced"] = True
+            u.mem_write(entry, struct.pack("<Q", value))
+            n = int.from_bytes(u.mem_read(count_at, 4), "little")
+            u.mem_write(count_at, struct.pack("<I", (n + delta) & 0xffffffff))
+    uc.hook_add(unicorn.UC_HOOK_MEM_READ, on_read, begin=entry, end=entry + 7)
+    uc.hook_add(unicorn.UC_HOOK_CODE, on_code)
+
+
+def run(code, at, setup, rcx=HIM, race=None):
     """Run the cave once as his update's entry would; returns (calls, regs before, regs after, mem read)."""
     import keystone
     import unicorn
@@ -312,13 +647,17 @@ def run(code, at, setup, rcx=HIM):
             calls.append(("stop" if addr == STOP else "start", u.reg_read(regs["rcx"]), u.reg_read(regs["rdx"]),
                           u.reg_read(regs["rsp"]) % 16))
     uc.hook_add(unicorn.UC_HOOK_CODE, hook, begin=STUBS, end=STUBS + 0x1000)
+    st = {"read": False, "raced": False}
+    if race:
+        _race(uc, race, BLOCK + MB["count"], st)
     uc.emu_start(CODE, CODE + len(code), count=10000)
     after = {r: uc.reg_read(regs[r]) for r in KEEP}
     ok_xmm = all(uc.reg_read(xmm[i]) == 0x0123456789abcdef0011223344556677 + i for i in range(4))
     rip = uc.reg_read(X.UC_X86_REG_RIP)
 
     def rd(addr, n): return int.from_bytes(uc.mem_read(addr, n), "little")
-    return {"calls": calls, "before": before, "after": after, "xmm": ok_xmm, "end": rip == CODE + len(code), "rd": rd}
+    return {"calls": calls, "before": before, "after": after, "xmm": ok_xmm, "end": rip == CODE + len(code), "rd": rd,
+            "raced": st["raced"]}
 
 
 def scenarios(code, at):
@@ -416,6 +755,247 @@ def scenarios(code, at):
     # both requests in one update: the guard first, then the walk
     r = run(code, at, cmd("melee", guard=1, walk=2))
     expect([c[0] for c in r["calls"]] == ["stop", "start"], "guard then steer: %r" % r["calls"])
+
+    # the multiplayer table scan (the update cave's second half): man 0 (no single-man path), count > 0, entries at MB
+    # guards. The man being updated is rcx; his entry stops the engine's four, a non-engine command runs, a dead man's
+    # entry is freed, a man with no entry is untouched. Single player (count 0) never reaches the scan: the cases above
+    # all ran with count 0.
+    def table(entries, vt, rcx_man=HIM, hp=80):
+        def setup(q, d, uc):
+            q(BLOCK + MB["man"], 0)                 # nobody in the single-man slot: the cave's first half is skipped
+            d(BLOCK + MB["count"], len(entries))
+            q(rcx_man + MAN["cmd"], VT[vt])
+            d(rcx_man + MAN["hp"], hp)
+            for i, (man, mid) in enumerate(entries):
+                q(BLOCK + MB["guards"] + i * GE, man)
+                d(BLOCK + MB["guards"] + i * GE + 8, mid)
+        return setup
+
+    for vt in ("walk_a", "move_a", "move_b", "melee"):
+        r = run(code, at, table([(HIM, 1001)], vt), rcx=HIM)
+        kept(r, "table guard " + vt)
+        expect([c[:2] for c in r["calls"]] == [("stop", HIM)], "table guard: %s stopped on him, got %r" % (vt, r["calls"]))
+        expect(r["rd"](BLOCK + MB["stops"], 4) == 1, "table guard %s: counted" % vt)
+    for vt in ("walk_b", "stand", "idle", "clip"):
+        r = run(code, at, table([(HIM, 1001)], vt), rcx=HIM)
+        expect(not r["calls"], "table guard: %s left to run, got %r" % (vt, r["calls"]))
+    # a man with no entry of his own is untouched, even with a full-ish table
+    r = run(code, at, table([(OTHER, 2002)], "melee", rcx_man=HIM), rcx=HIM)
+    kept(r, "table: not guarded")
+    expect(not r["calls"], "a man with no entry: no stop")
+    # two men guarded at once: each stops his own on his own update
+    r = run(code, at, table([(HIM, 1001), (OTHER, 2002)], "melee", rcx_man=HIM), rcx=HIM)
+    expect([c[:2] for c in r["calls"]] == [("stop", HIM)], "two guarded, HIM updates: stop HIM, got %r" % r["calls"])
+    def two_other(q, d, uc):
+        table([(HIM, 1001), (OTHER, 2002)], "melee", rcx_man=HIM)(q, d, uc)
+        q(OTHER + MAN["cmd"], VT["melee"])
+        d(OTHER + MAN["hp"], 80)
+    r = run(code, at, two_other, rcx=OTHER)
+    expect([c[:2] for c in r["calls"]] == [("stop", OTHER)], "two guarded, OTHER updates: stop OTHER, got %r" % r["calls"])
+    # a guarded man who died: no stop, his entry freed and the count dropped (the backup to the GUARD_OFF his owner sends
+    # by his id)
+    r = run(code, at, table([(HIM, 1001)], "melee", hp=0), rcx=HIM)
+    kept(r, "table guard dead")
+    expect(not r["calls"], "a dead guarded man: no stop")
+    expect(r["rd"](BLOCK + MB["guards"], 8) == 0 and r["rd"](BLOCK + MB["count"], 4) == 0,
+           "a dead guarded man: his entry freed, count dropped")
+    # the lost race (the feasibility record's Ruling 18): his GUARD_OFF freed the entry between this update's scan and
+    # its free. The count went down once, there; here the exchange fails and nothing more is counted down
+    r = run(code, at, table([(HIM, 1001)], "melee", hp=0), rcx=HIM, race=(BLOCK + MB["guards"], 0, -1))
+    kept(r, "table guard dead, freed first elsewhere")
+    expect(r["raced"], "the race: the other free ran between the scan and the free")
+    expect(r["rd"](BLOCK + MB["guards"], 8) == 0 and r["rd"](BLOCK + MB["count"], 4) == 0,
+           "a free lost to another: count %d, want 0" % r["rd"](BLOCK + MB["count"], 4))
+    # freed elsewhere and claimed again by another man before the free: his entry is left to him
+    r = run(code, at, table([(HIM, 1001)], "melee", hp=0), rcx=HIM, race=(BLOCK + MB["guards"], OTHER, 0))
+    expect(r["raced"] and r["rd"](BLOCK + MB["guards"], 8) == OTHER and r["rd"](BLOCK + MB["count"], 4) == 1,
+           "an entry claimed again before the free: left to its new man, count 1")
+    return fails
+
+
+# -- the carrier cave's emulator ------------------------------------------------------------------------------------
+CCODE, CREC, CCONT, CSLOT, CSTUB, LAND, CSTACK, FRAGTAB, CMODEL, CMODEL2 = (
+    0x60000000, 0x61000000, 0x62000000, 0x63000000, 0x64000000, 0x65000000, 0x66000000, 0x67000000, 0x68000000, 0x69000000)
+# the map lookup stub: it returns CSLOT (whose first qword the harness fills with the model) when the id at [rdx] is the
+# one this run resolves, else null (a gone man). Assembled per run with the known id and the slot baked in.
+CSTUB_ASM = "mov r10d, {id}\ncmp dword ptr [rdx], r10d\njne crun_miss\nmov rax, {slot}\nret\ncrun_miss:\nxor eax, eax\nret"
+# the registers the carrier site's code still needs after the cave (callee-saved, and rbx the record): kept on every exit
+CKEEP = ["rbx", "rsi", "rdi", "rbp", "r12", "r13", "r14", "r15"]
+
+
+def crun(ccode, cat, word, known_id=0, model=0, model_hp=80, entries=(), nfrags=0, rows=(), man_frag=0, race=None):
+    """Run the carrier cave once at exe+2ecfcb7. Returns the block/model effects and whether it skipped the store."""
+    import keystone
+    import unicorn
+    from unicorn import x86_const as X
+    uc = unicorn.Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_64)
+    for base in (CCODE, BLOCK, CREC, CCONT, CSLOT, CSTUB, LAND, CSTACK, FRAGTAB, CMODEL, CMODEL2):
+        uc.mem_map(base, 0x10000)
+    ks = keystone.Ks(keystone.KS_ARCH_X86, keystone.KS_MODE_64)
+    uc.mem_write(CSTUB, bytes(ks.asm(CSTUB_ASM.format(id=known_id, slot=CSLOT), 0)[0]))
+    uc.mem_write(LAND, bytes(ks.asm("nop", 0)[0]))
+    ccode = ccode[:cat] + struct.pack("<Q", BLOCK) + ccode[cat + 8:]
+    uc.mem_write(CCODE, ccode)
+
+    def q(addr, v): uc.mem_write(addr, struct.pack("<Q", v & (2 ** 64 - 1)))
+    def d(addr, v): uc.mem_write(addr, struct.pack("<I", v & (2 ** 32 - 1)))
+    q(BLOCK + MB["map_lookup"], CSTUB)
+    q(BLOCK + MB["skip"], LAND)
+    q(BLOCK + MB["fragtab"], FRAGTAB)
+    d(BLOCK + MB["nfrags"], nfrags)
+    d(BLOCK + MB["count"], sum(1 for man, _ in entries if man))
+    for i, (man, mid) in enumerate(entries):
+        q(BLOCK + MB["guards"] + i * GE, man)
+        d(BLOCK + MB["guards"] + i * GE + 8, mid)
+    for i, row in enumerate(rows):
+        for j, p in enumerate(row):
+            q(FRAGTAB + i * FRAG_ROW + j * 8, p)
+    q(CREC + REC_BATTLE, CCONT)        # [reader + 0x30] -> the entity container
+    q(CSLOT, model)                    # the map lookup's value: the model (0 = gone)
+    if model:
+        d(model + MAN["hp"], model_hp)
+        q(model + FRAG, man_frag)
+    sp = CSTACK + 0x8000               # rsp at the carrier site is 16-aligned
+    d(sp + 0x30, word)
+    uc.reg_write(X.UC_X86_REG_RSP, sp)
+    creg = {r: getattr(X, "UC_X86_REG_" + r.upper()) for r in CKEEP}
+    before = {r: 0x7700000000 + n * 0x1111 for n, r in enumerate(CKEEP)}
+    before["rbx"] = CREC
+    for r, v in before.items():
+        uc.reg_write(creg[r], v)
+    st = {"v": False, "align": None, "resolved": False, "args": None}
+
+    def hook(u, addr, size, _):
+        if addr == CSTUB:
+            st["align"] = u.reg_read(X.UC_X86_REG_RSP) % 16
+            st["resolved"] = True
+            st["args"] = (u.reg_read(X.UC_X86_REG_RCX), u.reg_read(X.UC_X86_REG_RDX))
+        if addr == LAND:
+            st["v"] = True
+            u.emu_stop()
+    uc.hook_add(unicorn.UC_HOOK_CODE, hook)
+    rst = {"read": False, "raced": False}
+    if race:
+        _race(uc, race, BLOCK + MB["count"], rst)
+    uc.emu_start(CCODE, CCODE + len(ccode), count=100000)
+
+    def rd(addr, n): return int.from_bytes(uc.mem_read(addr, n), "little")
+    table = [(rd(BLOCK + MB["guards"] + i * GE, 8), rd(BLOCK + MB["guards"] + i * GE + 8, 4)) for i in range(ENTRIES)]
+    lost = ["%s %x -> %x" % (r, before[r], uc.reg_read(creg[r])) for r in CKEEP if uc.reg_read(creg[r]) != before[r]]
+    return {"skipped": st["v"], "align": st["align"], "resolved": st["resolved"], "rsp_ok": uc.reg_read(X.UC_X86_REG_RSP) == sp,
+            "count": rd(BLOCK + MB["count"], 4), "table": table, "frag": rd(model + FRAG, 8) if model else None, "rd": rd,
+            "args": st["args"], "lost": lost, "raced": rst["raced"]}
+
+
+def carrier_scenarios(ccode, cat):
+    """Every case the carrier cave has to get right. Returns the failures as text."""
+    import keystone  # noqa: F401 - crun imports it; fail early here if missing
+    fails = []
+    ID, ID2 = 1001, 2002
+
+    def expect(cond, what):
+        if not cond:
+            fails.append("carrier: " + what)
+
+    def word(op, flags=0, id=ID):
+        hi = MAGIC * 256 + op * 16 + flags
+        return hi * 0x10000 + (id & 0xffff)
+
+    def kept(r, what):  # rsp and every register the site's code reads after the cave, on whichever exit it took
+        expect(r["rsp_ok"], what + ": rsp balanced")
+        expect(not r["lost"], what + ": registers kept, lost " + ", ".join(r["lost"]))
+
+    # vanilla reload times (0.2 and -1.0) have no magic: the cave resumes untouched (does not skip the store), touches
+    # no guard entry and no fragment
+    for name, w in (("0.2", 0x3E4CCCCD), ("-1.0", 0xBF800000)):
+        r = crun(ccode, cat, w, known_id=ID, model=CMODEL)
+        expect(not r["skipped"], "vanilla %s: falls through to the store, not skipped" % name)
+        kept(r, "vanilla %s" % name)
+        expect(r["count"] == 0 and r["frag"] == 0, "vanilla %s: nothing claimed, fragment untouched" % name)
+
+    # GUARD_ON claims an entry for the man; GUARD_OFF frees it
+    r = crun(ccode, cat, word(OPS["GUARD_ON"]), known_id=ID, model=CMODEL)
+    expect(r["skipped"], "GUARD_ON: skips the store")
+    kept(r, "GUARD_ON")
+    expect(r["align"] == 8, "GUARD_ON: the map lookup's callee sees rsp 8 past a 16-byte boundary, got %s" % r["align"])
+    # the lookup is asked the way the handlers ask it: the container's map at +0x80, and the address of the id
+    expect(r["args"] == (CCONT + MAP_OFF, BLOCK + MB["find"]),
+           "GUARD_ON: lookup(container+0x80, &find), got %s" % (r["args"] and tuple(hex(a) for a in r["args"]),))
+    expect(r["count"] == 1 and r["table"][0] == (CMODEL, ID), "GUARD_ON claims entry 0: %r" % (r["table"][0],))
+    r = crun(ccode, cat, word(OPS["GUARD_OFF"]), known_id=ID, model=CMODEL, entries=[(CMODEL, ID)])
+    kept(r, "GUARD_OFF")
+    expect(r["count"] == 0 and r["table"][0] == (0, ID), "GUARD_OFF frees the entry: %r" % (r["table"][0],))
+    # the lost race (the feasibility record's Ruling 18): his dead man's update freed the entry between this scan's read
+    # and its free. The count went down once, there; here the exchange fails and nothing more is counted down
+    r = crun(ccode, cat, word(OPS["GUARD_OFF"]), known_id=ID, model=CMODEL, entries=[(CMODEL, ID)],
+             race=(BLOCK + MB["guards"], 0, -1))
+    kept(r, "GUARD_OFF, freed first elsewhere")
+    expect(r["raced"], "the race: the other free ran between the read and the free")
+    expect(r["count"] == 0 and r["table"][0] == (0, ID), "GUARD_OFF lost to another free: count %d, want 0" % r["count"])
+    # the entry holding another man by the time of the free: the exchange compares the pointer read, so it is left to him
+    r = crun(ccode, cat, word(OPS["GUARD_OFF"]), known_id=ID, model=CMODEL, entries=[(CMODEL, ID)],
+             race=(BLOCK + MB["guards"], CMODEL2, 0))
+    expect(r["raced"] and r["count"] == 1 and r["table"][0][0] == CMODEL2,
+           "GUARD_OFF after the entry was claimed again: left to its new man, count %d" % r["count"])
+    # a freed entry keeps its old id; it is free by its man pointer, so the next GUARD_ON takes it, the first free slot
+    r = crun(ccode, cat, word(OPS["GUARD_ON"]), known_id=ID, model=CMODEL, entries=[(0, 5), (CMODEL2, ID2)])
+    expect(r["count"] == 2 and r["table"][0] == (CMODEL, ID) and r["table"][1] == (CMODEL2, ID2),
+           "a freed entry is reused: %r" % r["table"][:3])
+    # id 0 is no man (the engine's own check, exe+2eaf0eb): never looked up, nothing claimed
+    r = crun(ccode, cat, word(OPS["GUARD_ON"], id=0), known_id=0, model=CMODEL)
+    expect(r["skipped"] and not r["resolved"] and r["count"] == 0, "id 0: not looked up, nothing claimed")
+
+    # two men guarded at once: distinct ids claim distinct entries
+    r = crun(ccode, cat, word(OPS["GUARD_ON"], id=ID2), known_id=ID2, model=CMODEL2, entries=[(CMODEL, ID)])
+    expect(r["count"] == 2 and r["table"][0] == (CMODEL, ID) and r["table"][1] == (CMODEL2, ID2),
+           "two men: both entries held, %r" % r["table"][:2])
+    # GUARD_ON for a man already claimed refreshes his pointer, claims no second slot
+    r = crun(ccode, cat, word(OPS["GUARD_ON"]), known_id=ID, model=CMODEL2, entries=[(CMODEL, ID)])
+    expect(r["count"] == 1 and r["table"][0] == (CMODEL2, ID), "GUARD_ON twice: one entry, pointer refreshed")
+
+    # the seventeenth man is dropped; the sixteen already held are unchanged
+    full = [(CMODEL, 100 + i) for i in range(ENTRIES)]
+    r = crun(ccode, cat, word(OPS["GUARD_ON"], id=9999), known_id=9999, model=CMODEL2, entries=full)
+    expect(r["count"] == ENTRIES and r["table"] == full, "the seventeenth man dropped, the sixteen unchanged")
+
+    # an unknown id (the map returns null) and a dead man: no claim, no write
+    r = crun(ccode, cat, word(OPS["GUARD_ON"], id=7), known_id=ID, model=0)
+    expect(r["skipped"] and r["count"] == 0, "unknown id: dropped, no claim")
+    kept(r, "unknown id")
+    # a dead man, every op: his entry freed (never claimed), his fragment never written
+    for op in ("GUARD_ON", "GUARD_OFF"):
+        r = crun(ccode, cat, word(OPS[op]), known_id=ID, model=CMODEL, model_hp=0, entries=[(CMODEL, ID)])
+        expect(r["count"] == 0 and r["table"][0] == (0, ID), "a dead man, %s: his entry freed, not claimed" % op)
+    dead_row = [CMODEL + 0x2000 + k * 0x100 for k in range(5)]
+    for op, frag in (("DISARM", dead_row[0]), ("ARM", dead_row[2])):
+        r = crun(ccode, cat, word(OPS[op], flags=1), known_id=ID, model=CMODEL, model_hp=0, nfrags=1, rows=[dead_row],
+                 man_frag=frag)
+        expect(r["skipped"] and r["frag"] == frag, "a dead man, %s: his fragment untouched, got %x" % (op, r["frag"]))
+
+    # DISARM points his fragment at the copy of its kind; each flag pair picks its column. ARM points it back.
+    orig = CMODEL + 0x2000
+    row = [orig, orig + 0x100, orig + 0x200, orig + 0x300, orig + 0x400]  # orig, plain, shots, charge, shots_charge
+    kinds = {0: row[1], 1: row[2], 2: row[3], 3: row[4]}  # flags (shots|charge<<1) -> column
+    for flags, want in kinds.items():
+        r = crun(ccode, cat, word(OPS["DISARM"], flags=flags), known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=orig)
+        expect(r["skipped"] and r["frag"] == want, "DISARM flags %d -> %x, got %x" % (flags, want, r["frag"]))
+    # flag bits 2-3 (word bits 18-19) are ignored, never change the column
+    for extra in (0x4, 0x8, 0xc):
+        r = crun(ccode, cat, word(OPS["DISARM"], flags=1 | extra), known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=orig)
+        expect(r["frag"] == row[2], "DISARM shots with ignored bits %x still picks shots" % extra)
+    # ARM from any column restores orig
+    for col in row[1:]:
+        r = crun(ccode, cat, word(OPS["ARM"]), known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=col)
+        expect(r["skipped"] and r["frag"] == orig, "ARM from %x -> orig, got %x" % (col, r["frag"]))
+    # an unknown fragment (not in the table) is left untouched
+    r = crun(ccode, cat, word(OPS["DISARM"]), known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=CMODEL + 0x5000)
+    expect(r["skipped"] and r["frag"] == CMODEL + 0x5000, "DISARM unknown fragment: untouched, dropped")
+
+    # HELLO asks the cave for nothing and a magic word with an op outside 1..5 is no op: both skip the store unresolved
+    for op in (OPS["HELLO"], 0, 6, 15):
+        r = crun(ccode, cat, word(op), known_id=ID, model=CMODEL)
+        expect(r["skipped"] and not r["resolved"] and r["count"] == 0, "op %d: dropped unresolved, no action" % op)
+        kept(r, "op %d" % op)
     return fails
 
 
@@ -429,18 +1009,131 @@ MUTANTS = [
     ("his own walk rebuilt every tick", "    je in_place\n", "    nop\n"),
     ("a dead man stopped", "    jg alive\n", "    jmp alive\n"),
     ("fresh cleared on every steer", "    test r8d, r8d\n    je restore\n", ""),
+    # the multiplayer table scan
+    ("the table scan guards the wrong man", "    cmp qword ptr [rdx], rsi\n", "    cmp qword ptr [rdx], rbx\n"),
+    ("a guarded man never stopped", "    jne b_restore\nb_stop:\n", "    jmp b_restore\nb_stop:\n"),
+    # a free it lost still counted down (the feasibility record's Ruling 18)
+    ("a dead man's free counts down unconditionally", "    lock cmpxchg qword ptr [rdx], rcx\n    jne b_restore\n",
+     "    lock cmpxchg qword ptr [rdx], rcx\n"),
+]
+
+# the carrier cave's own mistakes; each must be caught by carrier_scenarios()
+CARRIER_MUTANTS = [
+    ("the magic never checked", "    cmp r10d, {magic}\n    jne not_ours\n", ""),
+    ("the claimed entry gets the wrong man", "    mov qword ptr [rdi], rsi\n", "    mov qword ptr [rdi], rax\n"),
+    ("flag bits 2-3 not masked", "    and eax, 3\n", "    and eax, 0xf\n"),
+    ("GUARD_OFF frees nothing",
+     "    xor r10d, r10d\n    lock cmpxchg qword ptr [rdx], r10\n    jne done_frame\n    lock dec dword ptr [r12 + {count}]\n", ""),
+    # a free it lost still counted down (the feasibility record's Ruling 18)
+    ("GUARD_OFF counts down unconditionally", "    lock cmpxchg qword ptr [rdx], r10\n    jne done_frame\n",
+     "    lock cmpxchg qword ptr [rdx], r10\n"),
+    # the lookup's arguments, the registers the site needs back, a freed entry's stale id, id 0, a dead man
+    ("map = container instead of +0x80", "    lea rcx, [rax + {map_off}]\n", "    mov rcx, rax\n"),
+    ("container = the reader itself", "    mov rax, qword ptr [rbx + {rec_battle}]\n", "    mov rax, rbx\n"),
+    ("pop rdi / pop rsi swapped", "    pop rdi\n    pop rsi\n    jmp rax\n", "    pop rsi\n    pop rdi\n    jmp rax\n"),
+    ("push rax in place of push r12", "    push r12\n", "    push rax\n"),
+    ("id == 0 treated as free", "go_scan:\n    mov rax, qword ptr [rdx]\n    test rax, rax\n",
+     "go_scan:\n    mov eax, dword ptr [rdx + 8]\n    test eax, eax\n"),
+    ("id 0 looked up", "    test r15d, r15d\n    jz resolved_null\n", ""),
+    ("a dead man disarmed", "op_disarm:\n    test rsi, rsi\n    jz done_frame\n    cmp dword ptr [rsi + {m_hp}], 0\n    jle done_frame\n",
+     "op_disarm:\n    test rsi, rsi\n    jz done_frame\n"),
+    ("a dead man armed", "op_arm:\n    test rsi, rsi\n    jz done_frame\n    cmp dword ptr [rsi + {m_hp}], 0\n    jle done_frame\n",
+     "op_arm:\n    test rsi, rsi\n    jz done_frame\n"),
 ]
 
 
+def _uncarrier_sample(words):
+    """M.uncarrier under lua.exe for each (hi, lo): the op index 0 (nil) or 1..5, and shots/charge. The cave must agree."""
+    import subprocess
+    lua = r"C:\Program Files (x86)\Lua\5.1\lua.exe"
+    plat = PLATFORM.replace("\\", "/")
+    script = (
+        "local M = assert(loadfile([[%s]]))()\n"
+        "local names = {GUARD_ON=1, GUARD_OFF=2, DISARM=3, ARM=4, HELLO=5}\n"
+        "for line in io.lines() do\n"
+        "  local hi, lo = line:match('(%%d+) (%%d+)')\n"
+        "  local d = M.uncarrier(tonumber(hi), tonumber(lo))\n"
+        "  if not d then print('0 0 0 0')\n"
+        "  else print(names[d.op], d.id, d.shots and 1 or 0, d.charge and 1 or 0) end\n"
+        "end\n" % plat)
+    inp = "".join("%d %d\n" % (hi, lo) for hi, lo in words)
+    out = subprocess.run([lua, "-e", script], input=inp, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise SystemExit("lua.exe M.uncarrier failed: " + out.stderr)
+    res = []
+    for ln in out.stdout.split("\n"):
+        if ln.strip():
+            op, mid, shots, charge = (int(x) for x in ln.split())
+            res.append((op, mid, shots, charge))
+    return res
+
+
+def _cave_classify(ccode, cat, hi, lo):
+    """What the carrier cave does to a word, as (op index 0..5, shots, charge), read ONLY from observable effects.
+    0 = not ours (fell through to the store) or a magic word asking for no action (op out of 1..4, so HELLO too: dropped before resolving)."""
+    ID = lo if lo else 1
+    word = hi * 0x10000 + lo
+    orig = CMODEL + 0x2000
+    row = [orig, orig + 0x100, orig + 0x200, orig + 0x300, orig + 0x400]  # orig, plain, shots, charge, shots_charge
+    # the guard table is prefilled with a DIFFERENT man for this id, so GUARD_ON (refresh to CMODEL) and GUARD_OFF (free)
+    # are both visible. The fragment starts at orig, so DISARM's column write is visible and distinct per flag pair.
+    r = crun(ccode, cat, word, known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=orig, entries=[(CMODEL2, ID)])
+    if not r["skipped"]:
+        return (0, 0, 0)                               # resumed to the store: not a carrier
+    if not r["resolved"]:
+        return (0, 0, 0)                               # magic, but no action (op out of 1..4, HELLO, id 0): unresolved
+    if r["table"][0] == (CMODEL, ID):                  # the id's entry refreshed to the resolved man -> GUARD_ON
+        return (1, 0, 0)
+    if r["table"][0] == (0, ID):                        # the id's entry freed -> GUARD_OFF
+        return (2, 0, 0)
+    if r["frag"] in (row[1], row[2], row[3], row[4]):  # a column written -> DISARM
+        col = (row[1], row[2], row[3], row[4]).index(r["frag"])
+        return (3, col & 1, (col >> 1) & 1)
+    # resolved, skipped, neither table nor fragment touched: ARM (orig -> orig is a no-op here) or nothing at all. A
+    # second run from a copy tells them apart: ARM points it back to orig.
+    r2 = crun(ccode, cat, word, known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=row[1], entries=[(CMODEL2, ID)])
+    if r2["frag"] == orig:
+        return (4, 0, 0)
+    return (9, 0, 0)                                    # resolved and then did nothing: no op of ours does that
+
+
+def agreement(ccode, cat):
+    """The cave never disagrees with M.uncarrier: every op 0..15 x flag nibble x a few ids, plus 0.2/-1.0."""
+    words = []
+    for op in range(16):
+        for flags in range(16):
+            for mid in (1, 1001, 4265):
+                words.append((MAGIC * 256 + op * 16 + flags, mid))
+    words += [(0x3E4C, 0xCCCD), (0xBF80, 0x0000)]     # 0.2 and -1.0 as hi, lo halves
+    want = _uncarrier_sample(words)
+    fails = []
+    for (hi, lo), (op, _mid, shots, charge) in zip(words, want):
+        c_op, c_shots, c_charge = _cave_classify(ccode, cat, hi, lo)
+        # HELLO (uncarrier op 5) and nil (0) are one "no action" class here, deliberately: the cave skips the store for
+        # both and resolves neither, so nothing it does can tell them apart. For DISARM uncarrier reports shots/charge;
+        # the cave's column must match. Other acting ops carry no flags.
+        if op == 5:
+            op = 0
+        if op != c_op or (op == 3 and (shots, charge) != (c_shots, c_charge)):
+            fails.append("agreement: hi=0x%04x lo=%d -> uncarrier (%d,%d,%d) but cave (%d,%d,%d)"
+                         % (hi, lo, op, shots, charge, c_op, c_shots, c_charge))
+    return fails
+
+
 def selftest():
-    code, at, mb = shipped()
+    code, at, ccode, cat, mb = shipped()
     if mb != MB:
         print("FAIL platform.lua's block offsets differ from this file's")
         return False
-    fails = scenarios(code, at)
+    fails = scenarios(code, at) + carrier_scenarios(ccode, cat)
     for f in fails:
         print("FAIL " + f)
-    print("%s: the shipped cave, %d bytes, %d failures" % ("ok" if not fails else "FAIL", len(code), len(fails)))
+    print("%s: the shipped caves, update %d bytes, carrier %d bytes, %d failures"
+          % ("ok" if not fails else "FAIL", len(code), len(ccode), len(fails)))
+    afails = agreement(ccode, cat)
+    for f in afails:
+        print("FAIL " + f)
+    print("%s: cave vs M.uncarrier agreement" % ("ok" if not afails else "FAIL"))
     caught = 0
     for name, old, new in MUTANTS:
         if old not in ASM:
@@ -451,8 +1144,18 @@ def selftest():
             caught += 1
         else:
             print("FAIL mutant survived: %s" % name)
-    print("%d of %d mutants caught" % (caught, len(MUTANTS)))
-    return not fails and caught == len(MUTANTS)
+    for name, old, new in CARRIER_MUTANTS:
+        if old not in CARRIER_ASM:
+            print("FAIL stale carrier mutant: %s" % name)
+            continue
+        mcode, mat = assemble(CARRIER_ASM.replace(old, new, 1))
+        if carrier_scenarios(mcode, mat):
+            caught += 1
+        else:
+            print("FAIL carrier mutant survived: %s" % name)
+    total = len(MUTANTS) + len(CARRIER_MUTANTS)
+    print("%d of %d mutants caught" % (caught, total))
+    return not fails and not afails and caught == total
 
 
 if __name__ == "__main__":

@@ -31,19 +31,26 @@ local ok, err = pcall(function()
 	E.K = load("keys")
 	E.settings = load("settings") -- read again at every toggle, but loaded only here
 	E.S = E.settings(get_mct and get_mct(), E.K)
+	-- in battle MCT reads its saved values after every mod script has run, so the read above has its defaults: a rebound
+	-- toggle only worked after one F2 (a player, 2026-10-21). MctInitialized is MCT saying the values are in
+	core:remove_listener("derpy_tp_mct")
+	core:add_listener("derpy_tp_mct", "MctInitialized", true, function() E.S = E.settings(get_mct(), E.K) end, false)
 	local mr = _G.memreader_plus
 	if not mr then
 		when_shown(function() E.say("derpy_tp_needs_memreader") end)
 		E.once("memreader", "memreader Plus is not loaded; nothing runs")
 		return
 	end
-	E.P = load("platform").build(mr)
+	E.P = load("platform").build(mr, bm:is_multiplayer(), E.once)
 	if not E.P.features.input then
 		when_shown(function() E.say("derpy_tp_input_unavailable") end)
 		E.once("input", "no keyboard or mouse: " .. table.concat(E.P.problems, "; "))
 		return
 	end
-	if bm:is_multiplayer() or bm:is_replay() then -- memory writes and scripted shots would desync
+	-- a replay has no player to play; multiplayer runs only in net mode (every change goes through the queue), else it would desync
+	local mp_off = bm:is_multiplayer() and not E.P.features.net
+	if bm:is_replay() or mp_off then
+		if mp_off then E.once("net", "multiplayer is off: " .. table.concat(E.P.problems, "; ")) end
 		bm:repeat_real_callback(function()
 			if E.P.focused() and E.P.pressed(E.S.keys.toggle) then E.say("derpy_tp_multiplayer") end
 		end, 1, "derpy_tp")

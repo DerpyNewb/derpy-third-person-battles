@@ -11,7 +11,7 @@ local m = mct:register_mod("derpy_third_person")
 m:set_title("Third-Person Battles")
 m:set_author("derpy")
 m:set_description("Play one unit from behind in battle. F2 takes the selected unit, or your general when none "
-	.. "is selected. Keys and camera are read each time it is switched on. It does nothing in multiplayer.")
+	.. "is selected. Keys and camera are read each time it is switched on.")
 
 local function slider(section, key, text, tooltip, default, min, max)
 	local o = m:add_new_option(key, "slider")

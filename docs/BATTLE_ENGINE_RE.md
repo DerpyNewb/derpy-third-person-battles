@@ -9,7 +9,9 @@ disassembly only.
 
 The code that uses these facts is `Modding Files/source/third_person/script/derpy_tp/platform.lua`, the only
 file in the third-person pack holding an address. The session record is
-`docs/sessions/HANDOFF_20261016_THIRD_PERSON_MOUNTS_AND_DEATH.md`, the last section.
+`docs/sessions/HANDOFF_20261016_THIRD_PERSON_MOUNTS_AND_DEATH.md`, the last section; the later third-person
+handoffs (`docs/SESSION_INDEX.md`, through 2026-10-21) added to sections 3, 5 and 14 and wrote sections 12 and 13,
+all on the same build.
 
 ## 1. The tools, and which question each answers
 
@@ -35,6 +37,10 @@ checks each command against a fact of this build. Two traps it works around:
 - **There is no RTTI.** Vtables run into each other with no complete-object-locator between them, so "scan back to
   where the vtable starts" is a guess. `vtmatch` aligns the region against a vtable whose base you know instead: a
   subclass keeps most of its base class's entries at the same index. That is how slot `0x4a8` was found (section 4).
+- **A function's start is a guess.** `fn` and the "in fn" column walk back to CC padding, and can land on an earlier
+  function: `fstart(2fda558)` gave `2fd97cc`, where the PE `.pdata` unwind range is `2fda19c..2fda624` (2026-10-20).
+  Settle a doubtful one from `.pdata`, and give Ghidra the true start: its helper makes a function at whatever RVA
+  it is asked.
 
 The analysis behind this document was done with `exe_re.py` (then a scratchpad script) and live reads. **Ghidra
 was set up afterwards** (section 10) and its decompile of the same five functions agrees with every line of the
@@ -79,6 +85,7 @@ Offsets on the model object (the man; for a rider, his mount is a model too, at 
 | `+0x108` | flags: bit 0x10 reaches the command/action path, bit 8 and bit 4 take other branches (read 0x33 in melee) | live / code |
 | `+0x128` | an object whose `+0x78` check also sends him to the gate (null in every melee frame measured) | live |
 | `+0x194/+0x198`, `+0x1e0/+0x1e8` | steering point copies x, z | live |
+| `+0x1e4` | the walk's destination y (read his own height, 654.7, on a siege wall) | live, 2026-10-21 |
 | `+0x278` | current animation slot, u16; valid while `+0x898` is set or `+0x284` is not 0 | live |
 | `+0x2e0` | mount parent (rider -> horse); null on foot. A crew shares one: all 5 of a Necrofex Colossus's men and all 4 of a Warsphinx's point at the same body, and a clip sent to any of them shows on the first | live, 2026-10-18 |
 | `+0x2e8` | his unit | live |
@@ -86,9 +93,12 @@ Offsets on the model object (the man; for a rider, his mount is a model too, at 
 | `+0x324` | **the kind of order issued to him this tick** (section 7); `3075e7c` zeroes it | live / code |
 | `+0x328` | command holder; the command object itself is embedded at `+0x330` | live |
 | `+0x330` | the command's vtable (section 5) | live |
+| `+0x340` | his own walk's done byte (`+0x10` of the command; `+0x360` is its `+0x30`), set when a walk with no path ends itself (section 5) | live / code, 2026-10-18 |
 | `+0x368..` | the command's payload: a walk's target x/z (`+0x368/+0x370`), run flag `+0x390`, speed `+0x394`; a forced clip's 16-byte clip payload | live |
+| `+0x3ae` | his walk's gait byte (stayed 0 through the engine's charge, section 5); the mailbox cave reads and writes it | live / code |
 | `+0x490` | **running** action holder: action object `+0x4a8`, its done byte `+0x4c8`, has `+0x5c0`, started `+0x5c1` | live |
 | `+0x5c8` | **queued** action holder: action object `+0x5e0`, its done byte `+0x600`, has `+0x6f8`, started `+0x6f9` | live |
+| `+0x710` | path state: 7 = the pathfinder found no way (set in `exe+3077009`); 6 = a walk reached its point (he coasts on until the command is replaced, 2026-10-14); a walk that moves him goes 2, then 4 | live, 2026-10-14 / 10-18 / 10-21 |
 | `+0x884` | the tick his wait ends (compared with the battle's `+0x98`) | live |
 | `+0x88a` | read 1 in every melee frame; non-zero sends the action update straight to the runner | live / code |
 | `+0x898` | with `+0x284`, whether `+0x278` holds a clip (`P.anim_slot`: neither set, no clip) | live |
@@ -117,11 +127,11 @@ start or command `3918e90`, chosen by its fragment's `+0x127c` bit 2.
 | Vtable | Command | Notes |
 |---|---|---|
 | `3911fb0` | forced clip | installed by `306e850`; **no order arrives while it runs** (live) |
-| `3ae2400` | his own walk | built by `walk_start` `exe+306f954`; speed from `exe+303b744` |
+| `3ae2400` | his own walk | built by `walk_start` `exe+306f954`; speed from `exe+303b744`. Built from the mailbox's block it has no path of its own (`+0x88` of the command null): to a point the pathfinder cannot reach (path state 7) its update `exe+3262850` ends it, done byte `+0x340`, and it **stays on him**, so writing its point in place moves him no more. A walk with a path re-plans instead (`+0x91`). Measured 2026-10-18 in a dwarf hold; `P.walk_ended` reads it |
 | `3919350` | the regiment's walk | the pack's guard stops it |
 | `39199f8`, `3ae1928` | the engine's moves | guard stops |
 | `3ad24b8` | the engine's melee attack | guard stops |
-| `3ad2d18` | the engine's charge | measured 2026-10-18 (`probes/zz_tp_charge_gait.lua`, Harald on CA's `attack_unit` from 45 m): his own walk for 0.4 s, then this for 5.4 s at 4.0 m/s against his run's 3.3, **no forced clip on him** (the charge cycle is his locomotion and loops), then MOVING_ATTACK_2 (485) at contact. The walk's gait byte `+0x3ae` stayed 0 throughout. The pack's sprint fakes it with the CHARGE clip (135), 0.8 s and not looping on Harald; re-sent every 0.6 s until 2026-10-18, now at its own length (data.lua `charges`) |
+| `3ad2d18` | the engine's charge | measured 2026-10-18 (`probes/zz_tp_charge_gait.lua`, Harald on CA's `attack_unit` from 45 m): his own walk for 0.4 s, then this for 5.4 s at 4.0 m/s against his run's 3.3, **no forced clip on him** (the charge cycle is his locomotion and loops), then MOVING_ATTACK_2 (485) at contact. The walk's gait byte `+0x3ae` stayed 0 throughout. The pack's sprint fakes it with the CHARGE clip (135), 0.8 s and not looping on Harald; re-sent every 0.6 s until 2026-10-18, now at its own length (data.lua `charges`). **Built by** `exe+30538b4`, whose only caller is `exe+306eb24(man, target)` (vslot `+0x4f8`): if `+0x324 < 2` it clears `+0x328` and builds the charge at `+0x330`. `target` is a 0x38-byte block copied to the command's `+0x90`: an entity at `+0x18`, a group at `+0x20` (one of its men picked at random), a position object at `+0x28` used when `+0x18` is null; the engine builds one in `exe+2eab460`. `exe+311bf9c(body, target)` charges a body and puts each rider on a ride-along command (`3ae1ce0`) - a chariot's or a mounted man's charge (code, 2026-10-20). **Called through the mailbox cave it crashed the game, with no dump, on a Seeker Chariot body and on an infantry man** (live, 2026-10-20); the cave went back to its 410-byte form, the charge version is in `Modding Files/Backup/third_person_charge_cave_20261020/` |
 | `39126f0` | stand in his state | what `walk_stop` `exe+306edd4` leaves |
 | `3919b28` | idle | |
 | `3ae2de8` | defend (block) | order kind 18 under it, measured |
@@ -160,7 +170,7 @@ action's start (slot 1) and marks it started; then it calls the update (slot 2) 
 action is done it clears the holder if `+0x133` asks (`exe+2db5ac4`).
 
 **The play command** (tag 0x28 in the deterministic command stream; reader `exe+2ecf4dc`; what `P.play` pushes):
-it reads the man, the slot (u16), the mask (u32) and one byte, then builds a **clip action** (vtable `exe+390c0b8`,
+it reads the man, the slot (a four-byte integer for version 0, a name for version 1; kept as a u16), the mask and one byte, then builds a **clip action** (vtable `exe+390c0b8`,
 constructor `exe+2f641b8`, base constructor `exe+3250f9c`) in the **queued** holder. For a rider
 (`exe+306e490` true and `+0x2e0` set) it goes on the mount's holder with the rider flag 1. Its 16-byte payload at
 `action+0x40`, which its start (`exe+2f7805c`) passes to the man's `+0x4a8`:
@@ -229,6 +239,15 @@ when the bytes there are the expected ones, and answers the same when they alrea
 puts it in while a man is played alone and takes it out at the stop. The platform takes it out as it loads, in
 case a battle was left mid-control. A build without the `queued_gate` row gets no patch and one log line.
 
+**In multiplayer** nobody toggles it. The gate changes the simulation (measured: a parked melee MOVE starts with it and
+is reset without it), so a machine that toggled it at a key press would start or reset that MOVE differently from the
+machines that did not, and the battle would desync (inferred; no two machines have run it). `install_net` puts it in at
+build on every machine, `main.lua` leaves it alone, and it stays in for the whole battle and after it, until the next
+build takes it out as it loads (a multiplayer build puts it straight back in). A machine where it does not go in gets
+no net mode. So in multiplayer the ceiling below covers every man of every army for the whole battle, whether anyone
+plays or not, and `P.play` is no longer the only thing that parks an action there: the forged MOVE, HALT and FOLLOW
+park one too (section 13, "As built"). Whether a vanilla man ever parks an action is open (section 14).
+
 Result, live (Teutogen Guard under two Clanrat units, a click every 2.4 s): 4 and 0 of 10 swings started before;
 10, 10 and 10 with it, in 200-400 ms; the same code with only the patch stubbed out, 10, 7 and 9 with waits to
 1.8 s. Shots, the horse's run speed and the no-auto-attack fragment were re-measured with it in and are unchanged.
@@ -276,7 +295,8 @@ answers the existing cave, so a later battle reads its block pointer back out of
 
 Every model class's update reaches `3086f04`: the subclass `312de40` calls it first, and so do seven other
 updates. Measured on a horse. `tools/third_person_cave.py` assembles the cave with keystone and runs the shipped
-bytes under unicorn: every path, register and stack alignment, plus 8 broken variants. Live, 795 stops with no
+bytes under unicorn: every path, register and stack alignment, plus 8 broken variants (11 now, with 13 more for the
+carrier cave, section 13). Live, 795 stops with no
 fault (session handoff 2026-10-17 section 10).
 
 **Recipes that made the measurement work** (all in `Modding Files/source/lord_control/probes/`, test scaffolding):
@@ -300,7 +320,7 @@ fault (session handoff 2026-10-17 section 10).
 ## 10. Ghidra: setup and use
 
 Ghidra 12.1.4 is in `C:\tools\ghidra_12.1.4_PUBLIC`, with Temurin JDK 21 in `C:\tools\jdk-21`. REA's Ghidra
-provider is blocked in REA 6.5.0 (`tools/external/README.md`); Ghidra itself works headless without it.
+provider works since REA 6.7.0 (`tools/external/README.md`); Ghidra itself also works headless without it.
 
 ```powershell
 py tools\ghidra_decompile.py --import          # once per game build: 56 s, a 333 MB project in ghidra_cache\
@@ -339,14 +359,309 @@ How it works and why:
    the build row's `update`, re-check the field offsets in `MAN`, then `py tools/third_person_cave.py` and
    `--selftest`. Without a known update the pack plays regiments whole.
 
-## 12. Open
+## 12. Beyond the man: the camera's floor, the projectile launch
+
+**The camera's floor** (2026-10-18, `probes/zz_tp_cam_sweep.lua`; session
+`HANDOFF_20261018_THIRD_PERSON_SIEGE_WALK_ARTILLERY.md` section 4). Camera system S =
+`*(*(*(exe+4480da0))+0x468)+0x64558`, current mode M = `*(S+0xc08)` (vtable `exe+3ab9498`). The floor `exe+2ebf734`
+(sibling `exe+2ebf9e4`) puts the eye at `max(A + min, B + h)`: A = vslot `+0x2e0`, `exe+2ee841c`, a raycast under the
+eye that counts roofs and walls; B = vslot `+0x2f0`, `exe+2ec2710`, the terrain heightfield; min/max vslots
+`+0x2c8`/`+0x2d0`, h = `M+0x450`. All 18 camera vtables hold A and B side by side. An eye asked 2 m over the road went
+18.7-24.0 m up under a gatehouse, 4.3 in the open (**live**). Redirecting one call site (`exe+2ebf916`) was not enough;
+a 5-byte `jmp exe+2ec2710` at A's entry (`48 8B C4 48 89` -> `E9 EF A2 FD FF`) gave +2.0 at all 11 points.
+`platform.lua` `P.terrain_floor(on)` writes it (BUILDS row `cam_collide` / `cam_terrain`) while third person is on;
+while it is in, every battle camera ignores buildings.
+
+**The projectile launch** (2026-10-20, Ghidra and live reads, while chasing the upward Irondrake flame; session
+`HANDOFF_20261020_THIRD_PERSON_FLAMETHROWER_PROBES.md`, which has the hooks, offsets and the open visual):
+`bm:trigger_projectile_launch` binds `2f1aef8 -> 2f1ad84` and queues through `2e9b9e4`; the real BCQ_FIRE_PROJECTILE
+handler is `2ecfd54` (command `+48` an optional firing entity, `+50` the **spread, not a yaw**); it spawns through
+`309eea4`, which publishes a 0x38-byte launch event (velocity at `+0x28`). The render consumer `2fe68b8` orients the
+launch FX from that velocity alone and does not branch on the beam flag (record `+f0`). Effect lookup `14f5e54`
+searches loaded effects only, so a new effect key with a `particle_effects` row still reads -1. The native velocity
+of a level Drakegun shot was forward, `(0, 1.50, 29.96)`. **Withdrawn:** the earlier chain `2efaa20 -> 2f19874 ->
+2f1a4bc -> 2ea7298` is a camera path read from metadata beside the serialiser, not the projectile's.
+
+## 13. Multiplayer and the command queue
+
+(2026-10-21, code only; decision record `docs/sessions/MP_FEASIBILITY_20261021_THIRD_PERSON.md`.) A battle
+runs in lockstep and the battle command queue (CA's names are `BCQ_*`) carries a change to every machine. That is
+inferred from the tick-bundle path under "One frame, one tick" below, which is one link short, and no two machines
+have run it. Addresses below are `exe+` RVAs; "battle" is the object `P.play` reaches as `[[exe+4480da0] + 0x468]`.
+
+**The registry.** 251 static initialisers (counted 2026-10-21 with the regex below) each call
+`exe+668a14(global, name, version, handler)`, which files the command under the id held in `global` (zero on disk, set
+at start-up); `exe+668ad4(&id)` finds the entry: name at `+0x0`, version at `+0x10`, handler at `+0x18`. A table of all 251 (name, global, handler, version) is one regex over
+the code, `lea r9,[handler]; xor r8d,r8d or mov r8d,imm; lea rdx,[name]; lea rcx,[global]; jmp 668a14`. The play
+command is `BCQ_ENTITY_USER_OVERRIDE_ORDER_ANIMATE`, global `exe+406cc98`, handler `exe+2ecf4dc`, **version 1**;
+`BCQ_FIRE_PROJECTILE` is global `exe+406cef8`, handler `exe+2ecfd54`, version 0.
+
+**Pushing.** Every pusher read has `cmd_push`'s shape (`exe+2e9b974` is the play command's; the player's move is
+`exe+1cae60c`): look the id up, write a 7-byte header into the queue with `exe+1bca278` (u16 length, the four id
+bytes, the version byte), call the command object's slot 0 to serialize its fields, then patch the length in
+`exe+1bcd5e4`. The queue is battle `+0x644e8`, vtable `exe+3904438` (slot 1 returns its buffer at `+0x8`, slot 2 empties
+it), 0x5000 bytes long with the write cursor at `+0x5008`. Fields are type-tagged: `exe+1bb1924` writes the tag, then
+the bytes raw, and `exe+1bab24c` reads them; the tags are listed under "The override commands" below. The writer checks
+the 0x5000 limit and flags the record instead of overrunning.
+
+The script wrappers `exe+2e9de34` to `exe+2e9e2ac` (27, each 0x2c bytes) push only when the battle's `+0x3b0` and
+`+0x3b1` are both 0; `+0x3b0` is what `battle:is_spectator()` (`exe+2eeb604`) returns, `+0x3b1` has no binding of its
+own. `battle:is_replay()` is the byte at `+0x645e0` (binding-table entry `exe+3d3ffd8`, handler `exe+2eeb29c`) and
+`battle:is_multiplayer()` is `+0x645c8` not null (handler `exe+2eea97c`); both were read with `exe_re.py ptrs` and `dis`
+on 2026-10-21.
+
+**The play command on the wire.** Its serializer `exe+2eecc50` writes the man's id (his `+0x258`), the slot as its
+**name** from the table at `exe+36ccb18` (32-byte rows, 2,260 names; row 2260 is `null`), the byte, and the mask as
+its **name** from `exe+3926220` (`NONE`, `TORSO_AND_ARMS`, `SPINE_AND_CHILDREN`, `NECK_AND_CHILDREN`, `LEFT_ARM`,
+`RIGHT_ARM`, `FULL_BODY` for 0 to 6; any other value writes `null`). The reader `exe+2ecf4dc` resolves the id
+through `exe+2eaf094` (the battle's `+0x1b8`, its map at `+0x80`), reads the slot as a four-byte integer (tag `4`) for
+version 0 or a name for version 1 (`exe+15861c4`, 2260 when unknown), reads the byte (`exe+1b9fc58`, called at
+`exe+2ecf55d`) and keeps only `byte != 0`, and reads the mask name back to 0..7 (`exe+1588f44`, 7 for `null`). The byte
+crosses the network whole (`exe+1ba06e8` writes all eight bits); only the reader narrows it. So a named slot below
+2260, eight bits and eight mask values arrive, but code after `exe+2ecf55d` sees one bit of the eight. The raw byte
+stays in the record's buffer (`+0x10`, read cursor `+0x20`; the field is tag `1` then the value), where a hook at
+`exe+2ecf556` or `exe+2ecf562` can still find it. The narrowed bit is the loop flag of `unit:play_anim_for_captain`
+(`exe+2f01278`, the binding `P.play` copies): the forced clip's update `exe+308779c` replays the slot every tick while
+it is 1.
+
+**One frame, one tick.** `exe+2d7b4a8` hands the queue's buffer to the tick manager's slot `+0x10` with the battle speed
+(`exe+2ddae64`), and empties the queue only when that returns true, so a full send buffer delays commands rather than dropping
+them. Single player's tick manager (vtable `exe+3a2e0c0`) copies it into its pending list (`exe+1bacab4`) and its
+slot 0 (`exe+1baa7b0`) returns a tick bundle holding it. The factory `exe+2db833c` chooses: a single-player battle
+(`+0x645c8` null) gets that local manager (`exe+1b9c678`); a multiplayer one gets `[battle+0x645c8] + 0x140`, and
+EMPIRE_MP's constructor `exe+2196d24` puts vtable `exe+3a5c888` at its own `+0x140`. One link was not followed: that
+`+0x645c8`, a battle constructor argument, holds the EMPIRE_MP object. So in multiplayer the tick manager is EMPIRE_MP's
+interface **by inference, one link short**; the two-machine run (Task 3 of the multiplayer plan) confirms it. Its
+submit `exe+21d7290` appends the buffer to the outgoing tick data (`exe+21a3a9c`, capped at
+0x5000), `EMPIRE_MP::submit_tick_data` (`exe+21d9280`) writes it as network message `0xa2` (or `0xa1`), and
+`EMPIRE_MP::p_get_tick` (`exe+21c8188`, the interface's slot 0) decodes `0xa1`/`0xa2` messages through `exe+21aff1c`
+into the next bundle. A bundle is `0x64058` bytes, the stride of the tick manager's pool (`exe+1baa883`): a time step
+and up to 20 buffers of `0x5004` (bytes, then length), since 8 + 20 x `0x5004` is `0x64058`. The callback `exe+2d804ec` passes it to `exe+2ddaaf0`, which copies it into the battle's `+0x468`, and
+`exe+2dd3910` runs each buffer through the executor `exe+2f041c0`: parse a record (`exe+288f9d0`), look its id up,
+call the handler with the record and the battle's `+0x440`. **Neither the executor nor a handler is told which
+player's buffer a record came from**, and the version byte is the only header field a handler sees. EMPIRE_MP learns
+the queue from `notify_battle_env_created` (`exe+21c42ec`, its vtable `exe+3a5bce0` slot `+0x78`), which the battle's
+constructor `exe+2d98420` calls with the queue. The `BNCQ_PLAYER_LEFT_GAME` command is pushed by EMPIRE_MP itself
+(`exe+21b7454`) into the same queue.
+
+**Model time.** `bm:time_elapsed_ms()` (`exe+2f17fb8`) returns the u32 at `[exe+4480da0] + 0x4a4`, which
+`exe+2f17df0` sets each tick (from the tick step at `exe+2dd3613`) to the tick count, the u32 at
+`[battle + 0x440] + 0x98`, times the u32 at `exe+3d0e294` (100 on disk). `model_tick_time_ms` (`exe+2ef5928`) returns
+that tick length.
+
+**Every `uc:` call the third-person pack makes is a queued command**: the record lists each binding and its `BCQ_*`.
+The pack's direct memory writes (steer, hold, face, the disarm's fragment pointer, the gate patch) are not `uc:` calls,
+and they do not travel (measured for `P.steer` in Task 2, where it was not recorded; inferred for the rest). **A slot
+without a clip is not a no-op:** the reader parks the action without looking at the
+fragment, and its start replaces the man's command with a forced clip (`exe+306e850`), whose play asks `exe+14828c0`
+(slot below 2260, fragment `+0x50 + 2*slot` not `0xffff`) and plays nothing.
+
+**The override commands** (2026-10-21, Task 1b, code only; the decision record's "Override commands" section has a row
+per type, the forging recipes and the carrier recommendation). Beside the play command, CA registered nine more per-man
+or per-battle overrides; every field of theirs crosses the wire raw (no names), and a handler that takes a man checks
+only the read-error byte and that the man resolved. Tags: `1` byte, `4` int32, `0xa` float, `0xc` three floats, `0xd` u16, `0xe` string (length,
+then characters), and four-byte ids resolved in battle `+0x1b8`: `0x23` a model (map `+0x80`), `0x21` (`+0x40`), `0x25`
+(`+0xe0`), `0x26` (`+0x100`), `0x27` (`+0x120`), `0x28`. A "position" is `0xc`, `0x26`, `0x27` (`exe+30f809c` reads,
+`exe+2eafa2c` writes). Each handler clears the man's queued holder (`exe+2db5ac4`) and parks its own action there, so
+one override or clip per man is parked at a time, and each meets the gate of section 7.
+
+| Command (`BCQ_ENTITY_USER_OVERRIDE_*`) | Handler, version | Wire | Action, and what it does |
+|---|---|---|---|
+| `_ORDER_MOVE`, global `exe+406c798` | `exe+2ecfb0c`, 0 | model; position; int32; float | vtable `exe+390bea8`. With his `+0x890` null: the walk parameter block from `exe+324e05c` (int32 as the run flag `+0x28`, float as the speed `+0x2c`, heading `+0x30` 0) into `walk_start` `exe+306f954`, so his own walk `3ae2400`, as the mailbox builds it. With `+0x890` set: `exe+324e8bc` and vslot `+0x5b0` (`exe+306fd58`) at the unit's own speed, rebuilt every tick. Done when his command's `+0x340` is set |
+| `_ORDER_HALT`, `exe+406cea8` | `exe+2ecf98c`, 0 | model | vtable `exe+390ba88`; after a draw of up to 2 ticks from the battle's generator (`exe+1bab1b0`), the stop `exe+306edf8` with state `0x81` (what `walk_stop` calls with his `+0x318`) |
+| `_ORDER_JUMP`, `exe+406cd64` | `exe+2ecf9e8`, 0 | model; point | vtable `exe+390b980`; vslot `+0x538` (`exe+306f158`) with a jump block from `exe+2d9f998` |
+| `_ORDER_TELEPORT`, `exe+406cd30` | `exe+2ecfbd4`, 0 | model; position; byte | vtable `exe+390b5e8`; vslot `+0xe8` (`exe+3078268`): byte 1 puts him at the point, byte 0 turns him toward it; then the stop with `0x81`. Never marks itself done (`exe+8f5a70`) |
+| `_ORDER_ATTACK`, `exe+406c82c` | `exe+2ecf644`, 0 | model; target model | vtable `exe+390c2c8`; target block `exe+2eab460`, then the order issuer `exe+306e89c` (or vslot `+0x580`) |
+| `_ORDER_FOLLOW_FIRST_PERSON`, `exe+406cc88` | `exe+2ecf6d0`, 1 | model; position; u16 heading; `0x25`; `0x21`; byte; point, model, `0x28`; int32; float; int32 state; byte; float; v1: byte, byte | vtable `exe+390bc98`; starts only on its own tick (`exe+2f783f0`); turns him to the heading (vslot `+0x5f8`, `exe+30702b8`) unless his command is busy, or stops him with the state, or attacks when the target byte and a weapon index are set; 10 ticks |
+| `_AIM_DELAY_TIME`, `exe+406c784` | `exe+2ecf498`, 1 | float | no action: the global `exe+3d10790` (default -1.0), read at `exe+32580b1` instead of the unit's value |
+| `_RELOAD_TIME`, `exe+406cda4` | `exe+2ecfc88`, 1 | float | no action: the global `exe+3d10794` (default -1.0); no reader found by a full rip-relative operand scan (`exe_re.py refs` misses `movss`) |
+| `BCQ_ENTITY_OVERRIDE_REMAINING_RELOAD_TIME`, `exe+406c85c` | `exe+2ecf43c`, 1 | model; float | no action: his `+0xad0` |
+
+**Serializers and pushers.** Only three of these have them: the play command (`exe+2eecc50`, `exe+2e9b974`), FOLLOW
+(serializer `exe+2eecd44` in vtable `exe+3ab25a8`, builder `exe+2d9b4ec`, pusher `exe+2d919dc`) and REMAINING_RELOAD_TIME
+(`exe+2eecbe4` in `exe+3904430`, pusher `exe+2d9196c`). Both of the latter are pushed by CA's own per-man control: the
+battle constructor builds a 0x820-byte object at battle `+0x647a0` (`exe+2d99995`), whose per-frame update `exe+2dcb644`
+(from `exe+2ef594c` through `exe+2dcb3a8`) pushes a FOLLOW while its `+0x518` holds a man, and whose exit `exe+2db96b4`
+pushes the reload time. No code loads the other globals except their registration. A command with no pusher is forged
+with three calls: `exe+1bca278(writer, queue + 8, &id, version)` (the 7-byte header; the id is read from the global at
+run time), one `exe+1bb1924(writer, tag, bytes, size)` (it writes the tag and then `size` raw bytes, so a blob of the
+first value followed by every later tag and value writes the whole record), and `exe+1bcd5e4(writer)` (patches the
+length, or rewinds an overflowed record). MOVE is 45 bytes, HALT 12, FOLLOW 99. HALT's one field is also exactly what
+`BCQ_ENTITY_INSTANT_KILL`'s serializer `exe+2eecb50` writes.
+
+**MOVE against the gate.** Vanilla: a parked MOVE is reset on every tick an order reaches him, so in a melee it never
+starts, like the swing in section 7 (measured: parked and unstarted on 48 of 49 ticks of a lasting melee, a MOVE sent
+every 0.1 s). With the gate byte it starts at his next update (measured: his own walk on him on 47 of 49 ticks). Read
+from the code, not measured: the regiment's order that tick still replaces the walk it built (the order issuer refuses
+only for a running action that blocks orders, and MOVE's `+0x80` slot, `exe+8f5810`, reads 0), and on the walk_start
+branch MOVE never rebuilds it, so a steered man in a melee needs a MOVE every tick. Even so, with the gate in and a MOVE
+every 0.1 s, one front man covered 1.2 m in 5 s, cause not isolated (the record, "The overrides, live"; section 14).
+The start's clip test is the man's vslot `+0x260`, a constant false on `exe+3912950` and `exe+3915a20`, the two
+infantry vtables read: a MOVE that reaches an infantry man mid-swing is read to replace the forced clip and cut the
+swing, which no probe has shown.
+
+### As built (2026-10-21)
+
+The third-person pack's multiplayer net mode, built and tested offline only: no two machines have run it. Code:
+`Modding Files/source/third_person/script/derpy_tp/platform.lua` (`install_net`, `M.net_rules`, `M.carrier`),
+`main.lua`, `combat.lua`, the entry `script/battle/mod/derpy_third_person.lua`, and `tools/third_person_cave.py`, which
+assembles both caves and runs the shipped bytes under unicorn (`--selftest`: every path, a lost race on each free, and
+24 broken variants, 11 of the update cave and 13 of the carrier cave, each caught; `--check` prints the two sizes below,
+599 and 567 bytes on 2026-10-21). The sending rules also run in a two-machine lockstep simulation
+(`tools/third_person_lockstep.lua`). One-machine live facts are Task 2's (the record's "Replay"). The decisions are the
+record's "Rulings"; what only two machines can answer is its "Live session checklist".
+
+**What travels how.** With `bm:is_multiplayer()` true, every change the pack makes is a queued command: steer is one
+forged MOVE, hold one HALT, a standing turn one FOLLOW_FIRST_PERSON (CA's pusher), a clip the play command as in single
+player, and the guard, disarm and arm a carrier word in a forged RELOAD_TIME. Nothing writes the steering copies,
+`+0xb0`, `+0x308` or the mailbox's man, guard and walk fields, so the update cave's single-player half never matches.
+MOVE, HALT, FOLLOW and the guard name a rider's mount, as `P.steer` always did; DISARM and ARM go for the mount and
+then the man.
+
+**The carrier word.** 32 bits: 31-24 the magic `0xD7`; 23-20 the op, 1 GUARD_ON, 2 GUARD_OFF, 3 DISARM, 4 ARM (5,
+HELLO, is reserved and never sent); 19-16 flags, bit 16 shots and bit 17 charge, bits 18-19 unassigned and ignored by
+both sides; 15-0 the body's id, his `+0x258`. Game Lua numbers are float32, so the word is never one Lua number:
+`M.carrier` returns two u16 halves, `hi = 0xD7 * 256 + op * 16 + flags` and `lo = id`, and `out.carrier` writes `lo`
+then `hi` as the four raw bytes of RELOAD_TIME's float field (tag `0xa`), so the u32 on the wire is `hi << 16 | lo`. As
+a float it is a normal negative number between -1.4e14 and -2.8e14, never a NaN or a denormal. An id over 0xFFFF is
+refused, never wrapped: that body is left out of guarding, with one log line (`a man is left out of multiplayer
+guarding`). Task 2 read ids 1 to 4,265 in a 20-against-20 battle. `M.uncarrier` decodes the same layout; the selftest
+runs it under `lua.exe` against the cave over every op, every flag nibble and three ids.
+
+**The carrier cave** (code; 567 bytes) sits on the RELOAD_TIME handler's `movss xmm0, [rsp+0x30]` at `exe+2ecfcb7`, past
+the read-error test, and goes in at build on every machine. It reads the word at `[rsp+0x30]`:
+
+- top byte not `0xD7`: memreader's epilogue re-runs the displaced `movss` and resumes at `exe+2ecfcbd`, so any other
+  value is stored as vanilla stores it;
+- the magic with an op outside 1-4 (HELLO included): it jumps to the handler's epilogue `exe+2ecfcc5`, skipping the
+  store, and does nothing else;
+- ops 1-4: it resolves the 16-bit id as the MOVE handler's resolver `exe+2eaf094` does (the battle object at the
+  command record's `+0x30`, its map at `+0x80`, `exe+17aece4(map, &id)`; id 0 is no man), acts, then skips the store.
+  A carrier never changes `exe+3d10794`.
+
+| Op | Live man | Man gone or dead (`+0xb1c <= 0`) |
+|---|---|---|
+| GUARD_ON | an entry holding his id gets his pointer again; else he claims the first free entry and `count` goes up; a full table drops it | frees his id's entry |
+| GUARD_OFF | frees the entry holding the id; no model is read | the same |
+| DISARM | the copy-table row with any column equal to his `+0x308`; writes the column the flags pick (plain, shots, charge, both) to `+0x308` | nothing |
+| ARM | the same row's original back to `+0x308` | nothing |
+
+The two pointers it jumps or calls through, `skip` (`exe+2ecfcc5`) and `map_lookup`, sit at block `+0xe8` and `+0xf0`,
+written before the cave goes in and never zeroed by a later build: a cave already past its match goes through them.
+
+**The guard table** (code). 16 entries of `{man pointer, u32 id at +8}` at mailbox block `+0x100`, `count` at `+0x54`.
+The update cave (section 9; now 599 bytes) has a second half: on every man's update while `count > 0`, it looks for his
+pointer among the 16. Found and alive, it stops the engine's four orders on him as the single-player guard does (the
+regiment's walk, the two moves, the melee attack, through `walk_stop`); found and dead, it frees his entry. Single
+player never sets `count`, so that half costs it one compare. Both free paths take the entry with `lock cmpxchg` of the
+pointer as read against 0, and `lock dec` the count only when the exchange won, so a dead man's update and his
+GUARD_OFF freeing one entry at once count it down once (the emulator runs that race). `M.net_rules` keeps the id each
+GUARD_ON went with, and `P.unguard()` sends GUARD_OFF by that kept id without reading the man, alive or dead: at the
+stop, and whenever the guarded body changes (he died and the next man is played). The update cave's free is the
+backup. Every build zeroes the entries, `count`, `nfrags` and `fragtab` (`check_mailbox`), so nothing survives from
+the battle before.
+
+**The copy table** (code). Built at "Deployed" on every machine (`build_copy_table`, a phase callback): every army in
+`bm:alliances()` order, every man and then his mount, deduped by fragment address, one 0x28-byte row `{orig, plain,
+shots, charge, shots_charge}` per fragment. Each copy is the one single player's disarm makes (`build_copy`): the
+fragment with its attack slots read none; `shots` blanks the shot clips too, `charge` keeps MOVING_ATTACK 484-493. The
+rows are their own `game_alloc`; the block holds their count at `+0x58` and the pointer at `+0x60`. Every army, not the
+human ones, because what `is_player_controlled()` returns on each machine is unmeasured. A unit that cannot be read (a
+null object, a read that faults, a reinforcement army not yet on the field) is left out, not the table; anything else
+that throws leaves net play off for that battle. Numeric loops and `ipairs` only, so the rows are the same on every
+machine; only the addresses differ, and the cave matches by pointer. A unit spawned later (a summon, a reinforcement)
+has no row, so a DISARM naming its fragment is dropped, on every machine alike.
+
+**The gate** is in for the whole battle on every machine (section 8).
+
+**The sending rules** (`M.net_rules`, pure Lua, the same lines the simulation's fake platform runs):
+
+- **One action a body a tick.** MOVE, HALT and FOLLOW for a body share one slot per model tick, since the engine keeps
+  one parked action per man and the later command in a tick wins (the record, "The overrides, live").
+- **A clip holds his steps back.** From a clip's send, no MOVE, HALT or FOLLOW goes for that body until the clip shows
+  (`P.anim_slot` reads its slot; `R.watch`, called by `main.lua` every frame for the man played, notices it while
+  nothing else is sent) or its give-up passes: `LOCK_MAX + late()`, 3.2 s, for a swing or a cheer; `LOCK_WAIT +
+  late()`, 1.2 s, for each shot phase (combat.lua); its own tick for a clip with none (a WALK_1 unstick, the CHARGE
+  loop, a unit of one's defend). The queue's delay cancels out of this window: a later command arrives as far behind
+  the clip as it was sent. The cost: a swing is not re-aimed while it waits, and one that never plays roots him to its
+  give-up, about 2 s longer than single player.
+- **Steer** sends a MOVE each tick it is free; **hold** one HALT, then a FOLLOW each time his heading changes; the
+  **guard** one GUARD_ON per body; **disarm** and **arm** a carrier only when a body's kind changes (armed, or disarmed
+  with its two flags), the mount's before the man's.
+- **The ARM goes ahead of every attack or shot clip.** `R.play` pushes the ARM (when that body is disarmed) and then the
+  clip in one Lua call, so the clip's slot is looked up armed on every machine. In net mode `P.play` never writes
+  `+0x308`; single player still points him back at his own fragment directly.
+- A push refused (the gate bytes set, no queue) is not marked sent, so it goes again.
+
+**Refusals, and what the player sees.** The entry passes `bm:is_multiplayer()` to `M.build`. Net mode needs build
+`6acec6f4` and its `BUILDS` row, then `install_net`, which refuses in this order: the MOVE, HALT and RELOAD_TIME ids
+not registered or with no registry entry; no mailbox block; the six bytes at `exe+2ecfcb7` not the expected ones; the
+carrier cave refused; the gate not going in. Each refusal, or a throw, is recorded as `net: <why>`, takes the gate out
+if it went in, and leaves single player's functions in place. A carrier cave that went in stays for the session
+(section 9). Inferred, not run: against a peer in net mode it still claims that peer's guard entries and stops that
+man's orders on this machine only.
+
+The entry then finds multiplayer with no net mode: it logs once `derpy_tp: multiplayer is off: <the platform's
+problems>`, loads nothing else, and F2 shows `derpy_tp_multiplayer` ("Third-Person Battles is off in replays. In
+multiplayer it needs an up-to-date memreader Plus and a supported game version on every machine; the
+script log has the details."). A replay is always off; in a replay of a multiplayer battle `install_net` still
+runs if `bm:is_multiplayer()` is true there, so the recorded carriers meet a cave and a gate.
+
+In net mode, F2 before "Deployed" does nothing and says nothing: `P.net_ready` is set only once this machine's copy
+table is built. A table that threw leaves it unset for the battle, F2 silent, and one line, `derpy_tp: multiplayer is
+off for this battle: the fragment table did not build: <error>`. At "Deployed" each machine logs once `derpy_tp: the
+fragment table took <n> model ms (<r> real ms), <k> fragments`; the model figure reads 0 if the battle waited for the
+build. `P.net_ready` is this machine's alone: a peer still building drops the DISARMs it is sent, which the planned
+HELLO handshake is to close.
+
+**The delay.** `P.net_delay = 0.2` s, provisional: two ticks, the one-machine figure (in Task 2 every queued command
+whose effect a getter shows changed it 200 ms after the script call; aiming, a weapon change and a projectile's first
+casualty showed later, at +500 to +1200 ms, with a lead time of their own). It is used only by `late()` in `combat.lua`,
+which lengthens the windows that wait for a clip to show; the simulation uses `DELAY_TICKS = 2`
+(`tools/third_person_lockstep.lua`). Both take the two-machine figure.
+
+## 14. Open
 
 - Which formation routine issues him an order every melee tick (the caller of `+0x4b0`): not traced. Not needed
   for the fix.
 - The `0x81` in the clip payload.
 - A per-man gate. The mailbox's cave (section 9) already knows the man played, so the gate's decision could move
-  into it.
+  into it. In multiplayer the guard table already lists, on every machine, every body the pack guards.
 - The post-fire `nil` then `1557` frame after a shot.
 - Which installer puts each engine command on him: the melee attack `3ad24b8` is built in the order issuer
   `306e89c` (constructor `3053684`), the regiment walk `3919350` and move `3ae1928` in `324e9dc` (from `306fea0`),
   move `39199f8` in `324e2c8` (five callers). Refusing them at the source would need a cave at each.
+- A charge for one man or one chariot: the engine's charge (section 5) through the cave crashed twice (2026-10-20).
+  Not to be reused for the flamethrower work either.
+- **Walls** (2026-10-21, `WORKSHOP_REPORTS_20261021_THIRD_PERSON.md`): a man deployed on a siege wall gets a walk from
+  the mailbox, path state goes 2 then 7, and he moves 0 m in every direction; after one native `goto_location` for his
+  regiment the walk goes 2 then 4 and the same walk moves him (7.8 m in 3.6 s). The field the pack's walk leaves unset
+  is not found; `+0x330..+0x400` dumps before and after a native move were taken, not decoded. The author refused the
+  regiment-order workaround: a later RE goal.
+- The Irondrake flame drawn upward from `trigger_projectile_launch` (section 12): which effect is wrong is not
+  isolated; first run the nulled launch-FX discriminator in the handoff.
+- Multiplayer (section 13), code only and not on the live checklist: whether the host checks a relayed buffer against
+  its sender; when `0xa1` is sent instead of `0xa2`; what sets the control object's `+0x518`.
+- Multiplayer, also not on the live checklist: why a steered man in a melee covered 1.2 m in 5 s with the gate in and a
+  MOVE every 0.1 s (the record, "The overrides, live", third row). The key press, his own fight clips and the gate were
+  not separated; the open-ground control rules out the re-sending itself. One man, one 5 s run.
+- Multiplayer, for the two-machine session. The record's "Live session checklist" holds how each is measured; its item
+  numbers are in brackets.
+  - That `+0x645c8` is EMPIRE_MP's object and a forged command pushed on one machine runs on the other at the same
+    tick, its fields intact (1, 17). How many ticks a push waits across machines, which sets `P.net_delay` (2); one
+    machine is two (Task 2).
+  - The battle's `+0x3b0` and `+0x3b1` on a client, and what `+0x3b1` is (3). Either set there refuses every push,
+    CA's script wrappers included.
+  - Whether a dead man's update still runs, which decides whether the update cave's free ever fires; and what a MOVE,
+    HALT or clip in flight does to a dying model, since every handler checks only that the id resolved (6). Whether the
+    engine ever hands a freed model id to a new model, which a GUARD_OFF in flight would then reach (unmeasured: Task 2
+    read a dense range of ids, 1 to 4,265 across 4,185 bodies, once at the start; reuse after a death was not looked at).
+  - Whether a vanilla man ever parks an action in his queued holder. If none does, the whole-battle gate is inert
+    where nobody plays; if one does, it changes every battle and a per-man gate keyed off the guard table is the
+    redesign (10).
+  - What `army:is_player_controlled()` returns on each machine (8). The copy table no longer depends on it.
+  - Whether HALT cuts a clip that is playing: its stop replaces any command (15). How far FOLLOW turns a standing man
+    toward the crosshair before a shot (14; Task 2: 55 of 90 degrees in 1.3 s).
+  - Whether `bm:disable_orders(true)` is local (11); whether a lobby starts when one player lacks the pack (12); what
+    `bm:is_multiplayer()` reads in a multiplayer battle's replay, and whether the replay reproduces it (13); whether
+    commands execute before "Deployed" (16).

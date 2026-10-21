@@ -11,6 +11,8 @@ local PAUSE_AFTER = 0.5
 -- a sprint's speed against his run, the charge's too (the author, 2026-10-16: "if no charge animation, add a 20% boost
 -- to speed", then "20% boost even with charge animation"; 2026-10-17: "add 50% speed boost when charging/sprinting")
 local SPRINT_SPEED = 1.5
+-- s the lock-on key may be held and still be its click: longer is the free mouse's hold when they share a key (keys.lua)
+local LOCK_CLICK = 0.3
 
 return function(E)
 	local F, P = E.F, E.P
@@ -219,8 +221,12 @@ return function(E)
 		F.uc:release_control()
 	end
 
-	local function look()
-		if P.held(E.S.keys.look_free) then F.dragging = false return end
+	local function look(now)
+		local S = E.S
+		-- on the lock-on's key, only a press past its click frees the mouse: freed at once, every click showed the cursor
+		-- and CA's interface faded in and out (the author, 2026-10-21: "the cursor keep popping off")
+		local click = S.keys.lock == S.keys.look_free and F.lock_key and now - F.lock_key <= LOCK_CLICK
+		if P.held(S.keys.look_free) and not click then F.dragging = false return end
 		if not F.dragging then P.look_begin() F.dragging = true return end
 		local dx, dy = P.look_delta()
 		if dx ~= 0 or dy ~= 0 then E.rig.look(dx, dy) end
@@ -290,7 +296,14 @@ return function(E)
 		else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
 		local kf, kr = 0, 0
 		if P.focused() then
-			look()
+			-- the lock-on: a click, on its release (combat.lua C.target); read before the look, which it holds off
+			local lk = P.held(S.keys.lock)
+			if lk and not F.lock_key then F.lock_key = now
+			elseif not lk and F.lock_key then
+				if now - F.lock_key <= LOCK_CLICK then E.combat.target() end
+				F.lock_key = nil
+			end
+			look(now)
 			if P.pressed(S.keys.hide_ui) then hide_ui(not F.ui_off) end -- paused too: a still to take a picture of
 			if P.pressed(S.keys.minimap) then F.map = E.hud.map(not F.map) end
 			if P.pressed(S.keys.view) then E.first_person = not E.first_person end -- kept for the battle
@@ -298,6 +311,7 @@ return function(E)
 			-- Alt, configurable using mct"): while held, or a press switches them; paused too
 			if S.guide_hold then F.guide = P.held(S.keys.guide) elseif P.pressed(S.keys.guide) then F.guide = not F.guide end
 			cursor(not F.dragging)
+			if F.dragging then P.hide_cursor() end -- every frame: the game's middle-button release shows it (platform.lua)
 			kf = (P.held(S.keys.forward) and 1 or 0) - (P.held(S.keys.back) and 1 or 0)
 			kr = (P.held(S.keys.right) and 1 or 0) - (P.held(S.keys.left) and 1 or 0)
 			if not paused then
@@ -345,11 +359,16 @@ return function(E)
 		E.abilities.update(now) -- real time: the label and arrow follow the camera, which turns while paused
 		if not paused then
 			-- the engine's own orders on him go (the author, 2026-10-16: "battalion actions also affect the unit which
-			-- shouldnt be"; 2026-10-14: "absolute control and no auto attack")
-			if F.model then P.guard(F.model)
-			elseif single and not F.native_attack and not F.driving and not F.firing then P.guard(single) end
+			-- shouldnt be"; 2026-10-14: "absolute control and no auto attack"). In multiplayer the guard is a state on every
+			-- machine: P.guard sends it once, P.unguard takes it off by the id it went with, alive or dead: here when the
+			-- body changes (he died and the next man is played) or goes (a unit of one's own attack orders), and at the stop
+			local guard = F.model or single and not F.native_attack and not F.driving and not F.firing and single or nil
+			if F.guarded and P.features.net and not (guard and P.same(guard, F.guarded)) then P.unguard() F.guarded = nil end
+			if guard then P.guard(guard) F.guarded = guard end
 			-- and none of its swings start on him (P.disarm): his own, and an attack order on a unit of one, only
 			-- a swing held back past its lock (combat.lua C.locked) stays armed until it has played
+			-- multiplayer: a clip of his once seen lets his steps and turns go again (platform.lua R.watch; a no-op alone)
+			P.watch(F.model or single or nil)
 			local pd = F.pending
 			if pd then
 				local c = P.anim_slot(pd.m)
@@ -398,6 +417,7 @@ return function(E)
 					.. (o and (", ordered " .. math.floor(o:get_x() - x) .. "," .. math.floor(o:get_z() - z) .. " m off") or ""))
 			end
 		end
+		E.combat.track(dt)
 		E.combat.crosshair((F.ranged or F.armed ~= nil) and F.dragging and not F.ui_off)
 		E.hud.update(gnow)
 		-- melee mode centres on him; an ability armed looks ahead, where its crosshair aims (combat.lua C.aim_point)
@@ -428,8 +448,11 @@ return function(E)
 		end
 	end
 
+	-- multiplayer waits for "Deployed", where every machine builds the fragment table its disarm reads; a build that threw
+	-- leaves it waiting for the battle (platform.lua P.net_ready; MP_FEASIBILITY_20261021_THIRD_PERSON.md, Ruling 20).
+	-- Nothing said or logged: it simply waits
 	function M.start(unit)
-		if E.disabled or F.on then return end
+		if E.disabled or F.on or P.features.net and not P.net_ready then return end
 		swap = nil -- the key, or the new form: either way nothing more is waited for
 		E.S = E.settings(get_mct and get_mct(), E.K) -- loaded once by the entry: no file is read here
 		local S = E.S
@@ -498,6 +521,7 @@ return function(E)
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
 		F.lead = nil -- his steering point at its full distance (move.lua)
 		F.fly_want = nil
+		F.target, F.lock_key = nil, nil
 		F.hit_hp, F.next_react = nil, 0 -- a blow is his hit points falling from one frame to the next (combat.lua C.invincible)
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
 		local x, y, z
@@ -519,8 +543,10 @@ return function(E)
 			F.uc:release_control()
 		end
 		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate); a unit of one steered
-		-- alone too, whose melee attack the engine orders again every tick (measured 2026-10-18: none of 5 played, gated 6 of 6)
-		if F.model or F.single_steer then
+		-- alone too, whose melee attack the engine orders again every tick (measured 2026-10-18: none of 5 played, gated 6 of 6).
+		-- Multiplayer: the gate changes the simulation, so every machine has it from the build (platform.lua install_net) to the
+		-- battle's end, and here it is left alone: a toggle at a key press is a desync, and F.gated stays nil for the stop
+		if (F.model or F.single_steer) and not P.features.net then
 			F.gated = P.gate(true)
 			if not F.gated then E.once("gate", "a swing in a melee waits for a tick without an order: no gate on build " .. tostring(P.build)) end
 		end
@@ -568,6 +594,8 @@ return function(E)
 		F.shot, F.want_shot = nil, false
 		-- his swings back; nothing written to a dead man, whose model may be gone
 		if F.disarmed then try(function() if P.alive(F.unit, F.disarmed) then P.arm(F.disarmed) end end) F.disarmed = nil end
+		if F.guarded and P.features.net then try(P.unguard) end -- by its id: nothing read off a dead man
+		F.guarded = nil
 		if F.gated then F.gated = nil try(function() P.gate(false) end) end
 		if F.invincible then F.invincible = nil try(function() F.uc:set_invincible(false) F.uc:release_control() end) end
 		try(function() E.move.halt() end)
@@ -596,6 +624,7 @@ return function(E)
 		try(function() cam:enable_functionality("CAMERA_ALL_FUNCTIONS", true) end)
 		try(function() cam:change_height_range(-1, -1) end)
 		if F.floored then F.floored = nil try(function() P.terrain_floor(false) end) end
+		try(function() P.net_reset() end) -- multiplayer: the next session's first hold stops him anew
 		E.log("off: " .. tostring(why))
 	end
 
