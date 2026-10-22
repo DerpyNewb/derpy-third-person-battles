@@ -448,12 +448,37 @@ return function(E)
 		end
 	end
 
+	-- a press before every player's HELLO (Ruling 26) is kept, F.asked its model s: third person starts by itself once the
+	-- handshake completes (M.start forgets the press as it starts), and the player is told when the platform says it is
+	-- late (P.net_late). A press is dropped after NET_DROP model s: the handshake has missed its 5 s three times over, and
+	-- a camera taken over that long after the key would land on a player who has gone back to commanding the battle. Once
+	-- complete, a new press starts at once
+	local NET_DROP = 15
+	local function waiting(gnow)
+		if P.net_play then M.start() return end
+		if gnow - F.asked >= NET_DROP then F.asked = nil return end
+		if P.net_late and not F.told then F.told = true E.say("derpy_tp_mp_needs_everyone") end
+	end
+
 	-- multiplayer waits for "Deployed", where every machine builds the fragment table its disarm reads; a build that threw
 	-- leaves it waiting for the battle (platform.lua P.net_ready; MP_FEASIBILITY_20261021_THIRD_PERSON.md, Ruling 20).
-	-- Nothing said or logged: it simply waits
+	-- Nothing said or logged: it simply waits. Then for every player's HELLO (platform.lua M.handshake, Rulings 25, 26 and
+	-- 29): the first press asks this machine to say HELLO and is kept; a press while it waits is ignored, sending nothing
+	-- and restarting nothing, and the kept press still starts it on completion. A spectator plays no army: CA does not say
+	-- what local_army() names on one, and a player's would be driven from the spectator's client. It is refused here, not
+	-- at the build, since its handshake still puts its gate in at the players' tick
 	function M.start(unit)
 		if E.disabled or F.on or P.features.net and not P.net_ready then return end
-		swap = nil -- the key, or the new form: either way nothing more is waited for
+		if P.features.net then
+			local ok, watching = pcall(function() return bm:is_spectator() end)
+			if not ok or watching then E.once("spectator", "multiplayer: a spectator plays no army, so third person stays off") return end
+		end
+		if P.features.net and not P.net_play then
+			if not F.asked then F.asked, F.told, P.net_asked = bm:time_elapsed_ms() / 1000, false, true end
+			return
+		end
+		-- the key, or the new form: either way nothing more is waited for, and a kept press is spent
+		swap, F.asked = nil, nil
 		E.S = E.settings(get_mct and get_mct(), E.K) -- loaded once by the entry: no file is read here
 		local S = E.S
 		for _, c in ipairs(S.conflicts) do
@@ -544,8 +569,8 @@ return function(E)
 		end
 		-- his clicks beat the order his regiment gives him each tick of a melee (platform.lua P.gate); a unit of one steered
 		-- alone too, whose melee attack the engine orders again every tick (measured 2026-10-18: none of 5 played, gated 6 of 6).
-		-- Multiplayer: the gate changes the simulation, so every machine has it from the build (platform.lua install_net) to the
-		-- battle's end, and here it is left alone: a toggle at a key press is a desync, and F.gated stays nil for the stop
+		-- Multiplayer: the gate changes the simulation, so every machine has it from the handshake (platform.lua M.handshake) to
+		-- the battle's end, and here it is left alone: a toggle at a key press is a desync, and F.gated stays nil for the stop
 		if (F.model or F.single_steer) and not P.features.net then
 			F.gated = P.gate(true)
 			if not F.gated then E.once("gate", "a swing in a melee waits for a tick without an order: no gate on build " .. tostring(P.build)) end
@@ -656,6 +681,8 @@ return function(E)
 				else M.start() end
 			elseif F.on then
 				tick(now, dt, gnow, paused)
+			elseif F.asked then
+				waiting(gnow)
 			elseif swap then
 				follow_swap(gnow)
 			end

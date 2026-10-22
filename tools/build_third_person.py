@@ -38,6 +38,7 @@ LOC = {
     "derpy_tp_input_unavailable": "Third-Person Battles found memreader Plus but could not initialize keyboard and mouse input. The script log has the details.",
     "derpy_tp_multiplayer": "Third-Person Battles is off in replays. In multiplayer it needs an up-to-date memreader Plus and a supported game version on every machine; the script log has the details.",
     "derpy_tp_switched_off": "Third-Person Battles ran into three errors and is off until this battle ends. The script log has the details.",
+    "derpy_tp_mp_needs_everyone": "Third-Person Battles in multiplayer needs every player to have it and memreader Plus.",
 }
 
 

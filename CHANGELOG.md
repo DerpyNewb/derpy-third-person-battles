@@ -4,8 +4,9 @@
 
 - Multiplayer mode: every change goes through the game's own battle command queue, so both machines run the same
   battle. Built and tested offline in a two-machine simulation; not yet run on two machines.
-- In multiplayer it needs the mod and memreader Plus on every machine; without them it stays off and says why in the
-  script log.
+- In multiplayer it needs the mod and memreader Plus on every machine. The first F2 asks every player; it starts by
+  itself once all have answered; if not, it says so and the log names the missing armies. Nobody pressing F2 sends nothing.
+- Spectators never start it.
 - The multiplayer message no longer blames the game version for every refusal.
 
 ## 2026-10-21

@@ -24,6 +24,7 @@ from the cave's first instruction, mov rax, <block>):
     has_angle  steer: write buf's angle in place; near: steer: he is at the point, build no walk
     count      multiplayer: how many guard entries are claimed (0 in single player, so the table scan is skipped whole)
     nfrags, fragtab   the copy table's row count, and a pointer to it (its own game_alloc); DISARM/ARM read it
+    hello      multiplayer: a 32-bit mask, bit n set once army slot n's HELLO landed (the carrier cave sets it, lock or)
     find       scratch: the 16-bit id the carrier cave resolves, so &id can be passed to the map lookup
     skip, map_lookup   the carrier cave's two baked pointers: the store-skip target (exe+2ecfcc5) and exe+17aece4
     buf        the walk builder's 0x60-byte parameter block (platform.lua fills it as it always did)
@@ -52,7 +53,7 @@ PLACEHOLDER = 0x1122334455667788
 
 MB = {"man": 0x00, "walk_a": 0x08, "move_a": 0x10, "move_b": 0x18, "melee": 0x20, "walk_b": 0x28, "walk_stop": 0x30,
       "walk_start": 0x38, "guard": 0x40, "walk": 0x44, "stops": 0x48, "met": 0x4c, "has_angle": 0x50, "near": 0x51,
-      "count": 0x54, "nfrags": 0x58, "fragtab": 0x60, "find": 0x68, "buf": 0x80, "skip": 0xe8, "map_lookup": 0xf0,
+      "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "buf": 0x80, "skip": 0xe8, "map_lookup": 0xf0,
       "guards": 0x100, "size": 0x200}
 # the fields a cave calls or jumps through: written over, never zeroed (a cave already past its match goes through
 # them), so platform.lua keeps them outside every range check_mailbox zeroes; a harness test pins it
@@ -70,6 +71,9 @@ CARRIER_RVA, RESUME_RVA, SKIP_RVA = 0x2ecfcb7, 0x2ecfcbd, 0x2ecfcc5
 CARRIER_SITE = bytes.fromhex("f30f10442430")  # movss xmm0, dword ptr [rsp + 0x30]
 MAGIC = 0xD7
 OPS = {"GUARD_ON": 1, "GUARD_OFF": 2, "DISARM": 3, "ARM": 4, "HELLO": 5}
+# HELLO's 16 bits: the protocol version (15-8) and the sender's army slot (7-0), one bit of MB hello. A HELLO of another
+# version, or a slot past the mask, sets nothing. The version is platform.lua's HELLO_VERSION too: agreement() ties them
+HELLO_VERSION, HELLO_SLOTS = 1, 32
 # the record's battle object and the map lookup the MOVE/HALT handlers use (exe+2eaf094 reads a tag-0x23 model id, then
 # resolves it in battle+0x80 through exe+17aece4(map, &id) -> &value, value the model). The carrier carries no 0x23 field,
 # so the cave resolves its own 16-bit id the same way: battle = [record+0x30], map = battle+0x80, lookup by &id.
@@ -259,9 +263,10 @@ done:
 
 # The carrier cave at exe+2ecfcb7. rbx is the record reader, [rsp+0x30] is the carrier word (read before any push). A
 # word whose top byte is not the magic falls through to memreader's epilogue (the displaced movss, then the store at
-# exe+2ecfcbd): vanilla reload times are untouched. The magic with an op out of 1..4 is dropped unresolved (jumps to the
-# store-skip): M.uncarrier's nil, and HELLO, which asks the cave for nothing. Flag bits 2-3 (word bits 18-19) are masked
-# off, never acted on. The id is resolved in the battle map the MOVE/HALT handlers use, except id 0, which the engine
+# exe+2ecfcbd): vanilla reload times are untouched. The magic with an op out of 1..5 is dropped unresolved (jumps to the
+# store-skip): M.uncarrier's nil. HELLO (5) names no man and is never resolved: its version checked, its slot's bit is
+# set in MB hello with lock or (the script thread reads the mask), and the store skipped; the flags are not read. Flag
+# bits 2-3 (word bits 18-19) are masked off, never acted on. The id is resolved in the battle map the MOVE/HALT handlers use, except id 0, which the engine
 # itself takes for no man (exe+2eaf0eb) and is never looked up; a man who is gone or dead has his entry freed and
 # nothing else done, whatever the op. count is changed with lock inc/dec: the update cave frees entries from the workers.
 # Both caves free an entry the same way (Ruling 18 of MP_FEASIBILITY_20261021_THIRD_PERSON.md): lock cmpxchg its man
@@ -277,6 +282,8 @@ CARRIER_ASM = """
     mov r10d, r11d
     shr r10d, 20
     and r10d, 0xf
+    cmp r10d, {op_hello}
+    je hello
     cmp r10d, 1
     jb skip_it
     cmp r10d, 4
@@ -439,6 +446,18 @@ done_frame:
     pop rdi
     pop rsi
     jmp rax
+hello:
+    mov ecx, r11d
+    shr ecx, 8
+    cmp cl, {hello_version}
+    jne skip_it
+    mov ecx, r11d
+    and ecx, 0xff
+    cmp ecx, {hello_slots}
+    jae skip_it
+    mov edx, 1
+    shl edx, cl
+    lock or dword ptr [rax + {hello}], edx
 skip_it:
     mov rax, qword ptr [rax + {skip}]
     jmp rax
@@ -452,7 +471,8 @@ def fields():
     f.update({"m_" + k: hex(v) for k, v in MAN.items()})
     f["placeholder"] = hex(PLACEHOLDER)
     f.update({"entries": hex(ENTRIES), "ge": hex(GE), "frag_row": hex(FRAG_ROW), "m_frag": hex(FRAG),
-              "magic": hex(MAGIC), "rec_battle": hex(REC_BATTLE), "map_off": hex(MAP_OFF)})
+              "magic": hex(MAGIC), "rec_battle": hex(REC_BATTLE), "map_off": hex(MAP_OFF), "op_hello": hex(OPS["HELLO"]),
+              "hello_version": hex(HELLO_VERSION), "hello_slots": hex(HELLO_SLOTS)})
     return f
 
 
@@ -823,8 +843,11 @@ CSTUB_ASM = "mov r10d, {id}\ncmp dword ptr [rdx], r10d\njne crun_miss\nmov rax, 
 CKEEP = ["rbx", "rsi", "rdi", "rbp", "r12", "r13", "r14", "r15"]
 
 
-def crun(ccode, cat, word, known_id=0, model=0, model_hp=80, entries=(), nfrags=0, rows=(), man_frag=0, race=None):
-    """Run the carrier cave once at exe+2ecfcb7. Returns the block/model effects and whether it skipped the store."""
+def crun(ccode, cat, word, known_id=0, model=0, model_hp=80, entries=(), nfrags=0, rows=(), man_frag=0, race=None,
+         hello=0):
+    """Run the carrier cave once at exe+2ecfcb7. Returns the block/model effects and whether it skipped the store.
+    hello: the HELLO mask before; the result's hello is it after, and hello_unlocked each write to it whose instruction
+    has no lock prefix (unicorn runs one instruction whole, so only the encoding can show an unlocked read-modify-write)."""
     import keystone
     import unicorn
     from unicorn import x86_const as X
@@ -844,6 +867,7 @@ def crun(ccode, cat, word, known_id=0, model=0, model_hp=80, entries=(), nfrags=
     q(BLOCK + MB["fragtab"], FRAGTAB)
     d(BLOCK + MB["nfrags"], nfrags)
     d(BLOCK + MB["count"], sum(1 for man, _ in entries if man))
+    d(BLOCK + MB["hello"], hello)
     for i, (man, mid) in enumerate(entries):
         q(BLOCK + MB["guards"] + i * GE, man)
         d(BLOCK + MB["guards"] + i * GE + 8, mid)
@@ -874,6 +898,17 @@ def crun(ccode, cat, word, known_id=0, model=0, model_hp=80, entries=(), nfrags=
             st["v"] = True
             u.emu_stop()
     uc.hook_add(unicorn.UC_HOOK_CODE, hook)
+    unlocked = []
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    md.detail = True
+
+    def on_hello_write(u, access, addr, size, v, _):
+        rip = u.reg_read(X.UC_X86_REG_RIP)
+        ins = next(md.disasm(bytes(u.mem_read(rip, 15)), rip))
+        if ins.prefix[0] != capstone.x86.X86_PREFIX_LOCK:
+            unlocked.append("%s %s at +0x%x" % (ins.mnemonic, ins.op_str, rip - CCODE))
+    uc.hook_add(unicorn.UC_HOOK_MEM_WRITE, on_hello_write, begin=BLOCK + MB["hello"], end=BLOCK + MB["hello"] + 3)
     rst = {"read": False, "raced": False}
     if race:
         _race(uc, race, BLOCK + MB["count"], rst)
@@ -884,7 +919,8 @@ def crun(ccode, cat, word, known_id=0, model=0, model_hp=80, entries=(), nfrags=
     lost = ["%s %x -> %x" % (r, before[r], uc.reg_read(creg[r])) for r in CKEEP if uc.reg_read(creg[r]) != before[r]]
     return {"skipped": st["v"], "align": st["align"], "resolved": st["resolved"], "rsp_ok": uc.reg_read(X.UC_X86_REG_RSP) == sp,
             "count": rd(BLOCK + MB["count"], 4), "table": table, "frag": rd(model + FRAG, 8) if model else None, "rd": rd,
-            "args": st["args"], "lost": lost, "raced": rst["raced"]}
+            "args": st["args"], "lost": lost, "raced": rst["raced"], "hello": rd(BLOCK + MB["hello"], 4),
+            "hello_unlocked": unlocked}
 
 
 def carrier_scenarios(ccode, cat):
@@ -991,11 +1027,36 @@ def carrier_scenarios(ccode, cat):
     r = crun(ccode, cat, word(OPS["DISARM"]), known_id=ID, model=CMODEL, nfrags=1, rows=[row], man_frag=CMODEL + 0x5000)
     expect(r["skipped"] and r["frag"] == CMODEL + 0x5000, "DISARM unknown fragment: untouched, dropped")
 
-    # HELLO asks the cave for nothing and a magic word with an op outside 1..5 is no op: both skip the store unresolved
-    for op in (OPS["HELLO"], 0, 6, 15):
-        r = crun(ccode, cat, word(op), known_id=ID, model=CMODEL)
-        expect(r["skipped"] and not r["resolved"] and r["count"] == 0, "op %d: dropped unresolved, no action" % op)
+    # a magic word with an op outside 1..5 is no op: it skips the store unresolved and sets no HELLO bit, even with a
+    # HELLO's 16 bits
+    for op in (0, 6, 15):
+        r = crun(ccode, cat, word(op, id=HELLO_VERSION * 256 + 3), known_id=ID, model=CMODEL)
+        expect(r["skipped"] and not r["resolved"] and r["count"] == 0 and r["hello"] == 0,
+               "op %d: dropped unresolved, no action" % op)
         kept(r, "op %d" % op)
+
+    # HELLO (the feasibility record's Ruling 25) names no man: its army slot's bit goes into MB hello, the store is skipped
+    def hello(version, slot, mask=0, flags=0):
+        return crun(ccode, cat, word(OPS["HELLO"], flags, version * 256 + slot), known_id=ID, model=CMODEL, hello=mask)
+    r = hello(HELLO_VERSION, 3)
+    expect(r["skipped"] and not r["resolved"] and r["count"] == 0 and r["hello"] == 1 << 3,
+           "HELLO slot 3: its bit alone, the store skipped, nobody resolved, got %x" % r["hello"])
+    kept(r, "HELLO")
+    expect(not r["hello_unlocked"], "HELLO: the mask is written by a locked instruction, not %s" % r["hello_unlocked"])
+    for slot, mask, want, what in ((0, 1 << 5, (1 << 5) | 1, "another army's bit kept, this one added"),
+                                   (31, 0, 1 << 31, "the last slot"),
+                                   (3, (1 << 3) | (1 << 7), (1 << 3) | (1 << 7), "a second HELLO for a slot set changes nothing")):
+        r = hello(HELLO_VERSION, slot, mask)
+        expect(r["skipped"] and r["hello"] == want, "HELLO slot %d: %s, got %x" % (slot, what, r["hello"]))
+    r = hello(HELLO_VERSION, 3, flags=0xf)
+    expect(r["hello"] == 1 << 3, "HELLO: the flags are not read, got %x" % r["hello"])
+    # another version is not counted; a slot past the mask is not wrapped onto another army (shl takes its count mod 32)
+    for version, slot in ((0, 3), (HELLO_VERSION + 1, 3), (0xff, 3), (HELLO_VERSION, HELLO_SLOTS), (HELLO_VERSION, 33),
+                          (HELLO_VERSION, 0xff)):
+        r = hello(version, slot)
+        expect(r["skipped"] and not r["resolved"] and r["hello"] == 0,
+               "HELLO version %d slot %d: nothing set, the store skipped, got %x" % (version, slot, r["hello"]))
+        kept(r, "HELLO version %d slot %d" % (version, slot))
     return fails
 
 
@@ -1039,6 +1100,12 @@ CARRIER_MUTANTS = [
      "op_disarm:\n    test rsi, rsi\n    jz done_frame\n"),
     ("a dead man armed", "op_arm:\n    test rsi, rsi\n    jz done_frame\n    cmp dword ptr [rsi + {m_hp}], 0\n    jle done_frame\n",
      "op_arm:\n    test rsi, rsi\n    jz done_frame\n"),
+    # HELLO (the feasibility record's Ruling 25)
+    ("HELLO dropped as before", "    cmp r10d, {op_hello}\n    je hello\n", ""),
+    ("HELLO sets the wrong bit", "    mov edx, 1\n    shl edx, cl\n", "    mov edx, 2\n    shl edx, cl\n"),
+    ("HELLO's or not locked", "    lock or dword ptr [rax + {hello}], edx\n", "    or dword ptr [rax + {hello}], edx\n"),
+    ("HELLO's version not checked", "    cmp cl, {hello_version}\n    jne skip_it\n", ""),
+    ("HELLO's slot not range-checked", "    cmp ecx, {hello_slots}\n    jae skip_it\n", ""),
 ]
 
 
@@ -1069,8 +1136,9 @@ def _uncarrier_sample(words):
 
 
 def _cave_classify(ccode, cat, hi, lo):
-    """What the carrier cave does to a word, as (op index 0..5, shots, charge), read ONLY from observable effects.
-    0 = not ours (fell through to the store) or a magic word asking for no action (op out of 1..4, so HELLO too: dropped before resolving)."""
+    """What the carrier cave does to a word, as (op index 0..5, a, b), read ONLY from observable effects: DISARM's a, b
+    are shots, charge; HELLO's a is the slot whose bit it set. 0 = not ours (fell through to the store) or a magic word
+    asking for no action (dropped before resolving)."""
     ID = lo if lo else 1
     word = hi * 0x10000 + lo
     orig = CMODEL + 0x2000
@@ -1081,7 +1149,10 @@ def _cave_classify(ccode, cat, hi, lo):
     if not r["skipped"]:
         return (0, 0, 0)                               # resumed to the store: not a carrier
     if not r["resolved"]:
-        return (0, 0, 0)                               # magic, but no action (op out of 1..4, HELLO, id 0): unresolved
+        if r["hello"]:                                 # a bit of the HELLO mask set, nobody resolved: HELLO, its slot
+            bits = [n for n in range(32) if r["hello"] >> n & 1]
+            return (5, bits[0], 0) if len(bits) == 1 else (9, 0, 0)
+        return (0, 0, 0)                               # magic, but no action (op out of 1..5, id 0): unresolved
     if r["table"][0] == (CMODEL, ID):                  # the id's entry refreshed to the resolved man -> GUARD_ON
         return (1, 0, 0)
     if r["table"][0] == (0, ID):                        # the id's entry freed -> GUARD_OFF
@@ -1098,25 +1169,24 @@ def _cave_classify(ccode, cat, hi, lo):
 
 
 def agreement(ccode, cat):
-    """The cave never disagrees with M.uncarrier: every op 0..15 x flag nibble x a few ids, plus 0.2/-1.0."""
+    """The cave never disagrees with M.uncarrier: every op 0..15 x flag nibble x a few ids, plus 0.2/-1.0. The ids
+    include HELLO's version 1 and its neighbours with in- and out-of-mask slots, so the two sides' HELLO_VERSION and
+    slot bound are tied: a version moved on one side alone fails here."""
     words = []
     for op in range(16):
         for flags in range(16):
-            for mid in (1, 1001, 4265):
+            for mid in (1, 1001, 4265, 0x0100, 0x011f, 0x0120, 0x01ff, 0x0003, 0x0203):
                 words.append((MAGIC * 256 + op * 16 + flags, mid))
     words += [(0x3E4C, 0xCCCD), (0xBF80, 0x0000)]     # 0.2 and -1.0 as hi, lo halves
     want = _uncarrier_sample(words)
     fails = []
-    for (hi, lo), (op, _mid, shots, charge) in zip(words, want):
-        c_op, c_shots, c_charge = _cave_classify(ccode, cat, hi, lo)
-        # HELLO (uncarrier op 5) and nil (0) are one "no action" class here, deliberately: the cave skips the store for
-        # both and resolves neither, so nothing it does can tell them apart. For DISARM uncarrier reports shots/charge;
-        # the cave's column must match. Other acting ops carry no flags.
-        if op == 5:
-            op = 0
-        if op != c_op or (op == 3 and (shots, charge) != (c_shots, c_charge)):
-            fails.append("agreement: hi=0x%04x lo=%d -> uncarrier (%d,%d,%d) but cave (%d,%d,%d)"
-                         % (hi, lo, op, shots, charge, c_op, c_shots, c_charge))
+    for (hi, lo), (op, mid, shots, charge) in zip(words, want):
+        c_op, c_a, c_b = _cave_classify(ccode, cat, hi, lo)
+        # For DISARM uncarrier reports shots/charge and the cave's column must match; for HELLO uncarrier's id is the slot
+        # and the cave's bit must be that slot's. Other acting ops carry no flags.
+        if op != c_op or (op == 3 and (shots, charge) != (c_a, c_b)) or (op == 5 and mid != c_a):
+            fails.append("agreement: hi=0x%04x lo=%d -> uncarrier (%d,%d,%d,%d) but cave (%d,%d,%d)"
+                         % (hi, lo, op, mid, shots, charge, c_op, c_a, c_b))
     return fails
 
 

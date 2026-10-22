@@ -552,12 +552,22 @@ local function told_multiplayer()
 	return false
 end
 
--- multiplayer on a build the mod can carry commands on (P.features.net): F2 starts it, as it does alone
+-- multiplayer on a build the mod can carry commands on (P.features.net): once every player's HELLO has landed
+-- (platform.lua M.handshake), F2 starts it, as it does alone. Net mode on one machine: its own HELLO lands on it alone,
+-- and the other player's is set as the carrier cave would set it
+local function everyone_said_hello()
+	H.step(0.2)
+	H.heard[1] = true
+	H.step(0.2)
+	check(H.P.net_play, "every player's HELLO landed")
+end
+
 T.multiplayer_starts = function()
 	in_net_mode(function()
 		H.fresh({mp = true})
 		check(H.P.features.net, "the platform is in net mode")
 		H.phase.Deployed()
+		everyone_said_hello()
 		H.tap("F2")
 		check(H.E.F.on, "F2 starts it")
 		check(H.count("disable_orders") >= 1 and H.last("disable_orders")[2] == true, "player orders off")
@@ -578,8 +588,105 @@ T.multiplayer_waits_for_deployed = function()
 		check(H.count("disable_orders") == 0 and H.count("uc:halt") == 0, "nothing changed in the battle")
 		check(#H.calls == calls, "no call at all")
 		H.phase.Deployed()
+		everyone_said_hello()
 		H.tap("F2")
-		check(H.E.F.on, "after Deployed it starts")
+		check(H.E.F.on, "after Deployed and every HELLO it starts")
+	end)
+end
+
+local function needs_everyone()
+	local k = 0
+	for _, s in ipairs(H.all("subtitle")) do if s[2] == "derpy_tp_mp_needs_everyone" then k = k + 1 end end
+	return k
+end
+
+-- a press before every player's HELLO (the record's Ruling 26) asks this machine to say HELLO and is kept: the player is
+-- told only once the handshake is 5 model s late, and third person starts by itself when it completes, after the message
+-- too, with no second press. The start spends the press: F2 then stops it, and it stays stopped
+T.multiplayer_a_press_is_kept_until_the_handshake = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		H.phase.Deployed()
+		H.step(1)
+		check(not H.P.net_asked and not H.heard[0], "nobody pressed: no HELLO")
+		H.tap("F2")
+		check(not H.E.F.on and H.P.net_asked, "the press asks for the handshake and does not start it")
+		H.step(0.2)
+		check(H.heard[0], "this machine's HELLO went")
+		H.step(4.5)
+		check(needs_everyone() == 0, "not told before the handshake is late")
+		H.step(0.6)
+		check(needs_everyone() == 1, "told once it is: " .. needs_everyone())
+		H.heard[1] = true -- the other player's lands late
+		H.step(0.3)
+		check(H.E.F.on, "and it starts by itself")
+		check(needs_everyone() == 1, "nothing more said")
+		H.tap("F2")
+		H.step(0.5)
+		check(not H.E.F.on, "F2 stops it, and the spent press does not start it again")
+	end)
+end
+
+-- a kept press is spent by any start: here a second press lands in the frame the handshake completes, and the key starts
+-- third person before the kept press is looked at (a frame runs the model callback first, then reads the key). F2 then
+-- stops it, and it stays stopped (the second review's M7)
+T.multiplayer_a_direct_start_spends_a_kept_press = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		H.phase.Deployed()
+		H.tap("F2")
+		H.step(0.5)
+		check(H.P.net_asked and not H.E.F.on, "the first press is kept")
+		H.heard[1] = true
+		local hello
+		for _, t in ipairs(H.model_timers) do if t.id == "derpy_tp_hello" then hello = t end end
+		while H.game_ms + 1000 / 60 < hello.at do H.step(1 / 60) end
+		check(not H.P.net_play, "not complete before the callback")
+		H.down("F2") -- this frame: the callback completes the handshake, then the key is read
+		H.step(1 / 60)
+		H.up("F2")
+		H.step(1 / 60)
+		check(H.P.net_play and H.E.F.on, "started by the key in the completion's frame")
+		H.tap("F2")
+		H.step(0.5)
+		check(not H.E.F.on, "F2 stopped it, and the kept press does not start it again")
+	end)
+end
+
+-- a machine that cannot say whether it is spectating (bm:is_spectator() throws) is taken for a spectator: F2 keeps no
+-- press, asks for no HELLO, starts nothing, and says why once in the log (the lockstep spectator itself:
+-- ls_a_spectator_never_starts)
+T.multiplayer_a_spectator_check_that_throws_keeps_it_off = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		bm.is_spectator = function() error("test: is_spectator threw") end
+		H.phase.Deployed()
+		H.tap("F2")
+		H.step(0.5)
+		H.tap("F2")
+		check(not H.E.F.on and not H.P.net_asked and not H.heard[0], "nothing kept, no HELLO, not on")
+		local k = 0
+		for _, l in ipairs(H.log) do if l:find("a spectator plays no army", 1, true) then k = k + 1 end end
+		check(k == 1, "said once: " .. k)
+	end)
+end
+
+-- a kept press is dropped 15 model s after it: a handshake that completes later starts nothing by itself, and the next
+-- press starts at once
+T.multiplayer_a_stale_press_is_dropped = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		H.phase.Deployed()
+		H.tap("F2")
+		H.step(14.5)
+		check(not H.E.F.on and needs_everyone() == 1, "kept 14.5 s, and told once: " .. needs_everyone())
+		H.step(1)
+		H.heard[1] = true
+		H.step(0.3)
+		check(H.P.net_play and not H.E.F.on, "dropped at 15 s from the press: the late handshake starts nothing")
+		check(needs_everyone() == 1, "and says nothing")
+		H.tap("F2")
+		check(H.E.F.on, "a press now starts at once")
 	end)
 end
 
@@ -2418,8 +2525,8 @@ local function with_plus(mr, put, BASE, site, csite)
 end
 
 -- the order gate (exe+3087378, platform.lua P.gate) and memreader's patch, which writes only over the bytes it expects: the
--- net platform has the gate's code, because install_net puts the gate in at build. gate_platform, further down, tests the
--- toggle itself. jump: the byte the branch holds, 0x5c the game's own and 0x52 the gate in; returns a reader of the image
+-- net platform has the gate's code, because install_net checks it at build and the HELLO handshake puts the gate in.
+-- gate_platform, further down, tests the toggle itself. jump: the byte the branch holds, 0x5c the game's own and 0x52 the gate in; returns a reader of the image
 local GATE_AT = 0x3087378
 local GATE = {0x44, 0x38, 0xbf, 0xf8, 0x06, 0, 0, 0x75, 0x09, 0x44, 0x38, 0xbf, 0, 0x06, 0, 0, 0x75, 0x5c}
 local function with_patch(mr, put, BASE, jump)
@@ -2442,8 +2549,9 @@ end
 -- multiplayer: the real platform on a 6acec6f4 image with a battle, its queue and the three registered command types, and
 -- a recording mr.call standing in for the exe. N.fail: the field write overflows (the writer's error byte at +0);
 -- N.throw: the registry lookup throws; N.csite: the bytes at the carrier cave's site; N.jump: the byte at the gate's
--- branch (N.gate() reads it back); N.net_rules: stands in for M.net_rules, which install_net calls right after the gate
--- went in
+-- branch (N.gate() reads it back); N.net_rules: stands in for M.net_rules, which install_net calls right after the gate's
+-- check; N.single: a single-player build of the same image; N.refuse: the patch refuses to write that byte at the branch
+-- (0x52 the gate in, 0x5c out), as a failed protect or another tool's patch would
 local function net_platform(N)
 	N = N or {}
 	H.fresh()
@@ -2480,8 +2588,15 @@ local function net_platform(N)
 	with_plus(mr, put, BASE, nil, N.csite) -- the mailbox and carrier caves install on this fake, as in the real game
 	local bytes = with_patch(mr, put, BASE, N.jump)
 	function N.gate() return bytes(BASE + GATE_AT, #GATE)[#GATE] end
+	if N.refuse then
+		local patch = mr.patch
+		function mr.patch(p, expected, new)
+			if new:byte(#new) == N.refuse and N.gate() ~= N.refuse then return nil, "test: refused" end
+			return patch(p, expected, new)
+		end
+	end
 	local told, seen = {}, {} -- the entry's E.once: once a tag
-	local P = M.build(mr, true, function(tag, text) if not seen[tag] then seen[tag] = true told[#told + 1] = tag .. ": " .. text end end)
+	local P = M.build(mr, not N.single, function(tag, text) if not seen[tag] then seen[tag] = true told[#told + 1] = tag .. ": " .. text end end)
 	N.M, N.P, N.mr, N.put, N.BASE, N.Q, N.calls, N.told = M, P, mr, put, BASE, Q, calls, told
 	-- a man at 0x6300000, id 1001, his unit's object at 0x6400000
 	N.man = BASE + 0x6300000
@@ -2766,13 +2881,14 @@ T.platform_net_the_next_battle_starts_with_an_empty_guard_table = function()
 	-- the last battle's: a man in every entry, a count, a copy table
 	for o = M.MB.guards, M.MB.size - 8, 8 do put(block + o, N.BASE + 0x6000000 + o, 8) end
 	put(block + M.MB.count, 16, 4) put(block + M.MB.nfrags, 9, 4) put(block + M.MB.fragtab, N.BASE + 0x6f00000, 8)
+	put(block + M.MB.hello, 3, 4) -- and its HELLO mask: a stale bit would count a player of that battle as heard
 	mr.wrote = {}
 	local P2 = M.build(mr, true, function() end)
 	check(P2.features.net and P2.mailbox.addr == block, "the next battle, the same block: " .. table.concat(P2.problems, "; "))
 	local left = {}
 	local function zeroed(o) if mr.wrote[block + o] ~= 0 then left[#left + 1] = string.format("+0x%x", o) end end
 	for o = M.MB.guards, M.MB.size - 4, 4 do zeroed(o) end
-	for _, o in ipairs({M.MB.count, M.MB.nfrags, M.MB.fragtab, M.MB.fragtab + 4}) do zeroed(o) end
+	for _, o in ipairs({M.MB.count, M.MB.nfrags, M.MB.fragtab, M.MB.fragtab + 4, M.MB.hello}) do zeroed(o) end
 	check(#left == 0, "not zeroed at the build: " .. table.concat(left, " "))
 end
 
@@ -2878,31 +2994,258 @@ T.platform_net_a_refused_carrier_cave_leaves_single_player_standing = function()
 	check(N.pushed(n, 0x406c798) == 0, "steer is single player's: no MOVE pushed")
 end
 
+-- bm:alliances() for the handshake: one army per alliance, human as listed, no units (the copy table finds none). This
+-- machine's army is the first (the harness's bm:local_alliance and local_army)
+local function hello_alliances(humans)
+	return function()
+		return {count = function() return #humans end, item = function(_, i)
+			local a = {is_player_controlled = function() return humans[i] end,
+				units = function() return {count = function() return 0 end} end}
+			return {armies = function() return {count = function() return 1 end, item = function() return a end} end}
+		end}
+	end
+end
+-- the block's HELLO mask, as the carrier cave sets it when HELLOs land
+local function heard(N, mask) N.put(N.P.mailbox.addr + N.M.MB.hello, mask, 4) end
+local function hello_timer() for _, t in ipairs(H.model_timers) do if t.id == "derpy_tp_hello" then return t end end end
+
 -- the order gate changes the simulation: a man's queued action beats the order his regiment gives him each tick of a melee
--- (measured live, the record's "The overrides, live"). In a lockstep battle every machine has it from the first tick and
--- keeps it to the end, so install_net puts it in at build; main.lua leaves it alone in net mode (the lockstep tests)
-T.platform_net_puts_the_gate_in_at_build = function()
+-- (measured live, the record's "The overrides, live"), so every machine must put it in at one tick and keep it. The HELLO
+-- handshake picks that tick (the record's Ruling 25): the gate stays out at build, though its write is proven there, this
+-- machine's HELLO goes once its player presses F2 (Ruling 26) and its copy table is built, and the gate goes in once
+-- every human army's bit is set, which is inferred to be the same tick on every machine
+T.platform_net_puts_the_gate_in_once_every_human_said_hello = function()
 	local N = net_platform()
 	check(N.P.features.net, "net mode: " .. table.concat(N.P.problems, "; "))
-	check(N.gate() == 0x52, "in at build: his action update, got " .. string.format("%x", N.gate()))
-	-- a new game process has the game's own branch; the next battle's build puts it in again
-	N.put(N.BASE + GATE_AT + #GATE - 1, 0x5c, 1)
-	local P2 = N.M.build(N.mr, true, function() end)
-	check(P2.features.net and N.gate() == 0x52, "and the next battle's build: " .. string.format("%x", N.gate()))
+	check(N.gate() == 0x5c, "out at build: the game's own branch, got " .. string.format("%x", N.gate()))
+	local wrote = 0
+	for _, a in ipairs(N.mr.patches) do if a == N.BASE + GATE_AT then wrote = wrote + 1 end end
+	check(wrote >= 3, "its write proven at build, in and out again, after taking out a gate left in: " .. wrote)
+	check(hello_timer() and hello_timer().every == 100, "a model callback, every 100 model ms")
+	bm.alliances = hello_alliances({true, true, false}) -- this machine's army, the other player's, an AI's
+	N.P.net_asked = true
+	H.step(0.3)
+	check(N.pushed(0, 0x406cda4) == 0, "no HELLO before this machine's table is built, pressed or not")
+	N.P.net_asked = nil
+	H.phase.Deployed()
+	H.step(0.3)
+	check(N.pushed(0, 0x406cda4) == 0, "nor once it is, while nobody has pressed and nothing was heard")
+	N.P.net_asked = true -- the player's F2 (main.lua)
+	local n = #N.calls
+	H.step(0.15)
+	check(N.pushed(n, 0x406cda4) == 1, "one HELLO at the press: " .. N.pushed(n, 0x406cda4))
+	local r = N.record()
+	local d = N.M.uncarrier(r.at[2], r.at[0])
+	check(r.g == 0x406cda4 and r.ver == 1 and r.tag == 0x0a and r.size == 4, "a RELOAD_TIME carrier, as the others")
+	check(d and d.op == "HELLO" and d.id == 0 and r.at[0] == 0x0100, "for this machine's army, slot 0, version 1")
+	heard(N, 1) -- its own landed
+	H.step(0.3)
+	check(N.gate() == 0x5c and not N.P.net_play, "one human army of two heard: still out")
+	n = #N.calls
+	heard(N, 3) -- and the other player's; the AI army's bit is never waited for
+	H.step(0.15)
+	check(N.gate() == 0x52 and N.P.net_play, "every human army heard: in, and play may start, got " .. string.format("%x", N.gate()))
+	check(N.pushed(n, 0x406cda4) == 0, "no second HELLO")
+	local patches = #N.mr.patches
+	H.step(0.3)
+	check(#N.mr.patches == patches, "the gate set once, then left alone: " .. #N.mr.patches - patches .. " more")
+	local done
+	for _, t in ipairs(N.told) do if t:find("^hello_done: human armies 0,1 of 3 all said HELLO by [%d%.]+ model ms") then done = true end end
+	check(done, "the armies it waited for and its model time said once, to compare machine with machine: " .. table.concat(N.told, "; "))
 end
 
--- a second multiplayer battle in the same game process: nothing takes the gate out at Complete, so the first battle left the
--- game's branch at 0x52 and the next build finds it in. It must come out and go in again, with net mode on and no refusal;
--- and the build must not lean on memreader's patch accepting bytes that are already the new ones. The real patch is
--- documented as accepting them (BATTLE_ENGINE_RE.md section 9); the strict patch below is a stand-in that refuses them,
--- so only the build's own P.gate(false) lets the third battle in
+-- a machine whose player has not pressed answers another army's HELLO by itself (Ruling 26), only once its own copy table
+-- is built, and once only
+T.platform_net_answers_another_armys_hello_once_its_table_is_built = function()
+	local N = net_platform()
+	bm.alliances = hello_alliances({true, true})
+	heard(N, 2) -- the other player's HELLO, before this machine's "Deployed"
+	H.step(0.3)
+	check(N.pushed(0, 0x406cda4) == 0, "no answer before its table is built")
+	H.phase.Deployed()
+	local n = #N.calls
+	H.step(0.15)
+	check(N.pushed(n, 0x406cda4) == 1, "it answers, unpressed: " .. N.pushed(n, 0x406cda4))
+	local d = N.M.uncarrier(N.record().at[2], N.record().at[0])
+	check(d and d.op == "HELLO" and d.id == 0, "for its own army")
+	heard(N, 3)
+	n = #N.calls
+	H.step(0.3)
+	check(N.P.net_play and N.pushed(n, 0x406cda4) == 0, "complete, and nothing more sent")
+end
+
+-- a spectating client (CA: battle:is_spectator()) has no army of its own to speak for: it sends no HELLO, pressed or
+-- answering, so it can never fill a player's bit; it follows the players' bits like every machine. One that cannot say
+-- whether it is spectating sends nothing either, and says so
+T.platform_net_a_spectator_sends_no_hello_and_follows_the_bits = function()
+	local N = net_platform()
+	H.spectator = true
+	bm.alliances = hello_alliances({true, true})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	heard(N, 2)
+	local n = #N.calls
+	H.step(0.5)
+	check(N.pushed(n, 0x406cda4) == 0, "no HELLO from a spectator: " .. N.pushed(n, 0x406cda4))
+	heard(N, 3)
+	H.step(0.15)
+	check(N.gate() == 0x52 and N.P.net_play, "the gate in at the players' bits")
+	local C = net_platform()
+	bm.alliances = hello_alliances({true, true})
+	bm.is_spectator = function() error("test: is_spectator threw") end
+	H.phase.Deployed()
+	C.P.net_asked = true
+	n = #C.calls
+	H.step(0.5)
+	check(C.pushed(n, 0x406cda4) == 0, "no HELLO when is_spectator throws: " .. C.pushed(n, 0x406cda4))
+	local k = 0
+	for _, t in ipairs(C.told) do if t:find("^hello_spectator: .*is_spectator threw") then k = k + 1 end end
+	check(k == 1, "said once: " .. table.concat(C.told, "; "))
+end
+
+-- a handshake under way and not complete HELLO_WAIT (5000) model ms later: P.net_late, for main.lua to tell the player, and
+-- one log line naming the armies waited for and the ones not heard
+T.platform_net_a_late_handshake_says_which_armies_are_missing = function()
+	local N = net_platform()
+	bm.alliances = hello_alliances({true, true, false})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	H.step(0.15)
+	heard(N, 1) -- its own landed; the other player's never does
+	H.step(4.7)
+	check(not N.P.net_late, "not late yet")
+	H.step(0.5)
+	check(N.P.net_late, "late at 5 s")
+	H.step(1)
+	local k = 0
+	for _, t in ipairs(N.told) do
+		if t:find("hello_missing: multiplayer waits: human armies 0,1 of 3, no HELLO from 1 after 5000 model ms", 1, true) then k = k + 1 end
+	end
+	check(k == 1, "the missing army said once: " .. table.concat(N.told, "; "))
+end
+
+-- a handshake that completes in the step it would have turned late is not late: no "no HELLO from none" line, and nothing
+-- for main.lua to tell (the second review's M8)
+T.platform_net_a_completion_in_the_late_step_is_not_late = function()
+	local N = net_platform()
+	bm.alliances = hello_alliances({true, true})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	local since
+	for _ = 1, 30 do
+		H.step(1 / 60)
+		if N.pushed(0, 0x406cda4) > 0 then since = H.game_ms break end
+	end
+	check(since, "the HELLO went at the press")
+	heard(N, 1)
+	local t = hello_timer()
+	for _ = 1, 600 do
+		local nxt = H.game_ms + 1000 / 60
+		if nxt >= t.at and nxt - since >= 5000 then break end
+		H.step(1 / 60)
+	end
+	check(not N.P.net_late and not N.P.net_play, "waiting, not late yet")
+	heard(N, 3) -- the other player's lands just before the step that would turn late
+	H.step(1 / 60)
+	check(N.P.net_play and not N.P.net_late, "complete, and not late")
+	for _, line in ipairs(N.told) do check(not line:find("^hello_missing"), "no late line: " .. line) end
+end
+
+-- army slot 9's bit is bit 1 of the mask's second byte: read there, not in the first
+T.platform_net_a_slot_past_the_first_byte_is_read_from_its_own_byte = function()
+	local N = net_platform()
+	bm.alliances = hello_alliances({true, false, false, false, false, false, false, false, false, true})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	heard(N, 1 + 2) -- slot 0, and bit 1 of the first byte: slot 1, an AI army
+	H.step(0.3)
+	check(N.gate() == 0x5c and not N.P.net_play, "slot 9 not heard: still out")
+	heard(N, 1 + 512)
+	H.step(0.15)
+	check(N.gate() == 0x52 and N.P.net_play, "slot 9 heard: in")
+	local done
+	for _, t in ipairs(N.told) do if t:find("^hello_done: human armies 0,9 of 10 all said") then done = true end end
+	check(done, "both armies named: " .. table.concat(N.told, "; "))
+end
+
+-- a HELLO the writer flags (the record overflowed and was rewound) did not go: it goes again on a later model tick, and
+-- once gone, never again
+T.platform_net_a_hello_that_did_not_go_goes_again = function()
+	local N = net_platform({fail = true})
+	bm.alliances = hello_alliances({true, true})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	local n = #N.calls
+	H.step(0.35)
+	check(N.pushed(n, 0x406cda4) >= 2, "pushed again on a later tick: " .. N.pushed(n, 0x406cda4))
+	N.fail = false
+	n = #N.calls
+	H.step(0.15)
+	check(N.pushed(n, 0x406cda4) == 1, "it went: " .. N.pushed(n, 0x406cda4))
+	n = #N.calls
+	H.step(0.3)
+	check(N.pushed(n, 0x406cda4) == 0, "and, gone, not again")
+end
+
+-- army:is_player_controlled() meaning "the local player" in multiplayer (unmeasured: the record's live checklist item 8)
+-- would leave this machine one human army, its own HELLO all it waits for: it would start alone. Fewer than two is
+-- refused, every bit set or not, said with the armies it saw, and no HELLO goes, pressed or not: it could never complete
+T.platform_net_fewer_than_two_humans_never_put_the_gate_in = function()
+	local N = net_platform()
+	bm.alliances = hello_alliances({true, false})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	local n = #N.calls
+	heard(N, 0xFFFFFFFF)
+	H.step(1)
+	check(N.gate() == 0x5c and not N.P.net_play, "never in, never ready")
+	check(N.pushed(n, 0x406cda4) == 0, "no HELLO sent: " .. N.pushed(n, 0x406cda4))
+	local k = 0
+	for _, t in ipairs(N.told) do
+		if t:find("^hello_humans: multiplayer waits: the battle reports human armies 0 of 2, and with fewer than two it would start alone") then k = k + 1 end
+	end
+	check(k == 1, "said why: " .. table.concat(N.told, "; "))
+end
+
+-- a replay of a multiplayer battle builds net mode too (the record's Ruling 17): its recorded HELLOs land again, and the
+-- gate goes in at their bits, as it is inferred to have in the battle. It sends none of its own, not even the answer a
+-- live machine gives another army's HELLO
+T.platform_net_a_replay_sends_no_hello_and_follows_the_bits = function()
+	local N = net_platform()
+	H.replay = true
+	bm.alliances = hello_alliances({true, true})
+	H.phase.Deployed()
+	N.P.net_asked = true
+	heard(N, 2)
+	local n = #N.calls
+	H.step(0.5)
+	check(N.pushed(n, 0x406cda4) == 0, "no HELLO from a replay: " .. N.pushed(n, 0x406cda4))
+	heard(N, 3)
+	H.step(0.15)
+	check(N.gate() == 0x52 and N.P.net_play, "the gate in at the recorded bits")
+end
+
+-- single player has no handshake: no model callback, no HELLO, and the gate is main.lua's to set at a start (pinned by
+-- the_gate_is_in_while_a_man_is_played_alone and the_gate_is_in_while_a_unit_of_one_is_steered_alone)
+T.platform_single_player_has_no_handshake = function()
+	local N = net_platform({single = true})
+	check(not N.P.features.net and hello_timer() == nil, "no net mode, no handshake")
+	H.step(1)
+	check(N.pushed(0, 0x406cda4) == 0 and N.gate() == 0x5c, "no HELLO, the gate out")
+	check(N.P.gate(true) and N.gate() == 0x52, "and P.gate sets it, as before")
+end
+
+-- a second multiplayer battle in the same game process: the first battle's handshake put the gate in and nothing took it
+-- out at Complete. The next build takes it out (its own handshake puts it back), with net mode on and no refusal; and its
+-- check must not lean on memreader's patch accepting bytes that are already the new ones. The real patch is documented as
+-- accepting them (BATTLE_ENGINE_RE.md section 9); the strict patch below is a stand-in that refuses them
 T.platform_net_a_second_battle_in_the_same_process_keeps_net_mode = function()
 	local N = net_platform()
-	check(N.gate() == 0x52, "the first battle left the gate in")
+	N.put(N.BASE + GATE_AT + #GATE - 1, 0x52, 1) -- the first battle's handshake put it in
 	local P2 = N.M.build(N.mr, true, function() end)
 	check(P2.features.net, "net mode: " .. table.concat(P2.problems, "; "))
 	check(#P2.problems == 0, "no refusal: " .. table.concat(P2.problems, "; "))
-	check(N.gate() == 0x52, "and the gate is in: " .. string.format("%x", N.gate()))
+	check(N.gate() == 0x5c, "the next build took it out: " .. string.format("%x", N.gate()))
 	local patch = N.mr.patch
 	function N.mr.patch(p, expected, new)
 		if N.gate() == new:byte(#new) then return nil, "other bytes" end
@@ -2910,7 +3253,7 @@ T.platform_net_a_second_battle_in_the_same_process_keeps_net_mode = function()
 	end
 	local P3 = N.M.build(N.mr, true, function() end)
 	check(P3.features.net, "a third battle, with a patch that refuses bytes already new: " .. table.concat(P3.problems, "; "))
-	check(N.gate() == 0x52, "and the gate is in: " .. string.format("%x", N.gate()))
+	check(N.gate() == 0x5c, "and the gate out until its handshake: " .. string.format("%x", N.gate()))
 end
 
 -- code the gate does not know: a machine without it would reset a melee MOVE that the others run, so there is no net mode
@@ -2925,19 +3268,33 @@ T.platform_net_without_the_gate_is_no_net_mode = function()
 	check(N.pushed(n, 0x406c798) == 0, "steer is single player's: no MOVE pushed")
 end
 
--- a refusal after the gate went in (here the rules, which install_net builds right after it, throw) leaves the gate out
--- again: a machine whose mod is off keeps none, since it would reset a melee MOVE that the peers run. A refusal before the
--- gate touches nothing of it
-T.a_refused_net_build_takes_the_gate_out = function()
+-- a refusal after the gate's check (here the rules, which install_net builds right after it, throw) leaves the gate out:
+-- the build's proof takes it out again, and a refused build has no handshake, so it never says HELLO and no peer starts
+-- with it. A refusal before the check touches nothing of the gate either
+-- a machine whose gate cannot be written would let the others start with theirs in and its own out: the write is proven
+-- at build, in and out again before the battle's first tick, and a refusal either way is no net mode and no handshake,
+-- so it never says HELLO. An out-write refused after the in-write went leaves the gate in, and says so
+T.platform_net_a_gate_that_cannot_be_written_is_no_net_mode = function()
+	for _, c in ipairs({{0x52, "cannot be written", 0x5c}, {0x5c, "cannot be taken out", 0x52}}) do
+		local N = net_platform({refuse = c[1]})
+		check(not N.P.features.net, "no net mode")
+		check(table.concat(N.P.problems, "; "):find(c[2], 1, true), "the reason is kept: " .. table.concat(N.P.problems, "; "))
+		check(N.gate() == c[3], "the gate: " .. string.format("%x", N.gate()))
+		check(hello_timer() == nil, "no handshake, so no HELLO")
+	end
+end
+
+T.a_refused_net_build_leaves_the_gate_out = function()
 	local O = {}
-	O.net_rules = function() O.in_at_refusal = O.gate() error("test: the rules threw") end
+	O.net_rules = function() O.at_refusal = O.gate() error("test: the rules threw") end
 	local N = net_platform(O)
-	check(O.in_at_refusal == 0x52, "the gate was in when the refusal came: " .. tostring(O.in_at_refusal))
+	check(O.at_refusal == 0x5c, "the gate was out when the refusal came: " .. tostring(O.at_refusal))
 	check(not N.P.features.net, "no net mode")
 	check(table.concat(N.P.problems, "; "):find("the rules threw", 1, true), "the reason is kept: " .. table.concat(N.P.problems, "; "))
-	check(N.gate() == 0x5c, "the gate is out again: " .. string.format("%x", N.gate()))
+	check(N.gate() == 0x5c, "the gate is out: " .. string.format("%x", N.gate()))
+	for _, t in ipairs(H.model_timers) do check(t.id ~= "derpy_tp_hello", "no handshake on a refused build") end
 	local C = net_platform({csite = {0xe9, 0, 0, 0, 0, 0x90}})
-	check(not C.P.features.net and C.gate() == 0x5c, "a refusal before the gate leaves the game's branch: " .. string.format("%x", C.gate()))
+	check(not C.P.features.net and C.gate() == 0x5c, "a refusal before the check leaves the game's branch: " .. string.format("%x", C.gate()))
 end
 
 local function real_platform()
@@ -7909,7 +8266,7 @@ end
 T.the_carrier_round_trips = function()
 	local M = H.platform_module()
 	for _, c in ipairs({{"GUARD_ON", 1}, {"GUARD_OFF", 65535}, {"DISARM", 4265, {shots = true, charge = true}},
-		{"DISARM", 7, {shots = false, charge = true}}, {"ARM", 0}}) do
+		{"DISARM", 7, {shots = false, charge = true}}, {"ARM", 0}, {"HELLO", 0}, {"HELLO", 31}}) do
 		local d = M.uncarrier(M.carrier(c[1], c[2], c[3]))
 		check(d and d.op == c[1] and d.id == c[2], c[1] .. " " .. c[2])
 		check(d.shots == (c[3] and c[3].shots or false) and d.charge == (c[3] and c[3].charge or false), "flags")
@@ -7928,10 +8285,15 @@ T.the_carrier_word_layout_is_the_caves = function()
 	is(0xD733, 4265, "DISARM", 4265, {shots = true, charge = true})
 	is(0xD732, 7, "DISARM", 7, {charge = true})
 	is(0xD740, 0, "ARM", 0)
-	is(0xD750, 9, "HELLO", 9)
+	is(0xD750, 0x0109, "HELLO", 9) -- the protocol version 1 above the army slot (Ruling 25)
+	is(0xD750, 0x011F, "HELLO", 31)
 	for hi = 0, 0xFFFF do -- fed arbitrary floats' bits: never an error, a table only under the magic
-		local d = M.uncarrier(hi, 0xFFFF)
-		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X", hi))
+		local d = M.uncarrier(hi, 0xFFFF) -- as a HELLO, version 255 and slot 255: no HELLO of ours
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X", hi))
+		d = M.uncarrier(hi, 0x0103) -- as a HELLO, version 1 and slot 3
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X, lo 0x0103", hi))
+		d = M.uncarrier(hi, 0x0203) -- as a HELLO, version 2: not this build's
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X, lo 0x0203", hi))
 	end
 end
 
@@ -7939,6 +8301,17 @@ T.vanilla_reload_times_are_not_carriers = function()
 	local M = H.platform_module()
 	check(M.uncarrier(0x3E4C, 0xCCCD) == nil, "0.2")
 	check(M.uncarrier(0xBF80, 0x0000) == nil, "-1.0")
+end
+
+-- a HELLO names an army slot, one bit of the block's 32-bit mask: past it, refused, never wrapped onto another army; and a
+-- HELLO of another protocol version, or past the mask, decodes to nothing (the cave sets nothing for it either)
+T.a_hello_past_the_mask_or_of_another_version_is_nothing = function()
+	local M = H.platform_module()
+	check(pcall(M.carrier, "HELLO", 31) and not pcall(M.carrier, "HELLO", 32), "slot 31 is the last that fits")
+	check(M.HELLO_VERSION == 1, "the first protocol version: " .. tostring(M.HELLO_VERSION))
+	for _, lo in ipairs({0x0003, 0x0203, 0xFF03, 0x0120, 0x01FF}) do
+		check(M.uncarrier(0xD750, lo) == nil, string.format("lo %04X is no HELLO", lo))
+	end
 end
 
 T.an_id_past_16_bits_is_refused = function()

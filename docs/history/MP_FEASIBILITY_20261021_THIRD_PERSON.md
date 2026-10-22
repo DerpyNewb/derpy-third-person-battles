@@ -5,9 +5,12 @@
 slot on the wire, and Task 1b found CA's own per-man overrides on the same queue. What was built instead: steer is a
 forged MOVE, hold a HALT, a standing turn CA's FOLLOW_FIRST_PERSON, a clip the play command as before, and the guard,
 disarm and arm a 32-bit carrier word in a forged RELOAD_TIME, read on every machine by a cave at `exe+2ecfcb7` that
-keeps a 16-entry guard table and points men at a fragment copy table built at "Deployed". The order gate is in for the
-whole battle on every machine, and nothing writes a man's fields outside the queue. It is tested offline only (the
-caves under an emulator, the sending rules in a two-machine simulation); no two machines have run it, and nothing is
+keeps a 16-entry guard table and points men at a fragment copy table built at "Deployed". A HELLO carrier from every
+human army's machine gates it all (Rulings 25 and 26), and none is sent until a player presses F2: the order gate goes
+in on every machine once the last one lands (one tick everywhere is inferred) and stays to the battle's end, and play
+waits for it. Nothing writes a man's fields outside the queue. It is tested
+offline only (the caves under an emulator, the sending rules in a two-machine simulation); no two machines have run it,
+and nothing is
 uploaded until checklist items 10 and 12 are answered (Ruling 15). The format, the caves and the sending rules are
 `docs/BATTLE_ENGINE_RE.md` section 13, "As built (2026-10-21)"; the decisions are "Rulings" and the session's
 measurements "Live session checklist", both at the end of this record. The sections between are the historical record
@@ -399,14 +402,51 @@ Ruling 8 (the open-ground re-send control) is the control row of "The overrides,
   rider paths (item 18 checks them live); a null model entry inside a readable unit still fails the copy table and turns
   multiplayer off (not demonstrated). If wrong: multiplayer off for that battle on every machine, no desync, said once
   in the log.
+- **25.** The HELLO handshake, built before the live session, so Ruling 15's wait is overturned and Ruling 23's gap
+  closed. Each machine sends one HELLO carrier (op 5, version 1 in bits 15-8, its army's slot in bits 7-0) for its own
+  army once its copy table is built, and sends it again while a push is refused. The carrier cave sets the slot's bit in
+  a mask at block `+0x5c` with `lock or`, and a model callback in `platform.lua` (so a replay runs it too, Ruling 17)
+  puts the order gate in once every human army's bit is set; the gate no longer goes in at build, which only checks
+  its bytes. F2 starts net play only then, and before it says `derpy_tp_mp_needs_everyone`. Human means
+  `army:is_player_controlled()`, whose multiplayer meaning is item 8; fewer than two human armies is refused, since a
+  local meaning would start each machine alone. If wrong: a local meaning keeps the pack off in every multiplayer battle
+  (safe, said once in the log); a player who controls two armies never completes it (also safe); a vanilla peer that
+  reads RELOAD_TIME's global after all desyncs on A's HELLO alone (item 12); and a gate patched from the model callback
+  at a different point of the tick on each machine desyncs at the handshake's tick (item 10). Amended by Ruling 26.
+- **26.** The HELLO is sent only on this player's first F2 press in net mode, or as soon as another human army's HELLO
+  has landed, and in both cases only after this machine's copy table is built: a modded peer answers by itself, and a
+  lobby where nobody presses F2 forges nothing. The press is kept: third person starts by itself when the handshake
+  completes, with no second press, and `derpy_tp_mp_needs_everyone` shows only once the handshake is 5 model s late
+  (`HELLO_WAIT`, two queue delays and three 100 ms callbacks with 2.3 s a trip to spare). A press while one is kept does
+  nothing (Ruling 28 changed this, and Ruling 29 restored it); a kept press is dropped 15 model s after it (`NET_DROP`), since a camera taken over
+  later lands on a player who has gone back to commanding the battle. If wrong (the vanilla global is read after all): a
+  mixed lobby where someone presses F2 still sends one HELLO; item 12 measures it.
+- **27.** The handshake review's fixes: no HELLO from a spectator (`bm:is_spectator()`, pcall'd; a throw counts as
+  watching) nor with fewer than two human armies; both log lines name the human armies' slots and the army count, so
+  item 8 can compare machines; the completion tick is stated as inferred; the gate's write is proven at build, in and
+  out again before the first tick, and net mode refused if either write fails, so a machine that cannot write it never
+  says HELLO; one log line names the armies not heard once the handshake is late. A second human army entry for one
+  player (a reinforcement) never completes and is parked as a live look (item 8). If wrong: an out-write refused after
+  the in-write went leaves the gate in on a refused machine, said in its reason. The second review added: a spectator
+  never starts third person either (`M.start` refuses it, a throw counting as watching, and keeps no press, while its
+  handshake still puts its gate in at the players' tick); any start spends a kept press; and the late line goes only
+  with an army still missing.
+- **28.** Overturned by Ruling 29. A second F2 press while the handshake waits cancelled the kept press: no HELLO, nothing
+  restarted, the handshake carrying on.
+- **29.** Overturns Ruling 28: a second F2 press while the handshake waits is ignored. The kept press stands, no HELLO is
+  resent and nothing is cancelled, so the kept press still starts third person on completion. A cancel gives no
+  feedback, so a player who pressed twice to make sure would wait for a start that never comes; and with every player
+  modded the wait is about a second, so a cancel buys almost nothing. If wrong: a player who pressed by mistake has
+  third person start when the handshake completes, and stops it with F2.
 
 ## Live session checklist
 
 What only two machines can answer, each with its measurement. The item numbers are fixed, since
 `docs/BATTLE_ENGINE_RE.md` section 14 and the rulings cite them; the order below is the order to run them, top to
-bottom. **Nothing is uploaded until items 10 and 12 are answered (Ruling 15).** If a lobby starts with one player
-lacking the pack, the handshake comes first; if a vanilla man ever parks an action, a mixed lobby diverges before the
-first forged command, and the handshake needs another design, for example a per-man gate keyed off the guard table.
+bottom. **Nothing is uploaded until items 10 and 12 are answered (Ruling 15).** The handshake is built (Rulings 25 to
+27), so a lobby with one player lacking the pack never starts it and never puts the gate in, and sends nothing unless
+someone presses F2; item 12 checks that A's one HELLO leaves such a battle in step, and item 10 that the gate going in
+mid-battle does on every machine.
 
 ### Before the session
 
@@ -421,7 +461,8 @@ first forged command, and the handshake needs another design, for example a per-
   every 1 s of model time it logs one number per machine, the sum over every model of every army of
   `x * 31 + z * 17 + hp`, rounded to 0.01 (the plan, `docs/superpowers/plans/2026-10-21-third-person-multiplayer.md`,
   Task 3). Items 7 and 8 read the mailbox block, `_G.DERPY_TP.P.mailbox`: `count` `+0x54`, `nfrags` `+0x58`, `fragtab`
-  `+0x60`, the 16 entries from `+0x100` (16 bytes each, the id at `+8`). Every probe runs inside `pcall`: one Lua error
+  `+0x60`, the 16 entries from `+0x100` (16 bytes each, the id at `+8`), the HELLO mask `+0x5c` (bit n for army slot
+  n). Every probe runs inside `pcall`: one Lua error
   wedges the bridge.
 
 ### Battle 1: a 1v1, both players with the pack
@@ -436,17 +477,33 @@ At load and in deployment:
   a GUARD_ON during deployment, and a GUARD_OFF after. Pass: both execute at the same tick on both machines, and the
   guard is still in the table after Deployed.
 
-At Deployed, before anyone presses F2:
+At Deployed, in this order (the handshake step is the battle's first F2):
 
 - **Build time.** Read `derpy_tp: the fragment table took <n> model ms (<r> real ms), <k> fragments` on both: the real
-  ms is the cost, the model ms whether the battle waited for it. Wait a few seconds after Deployed before F2: a peer
-  whose table is not built yet drops the DISARMs it is sent (Ruling 23).
-- **8. Copy table.** `nfrags` and the set of original fragments, by unit type, on both. Pass: equal, with every army's
-  fragments present. Record what `army:is_player_controlled()` returns for each army on each machine. Once, run it in a
-  battle with an AI reinforcement army: a unit not yet on the field is left out, not the table.
-- **10. The gate on vanilla units.** While nobody plays, log every man's queued holder every tick (`+0x5c8`; has
-  `+0x6f8`, started `+0x6f9`). If no vanilla man ever has a parked action, the whole-battle gate is inert without the mod
-  playing. Also compare a lasting AI melee with the gate in (net mode) and out (the pack off on both).
+  ms is the cost, the model ms whether the battle waited for it. A peer whose table is not built yet does not answer a
+  HELLO until it is (Rulings 25 and 26), so nobody starts before every table is there.
+- **Nothing sent.** Before anyone presses F2, run 10 s and read both machines' sent records: no HELLO, no carrier, and
+  the mask `+0x5c` 0 on both (Ruling 26).
+- **The handshake.** Press F2 on A with a unit selected. Read `derpy_tp: human armies <slots> of <armies> all said
+  HELLO by <ms> model ms: the order gate is in` on both. Pass: the same slots and the same ms on both, the mask `+0x5c`
+  holding exactly those bits, B's HELLO sent without a press on B, and A in third person with no second press. If
+  `derpy_tp_mp_needs_everyone` shows on A instead (5 model s after the press), the log has `multiplayer waits: human
+  armies <slots> of <armies>, no HELLO from <slots>`, naming who is missing, or another `multiplayer waits:` line saying
+  why.
+- **8. Copy table and the human armies.** `nfrags` and the set of original fragments, by unit type, on both. Pass:
+  equal, with every army's fragments present. Record what `army:is_player_controlled()`, `is_reinforcement_army()`,
+  `bm:local_alliance()` and `bm:local_army()` return for each army on each machine: the first decides the handshake's
+  human armies. Pass: every machine logs the same slots (the `human armies <slots> of <armies>` part of either line),
+  and they are the armies with a player at a keyboard. If it is true for each machine's own army alone, both logs say
+  `multiplayer waits: the battle reports human armies <its own slot> of <armies>` and the pack stays off in
+  multiplayer. Run once in the 1v1 and once in the 2v2. Once, run it in a battle with an AI reinforcement army: a unit
+  not yet on the field is left out, not the table. Once, a campaign battle with a player's own reinforcing army: if that
+  army is a human entry of its own, the handshake never completes (safe; the message blames the other players).
+- **10. The gate on vanilla units.** The gate now goes in at the handshake's tick, from a model callback, while the
+  battle's workers may be updating men (`BATTLE_ENGINE_RE.md` section 14). Pass first: the per-tick clip log of every
+  man stays equal on both machines across that tick. Then, while nobody plays, log every man's queued holder every tick
+  (`+0x5c8`; has `+0x6f8`, started `+0x6f9`). If no vanilla man ever has a parked action, the gate is inert without the
+  mod playing. Also compare a lasting AI melee with the gate in (net mode) and out (the pack off on both).
 
 Forged commands, from probes:
 
@@ -487,15 +544,23 @@ Played, both players at the keys:
 ### Battle 2: a 2v2 against the AI, same game session
 
 - **19. A second multiplayer battle in the same process.** The first left the gate in; the second build takes it out as
-  it loads and puts it back. Pass: no `multiplayer is off` line, and the hash stays equal.
+  it loads, and its own handshake, at the first F2, puts it back. Pass: no `multiplayer is off` line, the mask `+0x5c` 0
+  before that press, the HELLO line at the same ms on both, and the hash stays equal.
 - **4, second half.** Both humans in third person at once for 3 minutes or more. Pass: the hash logs are equal to the end.
 
 ### After the battles
 
-- **13. A multiplayer replay.** Load battle 1's replay: what `bm:is_multiplayer()` reads inside it, and whether it
-  reproduces the battle (the per-tick watch log in the battle against the same in the replay).
-- **12. A mismatched lobby.** Does a lobby start when B lacks the pack, or memreader Plus? If it does, the handshake is
-  required before any upload (Ruling 15). Then push 10 each of MOVE, HALT, FOLLOW and carriers from A, and record whether
-  B crashes and whether the hash diverges.
+- **13. A multiplayer replay.** Load battle 1's replay: what `bm:is_multiplayer()` reads inside it, what
+  `army:is_player_controlled()` returns for each army there (nobody controls one in a replay; false for all leaves the
+  gate out for the whole replay), whether the recorded HELLOs fill the mask `+0x5c`, whether the replay's `human armies
+  ... all said HELLO by <ms> model ms` line shows the battle's slots and model ms, and whether it reproduces the battle
+  (the per-tick watch log in the battle against the same in the replay).
+- **12. A mismatched lobby.** Does a lobby start when B lacks the pack, or memreader Plus? If it does: first, nobody
+  presses F2 for a minute; A sends nothing at all (Ruling 26) and the hash stays equal. Then A presses F2: A sends one
+  HELLO and never starts, `derpy_tp_mp_needs_everyone` shows on A 5 model s after the press and not before, A's log
+  names B's slot as missing, the gate never goes in on A, and A's log has no `all said HELLO` line. On B, A's HELLO is a
+  vanilla reload-time order whose value lands in RELOAD_TIME's global (`exe+3d10794`), which nothing is known to read;
+  read it on B. Pass: the hash equal on both for the whole battle, through A's HELLO. Then push 10 each of MOVE, HALT,
+  FOLLOW and carriers from A by probe, and record whether B crashes and whether the hash diverges.
 
 The results go into a dated session record, and each answered question comes out of `BATTLE_ENGINE_RE.md` section 14.

@@ -43,7 +43,7 @@ local COMPARED = {steer = true, hold = true, face = true, play = true, guard = t
 -- L.ALLOW: the battle writes the mod still makes on one machine and a later change is to move onto every machine. Each
 -- entry names the change; the entry goes when it lands. Never loosen the comparison instead.
 L = {}
-L.ALLOW = {} -- empty since the order gate went in at build on every machine; the mechanism stays for the next entry
+L.ALLOW = {} -- empty since the order gate went in on every machine at one tick; the mechanism stays for the next entry
 
 -- an order for keys of any type: by type, then value (numbers, strings), else by text
 local function key_less(a, b)
@@ -103,6 +103,8 @@ local function wire_args(...)
 end
 
 local function routed() return H.net and not H.net_unrouted end
+
+local function listof(items) return {count = function() return #items end, item = function(_, i) return items[i] end} end
 
 -- the swap ------------------------------------------------------------------------------------------------------
 local BASE -- set at the end of this file
@@ -228,7 +230,14 @@ local function deliver(w, due)
 	for i, c in ipairs(due) do
 		local p = ACTIONS[c.kind] and targets[i] and mc.parked[c.model_id]
 		if p then mc.parked[c.model_id] = nil put("superseded", c.model_id, {kind = "play", fields = p.c.fields}) end
-		if c.kind == "carrier" and not mc.mod then
+		local hello = c.kind == "carrier" and M.uncarrier(c.fields.hi, c.fields.lo)
+		if hello and hello.op == "HELLO" then
+			-- no man and no battle state on any machine: with the mod the cave sets the army's bit in its own block and skips
+			-- the store, without it the word lands in RELOAD_TIME's global, which no code is known to read (BATTLE_ENGINE_RE.md
+			-- section 13). The bit is the rule the cave follows: M.uncarrier's HELLO, which its selftest ties to the cave
+			if mc.mod then H.heard[hello.id] = true end
+			put("hello", c.model_id, hello)
+		elseif c.kind == "carrier" and not mc.mod then
 			put("carrier_ignored", c.model_id, M.uncarrier(c.fields.hi, c.fields.lo) or c.fields) -- the vanilla engine's unread global
 		elseif not targets[i] then put("dropped", c.model_id, {kind = c.kind, fields = c.fields})
 		elseif ACTIONS[c.kind] and last[c.model_id] ~= i then put("superseded", c.model_id, {kind = c.kind, fields = c.fields})
@@ -373,10 +382,17 @@ function W:diverged()
 	return found and found.text or nil
 end
 
--- opts: machines = {{name, fps, army, mod = true, pairs = "normal" | "reverse", route = true, fresh = <H.fresh opts>}, ...},
--- armies = {{<H.unit opts>, ...}, ...} (one battle, the same on every machine), delay_ticks, park_ticks (deliver),
--- allow (default L.ALLOW), gate = false (no machine builds with the order gate in; a machine without the mod never does).
--- route = false: that machine's fake platform, unit controllers and recorded calls act locally, as in single player
+-- opts: machines = {{name, fps, army, mod = true, pairs = "normal" | "reverse", route = true, fresh = <H.fresh opts>,
+-- deployed = true, hello_refusals = 0, hello_version}, ...}, armies = {{<H.unit opts>, ...}, ...} (one battle, the same on
+-- every machine, each army its own alliance), delay_ticks, park_ticks (deliver), allow (default L.ALLOW), gate = false
+-- (every machine's gate goes in and changes nothing), humans = "local" (army:is_player_controlled() true for this
+-- machine's own army alone), hello = false (the world starts before the HELLO handshake completes; by default the
+-- first machine with the mod asks for it, as its player's F2 press would, and the others answer).
+-- route = false: that machine's fake platform, unit controllers and recorded calls act locally, as in single player.
+-- deployed = false: its "Deployed" waits for the test (H.phase.Deployed()). hello_refusals: its first pushes of a HELLO
+-- are refused; hello_version: its HELLOs carry another protocol version (an older or newer build); spectator = true: a
+-- client spectating the battle (bm:is_spectator()), its army's view but not its player, so that army is human only if
+-- another machine plays it
 function L.new(opts)
 	opts = opts or {}
 	for k in next, _G do if not BASE[k] then rawset(_G, k, nil) end end -- the last world's globals
@@ -388,10 +404,13 @@ function L.new(opts)
 	local ids, n = {}, 0
 	for a, list in ipairs(armies) do ids[a] = {} for i in ipairs(list) do n = n + 1 ids[a][i] = n end end
 	local specs = opts.machines or {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, pairs = "reverse"}}
+	local played = {} -- the armies a machine plays: a human's
+	for _, s in ipairs(specs) do if not s.spectator then played[s.army or 1] = true end end
 	for _, s in ipairs(specs) do
 		local mc = {name = s.name, fps = s.fps or 60, army = s.army or 1, mod = s.mod ~= false, sent = {}, applied = {}, parked = {}, seq = 0, g = {}}
 		local h = setmetatable({}, {__index = H0})
 		h.ls, h.world, h.net, h.net_unrouted, h.fps, h.next_unit = mc, w, true, s.route == false, mc.fps, n
+		h.hello_refusals, h.hello_version = s.hello_refusals, s.hello_version
 		h.net_gate = mc.mod and opts.gate ~= false
 		-- the model clock is the ticks the world has run, as in the game, where it moves when a tick is processed: the sends
 		-- of one tick read one model time. Counted off the frames, it moved at a frame inside the tick (H.fresh's first step
@@ -416,6 +435,7 @@ function L.new(opts)
 			into[#into + 1] = o
 		end end
 		f.mp = true -- a multiplayer battle, as the game reports it; H.net puts the fake platform in net mode
+		f.spectator = s.spectator
 		f.tick_ms = f.tick_ms or TICK * 1000
 		if not mc.mod then f.memreader = false end -- a peer without the mod: it loads nothing that runs
 		w.machines[#w.machines + 1], w.by[mc.name] = mc, mc
@@ -445,10 +465,41 @@ function L.new(opts)
 					H.send("bm", nil, f2)
 				end
 			end
+			-- the battle's own alliances, in one order on every machine (the fake bm's are this machine's view): each army its
+			-- own alliance, human when a machine plays it (opts.humans = "local": this machine's alone). No units: only the
+			-- handshake reads them here (platform.lua M.handshake)
+			bm.alliances = function()
+				local list = {}
+				for a = 1, #armies do
+					local human = opts.humans == "local" and a == mc.army or opts.humans ~= "local" and played[a] == true
+					local army = {is_player_controlled = function() return human end}
+					list[a] = {armies = function() return listof({army}) end}
+				end
+				return listof(list)
+			end
+			bm.local_alliance = function() return mc.army end
+			bm.local_army = function() return 1 end
 			-- deployment is over on every machine before anyone plays: net play waits for it (platform.lua P.net_ready)
-			if H.phase.Deployed then H.phase.Deployed() end
+			if H.phase.Deployed and s.deployed ~= false then H.phase.Deployed() end
 			mc.mark = #H.calls -- the battle is compared from here: each mod's own load is its machine's business
 		end)
+	end
+	-- and every machine with the mod has had every player's HELLO, the gate in: net play waits for it (platform.lua
+	-- M.handshake). It starts as a press does (P.net_asked, set by main.lua's M.start), on the first machine with the mod,
+	-- with no session kept for it to start; the others answer that HELLO by themselves. The oracle compares those ticks too
+	if opts.hello ~= false then
+		for _, mc in ipairs(w.machines) do
+			if mc.mod then with(w, mc, function() H.P.net_asked = true end) break end
+		end
+		local function waiting()
+			for _, mc in ipairs(w.machines) do
+				local done = true
+				if mc.mod then with(w, mc, function() done = H.P.net_play == true end) end
+				if not done then return true end
+			end
+		end
+		for _ = 1, 30 do if not waiting() then break end w:tick() end
+		if waiting() then error("the HELLO handshake did not complete in 30 ticks: hello = false starts before it") end
 	end
 	return w
 end

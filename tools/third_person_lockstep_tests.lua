@@ -9,7 +9,8 @@ local function sent_kinds(w, n)
 	local k = {}
 	for _, c in ipairs(w:sent(n)) do
 		k[c.kind] = (k[c.kind] or 0) + 1
-		if c.kind == "carrier" then k["carrier:" .. c.fields.op] = (k["carrier:" .. c.fields.op] or 0) + 1 end
+		local op = c.kind == "carrier" and (c.fields.op or "unknown")
+		if op then k["carrier:" .. op] = (k["carrier:" .. op] or 0) + 1 end
 	end
 	return k
 end
@@ -48,7 +49,8 @@ T.ls_two_machines_stay_in_step_while_A_plays = function()
 	-- while the clip is in flight, platform.lua M.net_rules)
 	for _, kind in ipairs({"move", "follow", "play", "carrier:GUARD_ON"}) do check(k[kind], "A sent no " .. kind) end
 	check(ran_move(w, "B", 1001), "B's engine ran A's move for 1001")
-	check(#w:sent("B") == 0, "B decided nothing for A's man")
+	-- B's one send is its own HELLO, from the world's start (L.new runs the handshake)
+	check(#w:sent("B") == 1 and w:sent("B")[1].fields.op == "HELLO", "B decided nothing for A's man")
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
@@ -153,7 +155,8 @@ T.ls_a_uc_command_for_a_dead_unit_is_dropped = function()
 	w:on("A", function() create_unitcontroller(H.units[1]):halt() end)
 	w:run(0.3)
 	for _, n in ipairs({"A", "B"}) do
-		local a = w:applied(n)[1]
+		local a
+		for _, x in ipairs(w:applied(n)) do if x.kind ~= "hello" then a = x break end end -- past the world's handshake
 		check(a and a.kind == "dropped" and a.fields.kind == "uc", n .. ": " .. tostring(a and a.kind))
 	end
 end
@@ -184,10 +187,11 @@ T.ls_a_new_global_cannot_leak = function()
 	w:on("B", function() check(DERPY_TP_LEAK == nil, "not after a tick either") end)
 end
 
--- a peer without the mod writes the carrier's global and reads nothing: the oracle sees the desync
+-- a peer without the mod writes the carrier's global and reads nothing: the oracle sees the desync. A never starts against
+-- such a peer (ls_a_peer_without_the_mod_is_never_sent_to), so its platform guards directly here
 T.ls_a_peer_without_the_mod_ignores_carriers = function()
-	local w = L.new({machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, mod = false}}})
-	w:tap("A", "F2")
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, mod = false}}})
+	w:on("A", function() H.P.guard(H.units[1]._models[1]) end)
 	w:run(0.5)
 	local ignored = 0
 	for _, a in ipairs(w:applied("B")) do if a.kind == "carrier_ignored" then ignored = ignored + 1 end end
@@ -197,7 +201,9 @@ end
 
 -- the oracle's own tests: a change made on one machine only is reported, whichever path it took --------------------
 
-local UNROUTED = {machines = {{name = "A", fps = 60, army = 1, route = false}, {name = "B", fps = 40, army = 2, pairs = "reverse"}}}
+-- hello = false: nobody presses F2, so no machine says HELLO and no gate goes in (Ruling 26); these tests are about one
+-- call each
+local UNROUTED = {hello = false, machines = {{name = "A", fps = 60, army = 1, route = false}, {name = "B", fps = 40, army = 2, pairs = "reverse"}}}
 
 -- the platform writing on its own machine instead of queuing: each call alone, then the mod playing
 T.ls_oracle_sees_unrouted_platform_calls = function()
@@ -217,9 +223,22 @@ T.ls_oracle_sees_unrouted_platform_calls = function()
 		local d = w:diverged() -- the man's own state when the call changes it, else the recorded call
 		check(d and (d:find("man 1001") or d:find("call " .. name)), name .. ": " .. tostring(d))
 		check(#w:sent("A") == 0, name .. " was not queued")
+		check(#w:gates("A") == 0 and #w:gates("B") == 0, name .. ": nobody pressed, so no gate on either machine")
 	end
-	local w = L.new(UNROUTED)
+	-- then the mod playing unrouted. Both players press: A's HELLO lands on A alone and B's on both, so A's half of the
+	-- handshake completes and A starts, and B's never does. A's gate alone goes in, a one-sided write this world allows so
+	-- that what is caught is the playing. The control: the same world with nobody pressing stays in step
+	local PLAY = {hello = false, allow = {gate = "A's half handshake, unrouted"}, machines = UNROUTED.machines}
+	local w = L.new(PLAY)
+	w:run(3.0)
+	check(w:diverged() == nil, "nobody pressing: in step, " .. tostring(w:diverged()))
+	w = L.new(PLAY)
 	w:tap("A", "F2")
+	w:tap("B", "F2")
+	w:run(1.0)
+	local playing
+	w:on("A", function() playing = H.E.F.on end)
+	check(playing, "A plays")
 	w:on("A", function() H.down("W") end)
 	w:run(2.0)
 	check(w:diverged(), "the mod playing unrouted")
@@ -236,15 +255,18 @@ T.ls_oracle_sees_one_sided_battle_calls = function()
 	local man = function() return H.units[1]._models[1] end
 	local _, d = first({}, function() H.P.place(man(), 5, 5) end) -- never routed: a direct write
 	check(d and d:find("x=5.000"), "place: " .. tostring(d))
-	_, d = first(UNROUTED, function() bm:trigger_projectile_launch("test_shot", v(0, 0, 0), v(0, 0, 10)) end)
+	local u
+	u, d = first(UNROUTED, function() bm:trigger_projectile_launch("test_shot", v(0, 0, 0), v(0, 0, 10)) end)
 	check(d and d:find("call launch"), "launch: " .. tostring(d))
-	_, d = first(UNROUTED, function() H.units[1]:set_current_ammo_unary(0.5) end)
+	check(#u:gates("A") == 0, "launch: nobody pressed, so no gate")
+	u, d = first(UNROUTED, function() H.units[1]:set_current_ammo_unary(0.5) end)
 	check(d and d:find("set_ammo"), "set_ammo: " .. tostring(d))
+	check(#u:gates("A") == 0, "set_ammo: nobody pressed, so no gate")
 	_, d = first({}, function() H.units[1]._ammo = 3 end) -- a write to the unit itself
 	check(d and d:find("ammo=3"), "ammo: " .. tostring(d))
-	-- the gate is in on every machine from the build, so one machine's script setting it is a one-sided write like
-	-- the rest; the allowance mechanism stays for the next entry
-	check(L.ALLOW.gate == nil, "the gate needs no allowance: it is in from the build on both machines")
+	-- the gate goes in on every machine at the handshake's tick, so one machine's script setting it is a one-sided write
+	-- like the rest; the allowance mechanism stays for the next entry
+	check(L.ALLOW.gate == nil, "the gate needs no allowance: it goes in on both machines at one tick")
 	_, d = first({}, function() H.P.gate(true) end)
 	check(d and d:find("call gate"), "gate: " .. tostring(d))
 	_, d = first({allow = {gate = "a test's allowance"}}, function() H.P.gate(true) end)
@@ -491,8 +513,8 @@ end
 
 -- the order gate -----------------------------------------------------------------------------------------------------
 -- It patches one branch in the game's code and changes the simulation: a man's queued action beats the order his regiment
--- gives him each tick. Every machine has it from the first tick and keeps it to the end of the battle; one machine setting
--- it at a key press is a desync in the first melee.
+-- gives him each tick. Every machine puts it in at the tick the last HELLO landed (platform.lua M.handshake) and keeps it
+-- to the end of the battle; one machine setting it at a key press is a desync in the first melee.
 
 local function gate_text(g)
 	local t = {}
@@ -500,12 +522,15 @@ local function gate_text(g)
 	return "[" .. table.concat(t, " ") .. "]"
 end
 
-T.ls_the_gate_is_in_from_the_first_tick = function()
+T.ls_the_gate_goes_in_at_one_tick_and_stays = function()
 	local w = L.new({})
+	local at = w:gates("A")[1]
+	check(at and at.on and at.tick > 0, "A's gate in at the handshake, not at build: " .. gate_text(w:gates("A")))
 	local function held(when)
 		for _, n in ipairs({"A", "B"}) do
 			local g = w:gates(n)
-			check(#g == 1 and g[1].on and g[1].tick == 0, when .. ": " .. n .. " has the gate in from tick 0 and no change after, got " .. gate_text(g))
+			check(#g == 1 and g[1].on and g[1].tick == at.tick, when .. ": " .. n .. " has the gate in from tick " .. at.tick
+				.. " and no change after, got " .. gate_text(g))
 		end
 	end
 	held("before any key")
@@ -519,7 +544,7 @@ T.ls_the_gate_is_in_from_the_first_tick = function()
 	held("before Complete")
 	for _, n in ipairs({"A", "B"}) do w:on(n, function() H.phase.Complete() end) end
 	w:run(0.3)
-	held("at Complete") -- the next battle's build puts the game's own branch back (platform.lua)
+	held("at Complete") -- the next battle's build puts the game's own branch back, and its handshake the gate (platform.lua)
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
@@ -557,6 +582,237 @@ T.ls_a_move_in_melee_needs_the_gate = function()
 		.. ", B " .. ran_b .. " from tick " .. tostring(at_b))
 	check(count(w, "A", "reset") == 0 and count(w, "B", "reset") == 0, "gate in: nothing is reset")
 	check(w:diverged() == nil, "gate in on both: " .. tostring(w:diverged()))
+end
+
+-- the HELLO handshake (platform.lua M.handshake, the feasibility record's Rulings 25 and 26) ------------------------------
+-- Net play and the gate wait until every human army's machine has said HELLO. A machine says one, for its own army, once
+-- its player has pressed F2 or another army's HELLO has landed, and only once its copy table is built; the carrier cave
+-- sets that army's bit on every machine at one tick. The press is kept, and starts third person when the handshake
+-- completes; the player is told to wait only once the handshake is 5 model s late (platform.lua HELLO_WAIT)
+
+local NEEDS = "derpy_tp_mp_needs_everyone"
+
+-- how many times machine n's player was shown key
+local function said(w, n, key)
+	local k = 0
+	w:on(n, function() for _, s in ipairs(H.all("subtitle")) do if s[2] == key then k = k + 1 end end end)
+	return k
+end
+
+local function hellos(w, n)
+	local k = 0
+	for _, c in ipairs(w:sent(n)) do if c.kind == "carrier" and c.fields.op == "HELLO" then k = k + 1 end end
+	return k
+end
+
+-- what machine n sent that acts on a man: everything but a HELLO
+local function sent_for_men(w, n)
+	local t = {}
+	for _, c in ipairs(w:sent(n)) do if not (c.kind == "carrier" and c.fields.op == "HELLO") then t[#t + 1] = c.kind end end
+	return t
+end
+
+local function on(w, n) local r w:on(n, function() r = H.E.F.on end) return r end
+
+local MIXED = {hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, mod = false}}}
+
+-- B has no mod, and nobody presses F2: A has the mod installed and forges nothing at all, not even a HELLO, so nothing
+-- of A's reaches B's battle
+T.ls_a_mixed_lobby_where_nobody_presses_carries_nothing = function()
+	local w = L.new(MIXED)
+	w:run(6.0)
+	check(#w:sent("A") == 0, "A sent nothing: " .. #w:sent("A"))
+	check(#w:gates("A") == 0, "the gate never went in on A: " .. gate_text(w:gates("A")))
+	check(said(w, "A", NEEDS) == 0, "and nobody was told anything")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- B has no mod: A's press sends one HELLO, which nobody answers, so A never starts. A's player is told once the handshake
+-- is 5 s late, not before, and nothing of A's reaches B but that HELLO, which changes no battle state on either machine
+-- (tools/third_person_lockstep.lua deliver): the battles stay in step
+T.ls_a_peer_without_the_mod_is_never_sent_to = function()
+	local w = L.new(MIXED)
+	w:run(1.0)
+	w:tap("A", "F2")
+	w:on("A", function() H.down("W") end)
+	w:run(4.5)
+	check(hellos(w, "A") == 1, "A's press said HELLO, once: " .. hellos(w, "A"))
+	check(said(w, "A", NEEDS) == 0, "not told before the handshake is late")
+	w:run(1.0)
+	check(said(w, "A", NEEDS) == 1, "told once it is: " .. said(w, "A", NEEDS))
+	check(not on(w, "A"), "A never started")
+	check(#sent_for_men(w, "A") == 0, "A sent nothing for a man: " .. table.concat(sent_for_men(w, "A"), " "))
+	check(#w:gates("A") == 0, "the gate never went in on A: " .. gate_text(w:gates("A")))
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- a second press while one is kept is ignored (the record's Ruling 29): it sends nothing, restarts no clock and adds no
+-- message (the one message comes 5 s after the first press), and the kept press still starts third person when the
+-- handshake completes. With B unmodded the handshake never completes; with B modded, a second press made before B's
+-- answer lands leaves A to start by itself
+T.ls_a_second_press_while_waiting_sends_nothing = function()
+	local w = L.new(MIXED)
+	w:tap("A", "F2")
+	w:run(2.0)
+	local sent = #w:sent("A")
+	check(sent == 1 and hellos(w, "A") == 1, "the first press said HELLO: " .. sent)
+	w:tap("A", "F2")
+	w:run(2.5)
+	check(#w:sent("A") == sent, "the second press sent nothing: " .. #w:sent("A") - sent .. " more")
+	check(said(w, "A", NEEDS) == 0, "and said nothing")
+	w:run(1.0)
+	check(said(w, "A", NEEDS) == 1, "told 5 s after the first press, not the second: " .. said(w, "A", NEEDS))
+	w:tap("A", "F2")
+	w:run(1.0)
+	check(#w:sent("A") == sent and said(w, "A", NEEDS) == 1, "a third press after it: nothing more")
+	check(not on(w, "A") and w:diverged() == nil, tostring(w:diverged()))
+	w = L.new({hello = false})
+	w:tap("A", "F2")
+	w:tick()
+	w:tap("A", "F2") -- before B's answer has landed
+	w:run(1.0)
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the handshake completed: " .. gate_text(ga) .. " " .. gate_text(gb))
+	check(on(w, "A"), "the kept press still starts third person, with no third press")
+	check(hellos(w, "A") == 1, "one HELLO for the two presses: " .. hellos(w, "A"))
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- a spectating client with the pack (CA: battle:is_spectator()) never starts third person, by a press before the
+-- handshake or after it, and forges nothing. Its handshake still follows the players' bits and puts its gate in at their
+-- tick, which a spectator that runs the battle needs (the record's Ruling 27)
+T.ls_a_spectator_never_starts = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, pairs = "reverse"},
+		{name = "S", fps = 50, army = 1, spectator = true}}})
+	w:tap("S", "F2")
+	w:run(1.0)
+	check(not on(w, "S") and #w:sent("S") == 0, "S's press before the handshake: nothing kept, nothing sent")
+	check(#w:sent("A") == 0 and #w:sent("B") == 0, "and no machine asked to say HELLO")
+	w:tap("A", "F2")
+	w:run(1.0)
+	check(on(w, "A"), "the players' handshake completes, and A starts")
+	local ga, gs = w:gates("A"), w:gates("S")
+	check(#ga == 1 and #gs == 1 and gs[1].on and gs[1].tick == ga[1].tick, "S's gate in at the players' tick: "
+		.. gate_text(ga) .. " " .. gate_text(gs))
+	check(not on(w, "S"), "S's earlier press was never kept")
+	w:tap("S", "F2")
+	w:run(0.5)
+	check(not on(w, "S"), "nor does a press after it start S")
+	check(#w:sent("S") == 0, "S forged nothing: " .. #w:sent("S"))
+	local k = 0
+	w:on("S", function() for _, l in ipairs(H.log) do if l:find("a spectator plays no army", 1, true) then k = k + 1 end end end)
+	check(k == 1, "said once in S's log: " .. k)
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- both have the mod and nobody has pressed: nothing is sent. A's press says HELLO, B answers by itself, and A starts
+-- with no second press, both gates in at one tick. B, whose player pressed nothing, does not start, and starts at once on
+-- its own press
+T.ls_play_starts_once_everyone_said_hello = function()
+	local w = L.new({hello = false})
+	w:run(1.0)
+	check(#w:sent("A") == 0 and #w:sent("B") == 0, "nobody pressed: nothing sent")
+	w:tap("A", "F2")
+	check(not on(w, "A"), "F2 before the handshake does not start it")
+	w:run(1.0)
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 1, "A's press said HELLO, and B answered by itself: "
+		.. hellos(w, "A") .. " " .. hellos(w, "B"))
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and ga[1].on and #gb == 1 and gb[1].on and ga[1].tick == gb[1].tick,
+		"both HELLOs landed: the gate in on both at one tick, " .. gate_text(ga) .. " and " .. gate_text(gb))
+	check(on(w, "A"), "A started by itself, with no second press")
+	check(not on(w, "B"), "B's player pressed nothing")
+	check(said(w, "A", NEEDS) == 0, "and nobody was told to wait")
+	w:on("A", function() H.down("W") end)
+	w:run(1.0)
+	check(sent_kinds(w, "A").move, "A plays")
+	w:tap("B", "F2")
+	check(on(w, "B"), "B starts at its own press")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- B runs another build, whose HELLO carries another protocol version: no machine counts it, nor answers it, and nobody
+-- starts
+T.ls_a_hello_of_another_version_is_not_counted = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1},
+		{name = "B", fps = 40, army = 2, pairs = "reverse", hello_version = 2}}})
+	w:tap("B", "F2")
+	w:run(1.0)
+	local b = w:sent("B")
+	check(#b == 1 and b[1].kind == "carrier" and b[1].fields.lo == 2 * 256 + 1, "B said HELLO for its army, slot 1, version 2")
+	check(#w:sent("A") == 0, "A did not answer it")
+	for _, n in ipairs({"A", "B"}) do
+		local dropped = false
+		for _, a in ipairs(w:applied(n)) do if a.kind == "dropped" and a.fields.kind == "carrier" then dropped = true end end
+		check(dropped, n .. " dropped B's HELLO")
+	end
+	w:tap("A", "F2")
+	w:run(6.0)
+	for _, n in ipairs({"A", "B"}) do check(#w:gates(n) == 0, n .. " never put the gate in: " .. gate_text(w:gates(n))) end
+	check(not on(w, "A") and said(w, "A", NEEDS) == 1, "A cannot start, and is told")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- B's "Deployed" comes late (its table builder slower): it hears A's HELLO but answers only once its table is built, and
+-- A cannot start until that answer lands, so no DISARM reaches a machine whose table is not built (the record's Ruling 23)
+T.ls_a_late_copy_table_holds_everyone_back = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1},
+		{name = "B", fps = 40, army = 2, pairs = "reverse", deployed = false}}})
+	w:tap("A", "F2")
+	w:run(2.0)
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 0, "A said HELLO, B not before its table")
+	check(not on(w, "A"), "A cannot start before it")
+	w:on("B", function() H.phase.Deployed() end)
+	w:tick()
+	check(hellos(w, "B") == 1, "B's HELLO once its table is built")
+	check(not on(w, "A"), "nor while it is in the queue")
+	w:run(0.5)
+	local g = w:gates("A")
+	check(#g == 1 and g[1].on, "it landed: the gate in, " .. gate_text(g))
+	check(on(w, "A"), "and A starts, from its first press")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- a HELLO the queue did not take goes again on the next tick; once gone, never again
+T.ls_a_lost_hello_push_goes_again = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1},
+		{name = "B", fps = 40, army = 2, pairs = "reverse", hello_refusals = 3}}})
+	w:tap("B", "F2")
+	local refused = 0
+	for _ = 1, 10 do
+		w:on("B", function() refused = H.count("hello_refused") end)
+		if refused > 0 then break end
+		w:tick()
+	end
+	check(refused == 1 and hellos(w, "B") == 0, "the first push refused: " .. refused)
+	w:run(1.0)
+	w:on("B", function() refused = H.count("hello_refused") end)
+	check(refused == 3 and hellos(w, "B") == 1, "refused on three ticks, then it went, once: " .. refused .. " " .. hellos(w, "B"))
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the gate in on both at one tick: " .. gate_text(ga) .. " " .. gate_text(gb))
+	check(on(w, "B"), "and B starts, from its press")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- army:is_player_controlled() meaning "the local player" in multiplayer (unmeasured: the record's live checklist item 8)
+-- leaves each machine one human army, its own HELLO the only one it waits for: it would start alone. Fewer than two human
+-- armies is refused, said once in the log with the armies it saw, and no HELLO is sent, since it could never complete
+T.ls_fewer_than_two_humans_never_starts = function()
+	local w = L.new({hello = false, humans = "local"})
+	w:tap("A", "F2")
+	w:run(6.0)
+	check(hellos(w, "A") == 0 and hellos(w, "B") == 0, "no HELLO from either")
+	check(not on(w, "A") and said(w, "A", NEEDS) == 1, "A cannot start, and is told")
+	for _, n in ipairs({"A", "B"}) do
+		check(#w:gates(n) == 0, n .. " never put the gate in: " .. gate_text(w:gates(n)))
+		local k = 0
+		w:on(n, function()
+			for _, l in ipairs(H.log) do if l:find("human armies " .. (n == "A" and 0 or 1) .. " of 2, and with fewer than two it would start alone", 1, true) then k = k + 1 end end
+		end)
+		check(k == 1, n .. " says why once, naming its one human army: " .. k)
+	end
+	check(#sent_for_men(w, "A") == 0, "A sent nothing for a man")
+	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
 return T

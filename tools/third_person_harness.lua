@@ -25,7 +25,8 @@ function loadfile(path)
 	local name = path:match("^/script/derpy_tp/(.+)$")
 	if name == "platform" and not H.real_platform then
 		return function()
-			return {build = function() return H.P end,
+			-- once: the entry's E.once, which the shared handshake logs through
+			return {build = function(_, _, once) H.P.once = once return H.P end,
 				split = function(n) local lo = n % 0x10000 return n - lo, lo end}
 		end
 	end
@@ -162,6 +163,11 @@ local function make_bm()
 	end
 	function B:time_elapsed_ms() return H.model_ms() end -- model time: stands still while H.paused
 	function B:remove_real_callback(id) H.timers[id] = nil end
+	-- CA's model callbacks (lib_timer_manager): on the model clock, so in the lockstep simulation at one tick on every machine
+	function B:repeat_callback(fn, ms, id) H.model_timers[#H.model_timers + 1] = {fn = fn, at = H.model_ms() + ms, every = ms, id = id} end
+	function B:remove_callback(id)
+		for i = #H.model_timers, 1, -1 do if H.model_timers[i].id == id then table.remove(H.model_timers, i) end end
+	end
 	function B:camera() return H.cam end
 	function B:get_terrain_height(x, z) return H.ground and H.ground(x, z) or 0 end
 	function B:disable_orders(b) rec("disable_orders", b) end
@@ -171,6 +177,10 @@ local function make_bm()
 		suppress_unit_voices = function(_, b) rec("voices_off", b) end} -- CA's battle interface, bm.battle
 	function B:is_multiplayer() return H.mp end
 	function B:is_replay() return H.replay end
+	function B:is_spectator() return H.spectator == true end -- CA: "whether the local game client is spectating the battle"
+	-- the player on this machine: alliance 1's first army (CA: "In any singleplayer battle this should return 1")
+	function B:local_alliance() return 1 end
+	function B:local_army() return 1 end
 	function B:show_subtitle(key, full, force) rec("subtitle", key, full, force) end
 	function B:hide_subtitles() rec("hide_subtitles") end
 	function B:trigger_projectile_launch(key, from, to) rec("launch", key, from, to) end
@@ -189,14 +199,17 @@ local function make_bm()
 	function B:get_non_player_alliance()
 		return {armies = function() return listof({{units = function() return listof(H.enemies) end}}) end}
 	end
-	-- every alliance and its armies, as the real bm does: the player's and the allies' armies are human, the enemies' not.
-	-- Used by the multiplayer copy-table builder, which takes every army's fragments
+	-- every alliance and its armies, as the real bm does: the player's army, the allies' when there are any, then the
+	-- enemies'. The player's and the allies' are human; the enemies' are in a multiplayer battle (the other player) and not
+	-- otherwise. Used by the multiplayer copy-table builder and the HELLO handshake (platform.lua M.handshake)
 	function B:alliances()
 		local function army(units, human) return {is_player_controlled = function() return human end,
 			units = function() return listof(units) end} end
+		local ours = {army(H.units, true)}
+		if #H.allies > 0 then ours[2] = army(H.allies, true) end
 		return listof({
-			{armies = function() return listof({army(H.units, true), army(H.allies, true)}) end},
-			{armies = function() return listof({army(H.enemies, false)}) end},
+			{armies = function() return listof(ours) end},
+			{armies = function() return listof({army(H.enemies, H.mp == true)}) end},
 		})
 	end
 	return B
@@ -392,8 +405,10 @@ local function fake_platform()
 	P.features.net = H.net == true -- net mode, as platform.lua's in a multiplayer battle
 	for i, text in ipairs(H.problems or {}) do P.problems[i] = text end -- what the real platform recorded (opts.problems)
 	P.net_delay = 0.2
-	-- net play waits for "Deployed", where platform.lua builds its fragment table (P.net_ready)
-	if H.net then bm:register_phase_change_callback("Deployed", function() P.net_ready = true end) end
+	-- net play waits for "Deployed", where platform.lua builds its fragment table (P.net_ready). A machine without the mod
+	-- (no memreader Plus) builds no platform in the game: here it gets the fake, and nothing of net mode
+	local modded = H.net and _G.memreader_plus ~= nil
+	if modded then bm:register_phase_change_callback("Deployed", function() P.net_ready = true end) end
 	-- "unchecked": not in until check_mailbox, as in the game, where the first start that wants it puts it in
 	P.features.mailbox = H.features.mailbox ~= false and H.features.mailbox ~= "unchecked"
 	if not P.features.input then P.problems[1] = "input: test" return P end
@@ -458,8 +473,14 @@ local function fake_platform()
 	function P.disarm(m, shots) rec("disarm", m and m.id, shots) end
 	function P.arm(m) rec("arm", m and m.id) end
 	-- the order gate (platform.lua P.gate): its state, and every time it was set with the model clock. In a lasting melee
-	-- the fake engine of tools/third_person_lockstep.lua starts a queued action for a man only while it is in
-	function P.gate(on) rec("gate", on) H.gate_on = on H.gates[#H.gates + 1] = {ms = H.model_ms(), on = on} return true end
+	-- the fake engine of tools/third_person_lockstep.lua starts a queued action for a man only while it is in.
+	-- H.net_gate == false: a gate that goes in and changes nothing (L.new's gate = false, the test of what it is for)
+	function P.gate(on)
+		rec("gate", on)
+		H.gate_on = on and H.net_gate ~= false
+		H.gates[#H.gates + 1] = {ms = H.model_ms(), on = on}
+		return true
+	end
 	function P.terrain_floor(on) rec("terrain_floor", on) return true end
 	function P.anim_slot(m)
 		if m.anim_end and H.model_ms() >= m.anim_end and not H.anim_hold then m.anim_slot = nil end
@@ -487,9 +508,6 @@ local function fake_platform()
 	-- here directly. H.net_unrouted: net mode without the routing, the platform writing on its own machine (the oracle's
 	-- own test)
 	if H.net then P.apply = {move = P.steer, halt = P.hold, follow = P.face, play = P.play} end
-	-- platform.lua install_net puts the order gate in at build, on every machine; H.net_gate == false is a machine that does
-	-- not (a peer without the mod, or the test of what the gate is for: tools/third_person_lockstep.lua L.new's gate = false)
-	if H.net and H.net_gate ~= false then P.gate(true) end
 	-- When to send is platform.lua's own M.net_rules, the lines the real platform runs; what goes out is H.send's
 	if H.net and not H.net_unrouted then
 		local M = H.platform_module()
@@ -508,6 +526,24 @@ local function fake_platform()
 		P.steer, P.hold, P.face, P.guard, P.unguard, P.disarm, P.arm = R.steer, R.hold, R.face, R.guard, R.unguard, R.disarm, R.arm
 		P.net_reset, P.play, P.watch = R.reset, R.play, R.watch
 	end
+	-- the HELLO handshake: platform.lua's own M.handshake, the lines the real platform runs, every 100 model ms. H.heard is
+	-- the block's mask, set as the carrier cave sets it, from M.uncarrier's HELLO (tools/third_person_lockstep.lua deliver;
+	-- the cave selftest ties M.uncarrier to the cave). Unrouted, this machine's own HELLO lands on it alone.
+	-- H.hello_refusals: that many pushes are refused first (a push the queue did not take); H.hello_version: another build's
+	if modded then
+		local M = H.platform_module()
+		local function hello(slot)
+			if (H.hello_refusals or 0) > 0 then H.hello_refusals = H.hello_refusals - 1 rec("hello_refused", slot) return false end
+			local hi, lo = M.carrier("HELLO", slot)
+			lo = lo + ((H.hello_version or M.HELLO_VERSION) - M.HELLO_VERSION) * 256
+			if not H.net_unrouted then H.send("carrier", slot, {hi = hi, lo = lo}) return true end
+			local d = M.uncarrier(hi, lo)
+			if d then H.heard[d.id] = true end
+			return true
+		end
+		bm:repeat_callback(M.handshake(P, hello, function(slot) return H.heard[slot] == true end,
+			function(tag, text) if P.once then P.once(tag, text) end end), 100, "derpy_tp_hello")
+	end
 	return P
 end
 
@@ -523,6 +559,11 @@ function H.step(seconds)
 	for _ = 1, math.max(1, math.floor(seconds * fps + 0.5)) do
 		H.T = H.T + 1 / fps
 		if not H.paused then H.game_ms = H.game_ms + 1000 / fps end
+		-- the model's timers, each once a model time it falls due (a lockstep machine steps a tick in several frames)
+		if not H.paused then
+			local now = H.model_ms()
+			for _, t in ipairs({unpack(H.model_timers)}) do if now >= t.at then t.at = now + t.every t.fn() end end
+		end
 		if not H.paused then for _, u in ipairs(H.units) do if u._prior_walk then
 			u._z = u._z + 1 / fps
 			for _, m in ipairs(u._models) do m.z = m.z + 1 / fps end
@@ -552,14 +593,15 @@ function H.down(name) H.keys[code(name)] = true end
 function H.up(name) H.keys[code(name)] = nil end
 function H.tap(name) H.down(name) H.step(1 / 60) H.up(name) H.step(1 / 60) end
 
--- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, features, problems
+-- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, spectator, features, problems
 function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
 	H.T, H.calls, H.timers, H.keys, H.focus, H.mouse, H.wheel_notches = 100, {}, {}, {}, true, {0, 0}, 0
 	H.log, H.phase, H.selection_cbs, H.selected, H.sel, H.listeners = {}, {}, {}, nil, {}, {}
+	H.model_timers, H.heard = {}, {}
 	H.units, H.enemies, H.allies, next_id = {}, {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
-	H.mp, H.replay = opts.mp or false, opts.replay or false
+	H.mp, H.replay, H.spectator = opts.mp or false, opts.replay or false, opts.spectator
 	H.screen, H.tick_ms = opts.screen or {1920, 1080}, opts.tick_ms
 	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold, H.report_ms = 0, false, false, false, false, 0
 	H.features = opts.features or {input = true, anim = true, wheel = true}
