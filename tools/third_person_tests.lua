@@ -666,7 +666,7 @@ T.multiplayer_a_spectator_check_that_throws_keeps_it_off = function()
 		H.tap("F2")
 		check(not H.E.F.on and not H.P.net_asked and not H.heard[0], "nothing kept, no HELLO, not on")
 		local k = 0
-		for _, l in ipairs(H.log) do if l:find("a spectator plays no army", 1, true) then k = k + 1 end end
+		for _, l in ipairs(H.log) do if l:find("plays no army", 1, true) then k = k + 1 end end
 		check(k == 1, "said once: " .. k)
 	end)
 end
@@ -687,6 +687,53 @@ T.multiplayer_a_stale_press_is_dropped = function()
 		check(needs_everyone() == 1, "and says nothing")
 		H.tap("F2")
 		check(H.E.F.on, "a press now starts at once")
+	end)
+end
+
+-- the message says why, and who: another player not answering is named (the loc's %s); this machine's own HELLO not coming
+-- back is its own message, and so is a player list the handshake cannot use
+T.multiplayer_the_message_says_who_did_not_answer = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		H.loc = {derpy_tp_mp_needs_everyone = "no answer from %s. Everyone needs it."}
+		H.phase.Deployed()
+		H.tap("F2")
+		H.step(5.5)
+		check(needs_everyone() == 1, "told: " .. needs_everyone())
+		local line = find_uicomponent(H.root, "scripted_subtitles", "text_child")
+		check(line and line.text == "no answer from Player B. Everyone needs it.", "the other player named: " .. tostring(line and line.text))
+		H.fresh({mp = true})
+		H.hello_refusals = 1e6 -- its own HELLO never goes, so it never lands
+		H.phase.Deployed()
+		H.tap("F2")
+		H.step(5.5)
+		H.hello_refusals = nil -- H.fresh does not reset it
+		check(H.count("subtitle") == 1 and H.last("subtitle")[2] == "derpy_tp_mp_no_route", "its own: " .. tostring(H.last("subtitle") and H.last("subtitle")[2]))
+		H.fresh({mp = true})
+		H.players = nil
+		H.phase.Deployed()
+		H.tap("F2")
+		H.step(5.5)
+		check(H.count("subtitle") == 1 and H.last("subtitle")[2] == "derpy_tp_mp_no_players", "the list: " .. tostring(H.last("subtitle") and H.last("subtitle")[2]))
+	end)
+end
+
+-- a partner watching with units given to them (CA's IsPassiveParticipant) says HELLO and completes the handshake, since
+-- their machine runs the battle, but never starts: those units are another player's army
+T.multiplayer_a_partner_given_units_never_starts = function()
+	in_net_mode(function()
+		H.fresh({mp = true, players = {{id = "a", name = "Partner", me = true, passive = true}, {id = "b", name = "Player"}}})
+		H.phase.Deployed()
+		H.step(0.2)
+		H.heard[1] = true -- the player's HELLO: this machine answers it
+		H.step(0.5)
+		check(H.P.net_play, "the handshake completes with the partner's HELLO")
+		H.tap("F2")
+		H.step(0.5)
+		check(not H.E.F.on, "the partner's F2 starts nothing")
+		local k = 0
+		for _, l in ipairs(H.log) do if l:find("plays no army", 1, true) then k = k + 1 end end
+		check(k == 1, "said once in the log: " .. k)
 	end)
 end
 
@@ -2994,15 +3041,13 @@ T.platform_net_a_refused_carrier_cave_leaves_single_player_standing = function()
 	check(N.pushed(n, 0x406c798) == 0, "steer is single player's: no MOVE pushed")
 end
 
--- bm:alliances() for the handshake: one army per alliance, human as listed, no units (the copy table finds none). This
--- machine's army is the first (the harness's bm:local_alliance and local_army)
-local function hello_alliances(humans)
-	return function()
-		return {count = function() return #humans end, item = function(_, i)
-			local a = {is_player_controlled = function() return humans[i] end,
-				units = function() return {count = function() return 0 end} end}
-			return {armies = function() return {count = function() return 1 end, item = function() return a end} end}
-		end}
+-- CA's player list for the handshake (platform.lua M.players, the harness's player_list): n players, client ids in slot
+-- order, this machine player me (default 1, slot 0); watching[i]: player i spectates
+local function hello_players(n, me, watching)
+	H.players = {}
+	for i = 1, n do
+		H.players[i] = {id = string.format("client_%02d", i), name = "Player " .. i, me = i == (me or 1),
+			spectating = watching and watching[i] or nil}
 	end
 end
 -- the block's HELLO mask, as the carrier cave sets it when HELLOs land
@@ -3013,8 +3058,8 @@ local function hello_timer() for _, t in ipairs(H.model_timers) do if t.id == "d
 -- (measured live, the record's "The overrides, live"), so every machine must put it in at one tick and keep it. The HELLO
 -- handshake picks that tick (the record's Ruling 25): the gate stays out at build, though its write is proven there, this
 -- machine's HELLO goes once its player presses F2 (Ruling 26) and its copy table is built, and the gate goes in once
--- every human army's bit is set, which is inferred to be the same tick on every machine
-T.platform_net_puts_the_gate_in_once_every_human_said_hello = function()
+-- every player's bit is set (Ruling 30), which is inferred to be the same tick on every machine
+T.platform_net_puts_the_gate_in_once_every_player_said_hello = function()
 	local N = net_platform()
 	check(N.P.features.net, "net mode: " .. table.concat(N.P.problems, "; "))
 	check(N.gate() == 0x5c, "out at build: the game's own branch, got " .. string.format("%x", N.gate()))
@@ -3022,7 +3067,7 @@ T.platform_net_puts_the_gate_in_once_every_human_said_hello = function()
 	for _, a in ipairs(N.mr.patches) do if a == N.BASE + GATE_AT then wrote = wrote + 1 end end
 	check(wrote >= 3, "its write proven at build, in and out again, after taking out a gate left in: " .. wrote)
 	check(hello_timer() and hello_timer().every == 100, "a model callback, every 100 model ms")
-	bm.alliances = hello_alliances({true, true, false}) -- this machine's army, the other player's, an AI's
+	hello_players(2) -- this machine, then the other player
 	N.P.net_asked = true
 	H.step(0.3)
 	check(N.pushed(0, 0x406cda4) == 0, "no HELLO before this machine's table is built, pressed or not")
@@ -3037,28 +3082,28 @@ T.platform_net_puts_the_gate_in_once_every_human_said_hello = function()
 	local r = N.record()
 	local d = N.M.uncarrier(r.at[2], r.at[0])
 	check(r.g == 0x406cda4 and r.ver == 1 and r.tag == 0x0a and r.size == 4, "a RELOAD_TIME carrier, as the others")
-	check(d and d.op == "HELLO" and d.id == 0 and r.at[0] == 0x0100, "for this machine's army, slot 0, version 1")
+	check(d and d.op == "HELLO" and d.id == 0 and r.at[0] == 0x0200, "for this machine's player, slot 0, version 2")
 	heard(N, 1) -- its own landed
 	H.step(0.3)
-	check(N.gate() == 0x5c and not N.P.net_play, "one human army of two heard: still out")
+	check(N.gate() == 0x5c and not N.P.net_play, "one player of two heard: still out")
 	n = #N.calls
-	heard(N, 3) -- and the other player's; the AI army's bit is never waited for
+	heard(N, 3) -- and the other player's
 	H.step(0.15)
-	check(N.gate() == 0x52 and N.P.net_play, "every human army heard: in, and play may start, got " .. string.format("%x", N.gate()))
+	check(N.gate() == 0x52 and N.P.net_play, "every player heard: in, and play may start, got " .. string.format("%x", N.gate()))
 	check(N.pushed(n, 0x406cda4) == 0, "no second HELLO")
 	local patches = #N.mr.patches
 	H.step(0.3)
 	check(#N.mr.patches == patches, "the gate set once, then left alone: " .. #N.mr.patches - patches .. " more")
 	local done
-	for _, t in ipairs(N.told) do if t:find("^hello_done: human armies 0,1 of 3 all said HELLO by [%d%.]+ model ms") then done = true end end
-	check(done, "the armies it waited for and its model time said once, to compare machine with machine: " .. table.concat(N.told, "; "))
+	for _, t in ipairs(N.told) do if t:find("^hello_done: players 0,1 of 2 all said HELLO by [%d%.]+ model ms") then done = true end end
+	check(done, "the players it waited for and its model time said once, to compare machine with machine: " .. table.concat(N.told, "; "))
 end
 
--- a machine whose player has not pressed answers another army's HELLO by itself (Ruling 26), only once its own copy table
--- is built, and once only
-T.platform_net_answers_another_armys_hello_once_its_table_is_built = function()
+-- a machine whose player has not pressed answers another player's HELLO by itself (Ruling 26), only once its own copy
+-- table is built, and once only
+T.platform_net_answers_another_players_hello_once_its_table_is_built = function()
 	local N = net_platform()
-	bm.alliances = hello_alliances({true, true})
+	hello_players(2)
 	heard(N, 2) -- the other player's HELLO, before this machine's "Deployed"
 	H.step(0.3)
 	check(N.pushed(0, 0x406cda4) == 0, "no answer before its table is built")
@@ -3067,68 +3112,133 @@ T.platform_net_answers_another_armys_hello_once_its_table_is_built = function()
 	H.step(0.15)
 	check(N.pushed(n, 0x406cda4) == 1, "it answers, unpressed: " .. N.pushed(n, 0x406cda4))
 	local d = N.M.uncarrier(N.record().at[2], N.record().at[0])
-	check(d and d.op == "HELLO" and d.id == 0, "for its own army")
+	check(d and d.op == "HELLO" and d.id == 0, "for its own player")
 	heard(N, 3)
 	n = #N.calls
 	H.step(0.3)
 	check(N.P.net_play and N.pushed(n, 0x406cda4) == 0, "complete, and nothing more sent")
 end
 
--- a spectating client (CA: battle:is_spectator()) has no army of its own to speak for: it sends no HELLO, pressed or
--- answering, so it can never fill a player's bit; it follows the players' bits like every machine. One that cannot say
--- whether it is spectating sends nothing either, and says so
-T.platform_net_a_spectator_sends_no_hello_and_follows_the_bits = function()
+-- a spectating client runs the battle like every machine, so it answers a player's HELLO for its own slot and the gate
+-- waits for it (Ruling 30: it sent nothing while armies were counted, so a battle a partner watched never started). That it
+-- never starts third person is main.lua's (multiplayer_a_partner_given_units_never_starts, ls_a_spectator_never_starts).
+-- A machine that cannot say whether this is a replay sends nothing, and says so once
+T.platform_net_a_spectator_answers_and_its_bit_is_waited_for = function()
 	local N = net_platform()
 	H.spectator = true
-	bm.alliances = hello_alliances({true, true})
+	hello_players(3, 3, {[3] = true}) -- this machine is the third by client id, slot 2
 	H.phase.Deployed()
-	N.P.net_asked = true
-	heard(N, 2)
+	heard(N, 1) -- player 0's HELLO
 	local n = #N.calls
-	H.step(0.5)
-	check(N.pushed(n, 0x406cda4) == 0, "no HELLO from a spectator: " .. N.pushed(n, 0x406cda4))
-	heard(N, 3)
 	H.step(0.15)
-	check(N.gate() == 0x52 and N.P.net_play, "the gate in at the players' bits")
+	check(N.pushed(n, 0x406cda4) == 1, "the spectator answers: " .. N.pushed(n, 0x406cda4))
+	local d = N.M.uncarrier(N.record().at[2], N.record().at[0])
+	check(d and d.op == "HELLO" and d.id == 2, "for its own slot, 2: " .. tostring(d and d.id))
+	heard(N, 1 + 2)
+	H.step(0.3)
+	check(N.gate() == 0x5c and not N.P.net_play, "the two players heard, the spectator not: still out")
+	heard(N, 7)
+	H.step(0.15)
+	check(N.gate() == 0x52 and N.P.net_play, "the spectator's too: in")
 	local C = net_platform()
-	bm.alliances = hello_alliances({true, true})
-	bm.is_spectator = function() error("test: is_spectator threw") end
+	hello_players(2)
+	bm.is_replay = function() error("test: is_replay threw") end
 	H.phase.Deployed()
 	C.P.net_asked = true
 	n = #C.calls
 	H.step(0.5)
-	check(C.pushed(n, 0x406cda4) == 0, "no HELLO when is_spectator throws: " .. C.pushed(n, 0x406cda4))
+	check(C.pushed(n, 0x406cda4) == 0, "no HELLO when is_replay throws: " .. C.pushed(n, 0x406cda4))
 	local k = 0
-	for _, t in ipairs(C.told) do if t:find("^hello_spectator: .*is_spectator threw") then k = k + 1 end end
+	for _, t in ipairs(C.told) do if t:find("^hello_replay: .*is_replay threw") then k = k + 1 end end
 	check(k == 1, "said once: " .. table.concat(C.told, "; "))
 end
 
--- a handshake under way and not complete HELLO_WAIT (5000) model ms later: P.net_late, for main.lua to tell the player, and
--- one log line naming the armies waited for and the ones not heard
-T.platform_net_a_late_handshake_says_which_armies_are_missing = function()
+-- the reader: CA's list as CA's battle UI reads it, an entry per player online, CA's fields mapped, the list's order kept
+-- (the handshake sorts it); one whose size or an id does not read, or that throws, is no list, and says why
+T.platform_net_reads_the_player_list = function()
 	local N = net_platform()
-	bm.alliances = hello_alliances({true, true, false})
+	H.players = {{id = "b", name = "Bo"}, {id = "a", name = "Al", me = true}, {id = "c", name = "Cy", passive = true},
+		{id = "d", name = "Di", online = false}, {id = "e", name = "", spectating = true}}
+	local t, why = N.M.players()
+	check(t and #t == 4 and not why, "four online, Di left out: " .. tostring(t and #t) .. " " .. tostring(why))
+	local got = {}
+	for _, p in ipairs(t) do got[#got + 1] = p.id .. ":" .. p.name .. ":" .. tostring(p.me) .. ":" .. tostring(p.watching) end
+	check(table.concat(got, " ") == "b:Bo:false:false a:Al:true:false c:Cy:false:true e::false:true",
+		"ids, names, the local player, spectator and partner with units: " .. table.concat(got, " "))
+	H.players = nil
+	t, why = N.M.players()
+	check(t == nil and why == "its size read nil", "no list: " .. tostring(why))
+	H.players = {{name = "no id", me = true}, {id = "b"}}
+	t, why = N.M.players()
+	check(t == nil and why == "player 0's id read nil", "an id that does not read: " .. tostring(why))
+	local get = common.get_context_value
+	common.get_context_value = function() error("test: the context threw") end
+	t, why = N.M.players()
+	common.get_context_value = get
+	check(t == nil and why:find("^it threw: .*the context threw"), "a throw: " .. tostring(why))
+end
+
+-- a player's slot is their place by client id, not their place in CA's list: every machine that sees the same players
+-- gives each the same bit, whatever order its own list is in
+T.platform_net_a_players_slot_is_its_place_by_client_id = function()
+	local N = net_platform()
+	H.players = {{id = "z", name = "Zed", me = true}, {id = "m", name = "Em"}, {id = "a", name = "Ay"}}
+	H.phase.Deployed()
+	N.P.net_asked = true
+	local n = #N.calls
+	H.step(0.15)
+	check(N.pushed(n, 0x406cda4) == 1, "one HELLO")
+	local d = N.M.uncarrier(N.record().at[2], N.record().at[0])
+	check(d and d.id == 2, "z sorts last: slot 2, got " .. tostring(d and d.id))
+	check(N.P.net_me and N.P.net_me.name == "Zed", "this machine's own entry kept for main.lua")
+end
+
+-- a handshake under way and not complete HELLO_WAIT (5000) model ms later: P.net_late, for main.lua to tell the player
+-- who did not answer, by name; and one log line naming them by slot alone (a player posts the log, and the names are
+-- their friends')
+T.platform_net_a_late_handshake_says_which_players_are_missing = function()
+	local N = net_platform()
+	hello_players(3)
 	H.phase.Deployed()
 	N.P.net_asked = true
 	H.step(0.15)
-	heard(N, 1) -- its own landed; the other player's never does
+	heard(N, 1) -- its own landed; the others' never do
 	H.step(4.7)
 	check(not N.P.net_late, "not late yet")
 	H.step(0.5)
-	check(N.P.net_late, "late at 5 s")
+	check(N.P.net_late and N.P.net_why == "missing", "late at 5 s, others missing: " .. tostring(N.P.net_why))
+	check(N.P.net_missing == "Player 2, Player 3", "their names: " .. tostring(N.P.net_missing))
 	H.step(1)
 	local k = 0
 	for _, t in ipairs(N.told) do
-		if t:find("hello_missing: multiplayer waits: human armies 0,1 of 3, no HELLO from 1 after 5000 model ms", 1, true) then k = k + 1 end
+		if t:find("hello_missing: multiplayer waits: players 0,1,2 of 3, no HELLO from 1,2 after 5000 model ms", 1, true) then k = k + 1 end
+		check(not t:find("Player", 1, true), "no name in the log: " .. t)
 	end
-	check(k == 1, "the missing army said once: " .. table.concat(N.told, "; "))
+	check(k == 1, "the missing players said once: " .. table.concat(N.told, "; "))
+end
+
+-- this machine's own HELLO not landing (its command never came back through the queue) is told as its own, apart from a
+-- player who does not answer: it says the route itself failed, which no missing mod explains
+T.platform_net_its_own_hello_not_landing_is_its_own_reason = function()
+	local N = net_platform()
+	hello_players(2)
+	H.phase.Deployed()
+	N.P.net_asked = true
+	H.step(0.15)
+	check(N.pushed(0, 0x406cda4) == 1, "its HELLO went")
+	heard(N, 2) -- the other player's lands, its own never does
+	H.step(5.5)
+	check(N.P.net_late and N.P.net_why == "self" and not N.P.net_missing, "late, for its own: " .. tostring(N.P.net_why))
+	local k = 0
+	for _, t in ipairs(N.told) do if t:find("^hello_self: multiplayer waits: this machine's own HELLO, player 0, has not landed") then k = k + 1 end end
+	check(k == 1, "said once: " .. table.concat(N.told, "; "))
 end
 
 -- a handshake that completes in the step it would have turned late is not late: no "no HELLO from none" line, and nothing
 -- for main.lua to tell (the second review's M8)
 T.platform_net_a_completion_in_the_late_step_is_not_late = function()
 	local N = net_platform()
-	bm.alliances = hello_alliances({true, true})
+	hello_players(2)
 	H.phase.Deployed()
 	N.P.net_asked = true
 	local since
@@ -3151,28 +3261,28 @@ T.platform_net_a_completion_in_the_late_step_is_not_late = function()
 	for _, line in ipairs(N.told) do check(not line:find("^hello_missing"), "no late line: " .. line) end
 end
 
--- army slot 9's bit is bit 1 of the mask's second byte: read there, not in the first
+-- player slot 9's bit is bit 1 of the mask's second byte: read there, not in the first
 T.platform_net_a_slot_past_the_first_byte_is_read_from_its_own_byte = function()
 	local N = net_platform()
-	bm.alliances = hello_alliances({true, false, false, false, false, false, false, false, false, true})
+	hello_players(10)
 	H.phase.Deployed()
 	N.P.net_asked = true
-	heard(N, 1 + 2) -- slot 0, and bit 1 of the first byte: slot 1, an AI army
+	heard(N, 0x1FF) -- slots 0 to 8, so bit 1 of the first byte (slot 1) is set
 	H.step(0.3)
 	check(N.gate() == 0x5c and not N.P.net_play, "slot 9 not heard: still out")
-	heard(N, 1 + 512)
+	heard(N, 0x3FF)
 	H.step(0.15)
 	check(N.gate() == 0x52 and N.P.net_play, "slot 9 heard: in")
 	local done
-	for _, t in ipairs(N.told) do if t:find("^hello_done: human armies 0,9 of 10 all said") then done = true end end
-	check(done, "both armies named: " .. table.concat(N.told, "; "))
+	for _, t in ipairs(N.told) do if t:find("^hello_done: players 0,1,2,3,4,5,6,7,8,9 of 10 all said") then done = true end end
+	check(done, "every player named: " .. table.concat(N.told, "; "))
 end
 
 -- a HELLO the writer flags (the record overflowed and was rewound) did not go: it goes again on a later model tick, and
 -- once gone, never again
 T.platform_net_a_hello_that_did_not_go_goes_again = function()
 	local N = net_platform({fail = true})
-	bm.alliances = hello_alliances({true, true})
+	hello_players(2)
 	H.phase.Deployed()
 	N.P.net_asked = true
 	local n = #N.calls
@@ -3187,33 +3297,46 @@ T.platform_net_a_hello_that_did_not_go_goes_again = function()
 	check(N.pushed(n, 0x406cda4) == 0, "and, gone, not again")
 end
 
--- army:is_player_controlled() meaning "the local player" in multiplayer (unmeasured: the record's live checklist item 8)
--- would leave this machine one human army, its own HELLO all it waits for: it would start alone. Fewer than two is
--- refused, every bit set or not, said with the armies it saw, and no HELLO goes, pressed or not: it could never complete
-T.platform_net_fewer_than_two_humans_never_put_the_gate_in = function()
-	local N = net_platform()
-	bm.alliances = hello_alliances({true, false})
-	H.phase.Deployed()
-	N.P.net_asked = true
-	local n = #N.calls
-	heard(N, 0xFFFFFFFF)
-	H.step(1)
-	check(N.gate() == 0x5c and not N.P.net_play, "never in, never ready")
-	check(N.pushed(n, 0x406cda4) == 0, "no HELLO sent: " .. N.pushed(n, 0x406cda4))
-	local k = 0
-	for _, t in ipairs(N.told) do
-		if t:find("^hello_humans: multiplayer waits: the battle reports human armies 0 of 2, and with fewer than two it would start alone") then k = k + 1 end
+-- a player list the handshake cannot use leaves the gate out and sends no HELLO, every bit set or not, and tells the
+-- player why 5 s after a press (P.net_why "players"): one that does not read, one naming only one player (this machine
+-- would start alone), one this machine is not in, two players with one id, two entries for this machine, and more
+-- players than the HELLO mask
+T.platform_net_an_unusable_player_list_never_puts_the_gate_in = function()
+	local cases = {
+		{nil, "its size read nil"},
+		{{{id = "a", me = true}}, "it names 1 player"},
+		{{{id = "a"}, {id = "b"}}, "this machine is not in it"},
+		{{{id = "a", me = true}, {id = "a"}}, "two players share one id"},
+		{{{id = "a", me = true}, {id = "b", me = true}}, "two players are this machine"},
+	}
+	local many = {}
+	for i = 1, 33 do many[i] = {id = string.format("c%02d", i), me = i == 1} end
+	cases[#cases + 1] = {many, "it names 33 players, past the HELLO mask"}
+	for _, c in ipairs(cases) do
+		local N = net_platform()
+		H.players = c[1]
+		H.phase.Deployed()
+		N.P.net_asked = true
+		local n = #N.calls
+		heard(N, 0xFFFFFFFF)
+		H.step(5.5)
+		check(N.gate() == 0x5c and not N.P.net_play, c[2] .. ": never in")
+		check(N.pushed(n, 0x406cda4) == 0, c[2] .. ": no HELLO sent: " .. N.pushed(n, 0x406cda4))
+		check(N.P.net_late and N.P.net_why == "players" and N.P.net_problem == c[2], c[2] .. ": late, the list's fault: "
+			.. tostring(N.P.net_why) .. " " .. tostring(N.P.net_problem))
+		local k = 0
+		for _, t in ipairs(N.told) do if t == "hello_players: multiplayer waits: the player list cannot be used: " .. c[2] then k = k + 1 end end
+		check(k == 1, c[2] .. ": said once: " .. table.concat(N.told, "; "))
 	end
-	check(k == 1, "said why: " .. table.concat(N.told, "; "))
 end
 
 -- a replay of a multiplayer battle builds net mode too (the record's Ruling 17): its recorded HELLOs land again, and the
 -- gate goes in at their bits, as it is inferred to have in the battle. It sends none of its own, not even the answer a
--- live machine gives another army's HELLO
+-- live machine gives another player's HELLO
 T.platform_net_a_replay_sends_no_hello_and_follows_the_bits = function()
 	local N = net_platform()
 	H.replay = true
-	bm.alliances = hello_alliances({true, true})
+	hello_players(2)
 	H.phase.Deployed()
 	N.P.net_asked = true
 	heard(N, 2)
@@ -7238,7 +7361,8 @@ T.a_bar_shows_only_near_the_man_played_and_with_the_guide_setting_only_with_the_
 	check(H.E.F.model, "one Longma rider played")
 	H.E.F.model.x = 90 H.step(0.6)
 	check(shown(H.enemies[2]) and not shown(H.units[1]), "measured from the man, not his regiment 60 m back")
-	bar_battle({display_bars_range = 1000, display_bars_show = "guide"})
+	-- the banners switch off: the key is the markers alone, and the bars show with them as before
+	bar_battle({display_bars_range = 1000, display_bars_show = "guide", display_guide_banners = false})
 	by = pins()
 	H.enemies[2]._x = 5000
 	check(not shown(H.enemies[1]) and not shown(H.units[2]), "the guide setting: none before the markers key")
@@ -8285,15 +8409,15 @@ T.the_carrier_word_layout_is_the_caves = function()
 	is(0xD733, 4265, "DISARM", 4265, {shots = true, charge = true})
 	is(0xD732, 7, "DISARM", 7, {charge = true})
 	is(0xD740, 0, "ARM", 0)
-	is(0xD750, 0x0109, "HELLO", 9) -- the protocol version 1 above the army slot (Ruling 25)
-	is(0xD750, 0x011F, "HELLO", 31)
+	is(0xD750, 0x0209, "HELLO", 9) -- the protocol version 2 above the player slot (Rulings 25 and 30)
+	is(0xD750, 0x021F, "HELLO", 31)
 	for hi = 0, 0xFFFF do -- fed arbitrary floats' bits: never an error, a table only under the magic
 		local d = M.uncarrier(hi, 0xFFFF) -- as a HELLO, version 255 and slot 255: no HELLO of ours
 		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X", hi))
-		d = M.uncarrier(hi, 0x0103) -- as a HELLO, version 1 and slot 3
-		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X, lo 0x0103", hi))
-		d = M.uncarrier(hi, 0x0203) -- as a HELLO, version 2: not this build's
-		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X, lo 0x0203", hi))
+		d = M.uncarrier(hi, 0x0203) -- as a HELLO, version 2 and slot 3
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X, lo 0x0203", hi))
+		d = M.uncarrier(hi, 0x0103) -- as a HELLO, version 1: the army-slot build's, not this one's
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X, lo 0x0103", hi))
 	end
 end
 
@@ -8303,13 +8427,14 @@ T.vanilla_reload_times_are_not_carriers = function()
 	check(M.uncarrier(0xBF80, 0x0000) == nil, "-1.0")
 end
 
--- a HELLO names an army slot, one bit of the block's 32-bit mask: past it, refused, never wrapped onto another army; and a
--- HELLO of another protocol version, or past the mask, decodes to nothing (the cave sets nothing for it either)
+-- a HELLO names a player slot, one bit of the block's 32-bit mask: past it, refused, never wrapped onto another player;
+-- and a HELLO of another protocol version, or past the mask, decodes to nothing (the cave sets nothing for it either).
+-- Version 1 is the army-slot build of 2026-10-21 and 22 (Ruling 30)
 T.a_hello_past_the_mask_or_of_another_version_is_nothing = function()
 	local M = H.platform_module()
 	check(pcall(M.carrier, "HELLO", 31) and not pcall(M.carrier, "HELLO", 32), "slot 31 is the last that fits")
-	check(M.HELLO_VERSION == 1, "the first protocol version: " .. tostring(M.HELLO_VERSION))
-	for _, lo in ipairs({0x0003, 0x0203, 0xFF03, 0x0120, 0x01FF}) do
+	check(M.HELLO_VERSION == 2, "the second protocol version, player slots: " .. tostring(M.HELLO_VERSION))
+	for _, lo in ipairs({0x0003, 0x0103, 0xFF03, 0x0220, 0x02FF}) do
 		check(M.uncarrier(0xD750, lo) == nil, string.format("lo %04X is no HELLO", lo))
 	end
 end
@@ -8319,6 +8444,91 @@ T.an_id_past_16_bits_is_refused = function()
 	check(pcall(M.carrier, "GUARD_ON", 65535), "the last id that fits is accepted") -- a nil carrier would also "refuse" below
 	check(not pcall(M.carrier, "GUARD_ON", 65536), "refused, never wrapped onto another man")
 	check(not pcall(M.carrier, "GUARD_ON", -1), "a negative id is refused too")
+end
+
+-- a player, 2026-10-22: "Better visibility of unit types and a way to quickly show friend from foe.. like a keybind to
+-- toggle unit banners or unit outlines". The guide key already put CA's markers under every unit he does not command;
+-- held (or switched on) it brings CA's own banners back too, with their holder - unit type, side, health, morale and
+-- status - and the pack's bars step aside while they show, so no unit carries two health bars. The interface hidden
+-- (P), neither; third person off, CA's banners as the player had them
+T.the_guide_key_brings_cas_banners_back_and_the_bars_step_aside = function()
+	bar_battle({display_bars_range = 1000})
+	local holder = H.comp("unit_id_holder", H.root)
+	H.step(0.1)
+	local by = pins()
+	local function shown(u) return by[tostring(u._id)]:Visible() end
+	check(H.last("banners")[2] == false and not holder:Visible(), "third person on: no banners")
+	check(shown(H.enemies[1]) and shown(H.allies[1]), "the bars show")
+	H.down("Alt") H.step(1 / 60) H.step(1 / 60)
+	check(H.last("banners")[2] == true and holder:Visible(), "Alt held: CA's banners, and their holder shown")
+	check(not shown(H.enemies[1]) and not shown(H.allies[1]), "the bars step aside, at once")
+	local n = H.count("banners")
+	H.step(1)
+	check(H.count("banners") == n and holder:Visible(), "switched once, the holder kept shown: " .. H.count("banners") - n)
+	H.tap("P") H.step(1 / 60)
+	check(H.last("banners")[2] == false and not holder:Visible(), "the interface hidden: no banners, Alt or not")
+	H.step(1) -- the bars refresh meanwhile, under the hidden interface
+	H.tap("P") H.step(1 / 60) H.step(1 / 60)
+	check(H.last("banners")[2] == true and holder:Visible(), "shown again: back")
+	check(not shown(H.enemies[1]), "and the bars step aside at once, the key unchanged")
+	H.up("Alt") H.step(1 / 60) H.step(1 / 60)
+	check(H.last("banners")[2] == false and not holder:Visible(), "let go: off")
+	check(shown(H.enemies[1]), "the bars back")
+	H.down("Alt") H.step(0.1)
+	H.tap("F2") H.step(0.1)
+	check(H.last("banners")[2] == true and holder:Visible(), "third person off: CA's banners and their holder")
+	H.up("Alt") H.step(0.1)
+	check(H.last("banners")[2] == true, "the key does nothing with third person off")
+	H.tap("F2") H.step(0.1)
+	check(H.last("banners")[2] == false, "on again: none")
+	H.tap("F2") H.step(0.1)
+	check(H.last("banners")[2] == true, "off with the key up: CA's banners back")
+	-- the setting off: a press shows them, the next hides them
+	bar_battle({display_guide_hold = false})
+	H.tap("Alt") H.step(0.1)
+	check(H.last("banners")[2] == true, "a press: on")
+	H.step(1)
+	check(H.last("banners")[2] == true, "and stays on, the key let go")
+	H.tap("Alt") H.step(0.1)
+	check(H.last("banners")[2] == false, "the next press: off")
+	-- the MCT switch off: Alt is the markers alone, no banners
+	bar_battle({display_guide_banners = false})
+	H.down("Alt") H.step(0.1)
+	check(H.last("banners")[2] == false and H.count("uc:highlight") > 0, "switched off: markers, no banners")
+	H.up("Alt")
+	-- bars with the markers key: CA's banners stand in for them, nothing shows twice
+	bar_battle({display_bars_range = 1000, display_bars_show = "guide"})
+	by = pins()
+	H.down("Alt") H.step(0.1)
+	check(H.last("banners")[2] == true and not shown(H.enemies[1]), "the guide setting: the banners, not the bars")
+	H.up("Alt")
+	check(settings_with(nil).guide_banners == true, "on by default")
+end
+
+-- a player, 2026-10-22: "A better way to reflect what type of unit im casting a spell on. Just the name is not enough
+-- ... maybe show the outline of the targeted unit". No script call draws an outline. The unit an armed ability would
+-- hit gets CA's markers, with the guide off too and one of his own units included (the author's ruling that day), and
+-- loses them when the ability is disarmed or cast
+T.an_armed_abilitys_target_is_marked_one_of_his_own_too = function()
+	H.fresh({units = {{general = true, abilities = {MOD}}, {x = 0, z = 50, men = 10}}, enemies = {{x = 40, z = 60, men = 10}}})
+	H.cco = ability_record({TargetFriends = true})
+	H.tap("F2") H.step(0.1)
+	check(H.count("uc:highlight") == 0, "nothing marked before")
+	local friend = H.units[2]
+	H.tap("1") H.step(0.3)
+	check(marks()[friend._id] == true, "armed: his own unit on the crosshair marked")
+	local released = false
+	for _, c in ipairs(H.all("uc:release_control")) do if c[2] == friend._id then released = true end end
+	check(released, "and released at once, back to the player")
+	check(marks()[H.enemies[1]._id] == nil, "nothing else marked")
+	H.tap("1") H.step(0.1)
+	check(marks()[friend._id] == false, "disarmed: unmarked")
+	H.fresh({units = {{general = true, abilities = {FIREBALL}}}, enemies = {{x = 0, z = 50}}})
+	H.tap("F2") H.step(0.1)
+	H.tap("1") H.step(0.3)
+	check(marks()[H.enemies[1]._id] == true, "armed on an enemy, the guide off: marked")
+	H.tap("Left mouse") H.step(0.1)
+	check(H.last("uc:perform_special_ability") and marks()[H.enemies[1]._id] == false, "cast: unmarked")
 end
 
 return T

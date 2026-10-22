@@ -86,7 +86,26 @@ HUD = {
 BAR = {
     "size": (40, 10), "base": "#000000FF", "well": "#3B3B3BFF", "delayed": "#AA0000FF", "fill": "#A2EC17FF",
     "lifts": (2.5, 3.5, 4.5, 6, 8, 11, 15, 22, 37), "clear": 0.7,
+    # morale and effects (a player, 2026-10-22: "i would like to especially see morale or status effects on units"). The
+    # strip is CA's banner's bar_morale, 40x6 under the 40x10 health bar, in CA's ui_colours "yellow" (255 185 0).
+    # Not MoraleColour: that is CA's morale_* (green to steady, red shaken and wavering), the colour of our own and the
+    # enemy's health bars, and the preview drew the two as one thick bar. The morale icon carries the state's colour
+    "morale": (40, 6), "morale_fill": "#FFB900FF",
+    # the two icons left of the bars, CA's own, drawn 18 (CA: 24 in its tooltip, 18 on its banner), 2 px apart. The
+    # morale icon shows from state 4 (CA's tooltip tints 4 orange, 5 red, then the rout and shattered icons)
+    "icon": 18, "icon_gap": 2, "morale_from": 4,
 }
+# CA's unit tooltip morale icon (ui3.pack special_unit_tooltip.twui.xml icon_leadership, read 2026-10-22): a state per
+# MoraleState, (name, art, tint, offset)
+MORALE_STATES = [(str(n), "ui/skins/default/icon_leadership_id_white.png", c, (0, 0))
+                 for n, c in enumerate(("#A0FF37FF",) * 4 + ("#FFAD5BFF", "#FF2D2DFF"))] + [
+    ("6", "ui/skins/default/icon_status_route_24px.png", None, (0, 1)),
+    ("7", "ui/skins/default/icon_status_shattered_24.png", None, (0, 0))]
+# CA's banner effect icon (ui3.pack unit_banner.twui.xml effect_icon): a state per ActiveEffectState, CA's offsets
+EFFECT_STATES = [("both", "ui/skins/default/unit_effect_both.png", (0, 0)),
+                 ("negative", "ui/skins/default/unit_effect_negative.png", (0, -4)),
+                 ("positive", "ui/skins/default/unit_effect_positive.png", (0, 3))]
+EFFECT_EVENTS = {"event0": "UnitAbilityEffectRemoved", "event1": "UnitAbilityEffectAdded"}
 BAR_FILE = os.path.join(SRC, "ui", "derpy_tp", "bar_%d.twui.xml")
 ART = {
     "card": "ui/units/icons/wh3_main_cth_inf_iron_hail_gunners_0.png",   # replaced at run time by the unit's card
@@ -294,26 +313,64 @@ def _groups():
             "toggle": (2 * sl + H["slot_gap"], H["key_y"] + H["key"][1]), "screen": (1, 1)}
 
 
+PINS = ("pin", "pin_morale", "pin_state", "pin_effects")
+SEEN = ("base", "morale_base", "state_gate", "effects_gate")  # each pin's part the engine hides while the unit is unseen
+
+
 def build_bar(n):
-    """The bar layout for lift n (1-based): root > derpy_tp_bar (hud.lua shows and hides it) > pin (pinned) > base
-    (hidden while unseen) > delayed, fill. The engine sets the pinned component's own visibility every frame (shown while
-    on screen: measured 2026-10-19, a SetVisible on it was undone within 2 s), so hud.lua's goes on a plain parent.
-    A fill's 100% is its parent's size (CA's ContextFillBar doc), and every child lands at its parent's corner on a
-    component made at run time, so all share one box; the base's black edge draws a pixel outside it."""
+    """The bar layout for lift n (1-based). Every child of a component made at run time lands at its parent's corner,
+    and the engine stands a pinned box's bottom centre on the projected point (measured 2026-10-19, within 2 px), so
+    each part is its own pin on the unit at the same lift and its box's size is what places it:
+      derpy_tp_bar (hud.lua shows and hides it)
+        pin: the morale strip's height taller than the health bar, which sits at its top > base > delayed, fill
+        pin_morale: the strip, under the health bar > morale_base > morale
+        pin_state, pin_effects: twice as wide as their icon's left edge is far left of centre > a gate > the icon
+    The engine sets a pinned component's own visibility every frame (shown while on screen: measured 2026-10-19, a
+    SetVisible on it was undone within 2 s), so hud.lua's goes on the plain parent and the unit's own (IsVisible) on
+    each pin's child. A fill's 100% is its parent's size (CA's ContextFillBar doc); a black edge draws a pixel outside."""
     w, h = BAR["size"]
+    mw, mh = BAR["morale"]
+    ic, gap = BAR["icon"], BAR["icon_gap"]
     unit = "CcoBattleUnit"
+    seen = [("ContextVisibilitySetter", unit, "IsVisible")]
+
+    def pinned(name, pw, ph):
+        return EM.C(name, pw, ph, callbacks=[
+            ("ContextWorldSpaceComponent", unit, "Position", {"depth_disabled": 1, "offset_y": BAR["lifts"][n - 1]})])
+
+    def well(name, bw, bh):  # CA's banner bar: a black edge, the grey well
+        return EM.C(name, bw, bh, callbacks=seen, layers=[
+            {"path": ART["bar"], "offset": (-1, -1), "dw": 2, "dh": 2, "margin": 1, "colour": BAR["base"], "dock": None},
+            {"path": ART["bar"], "offset": (0, 0), "dw": 0, "dh": 0, "margin": 1, "colour": BAR["well"], "dock": None}])
+
+    def icon(path, offset, colour=None):
+        return [{"path": path, "offset": offset, "dw": 0, "dh": 0, "margin": 0, "colour": colour, "dock": None}]
+
     root = EM.C("root", 1, 1)
     top = root.add(EM.C("derpy_tp_bar", w, h))
-    pin = top.add(EM.C("pin", w, h, callbacks=[
-        ("ContextWorldSpaceComponent", unit, "Position", {"depth_disabled": 1, "offset_y": BAR["lifts"][n - 1]})]))
-    base = pin.add(EM.C("base", w, h, callbacks=[("ContextVisibilitySetter", unit, "IsVisible")], layers=[
-        {"path": ART["bar"], "offset": (-1, -1), "dw": 2, "dh": 2, "margin": 1, "colour": BAR["base"], "dock": None},
-        {"path": ART["bar"], "offset": (0, 0), "dw": 0, "dh": 0, "margin": 1, "colour": BAR["well"], "dock": None}]))
+    base = top.add(pinned("pin", w, h + mh)).add(well("base", w, h))
     base.add(EM.C("delayed", w, h, image=ART["bar"], imagemargin=1, colour_img=BAR["delayed"], callbacks=[
         ("ContextFillBar", unit, "DelayedHealthPercent", {"update_constant": 100})]))
     base.add(EM.C("fill", w, h, image=ART["bar"], imagemargin=1, colour_img=BAR["fill"], callbacks=[
         ("ContextFillBar", unit, "HealthPercent", {"update_constant": ""}),
         ("ContextColourSetter", unit, "AllianceColour")]))
+    # MoralePercent is morale over the best it could be, NOT 0..1: measured 1.06-1.57 at deploy, 0.21 wavering, 0.03
+    # broken (2026-10-22). The fill clamps, so the strip reads full until real losses pull it under 1.
+    top.add(pinned("pin_morale", mw, mh)).add(well("morale_base", mw, mh)).add(EM.C(
+        "morale", mw, mh, image=ART["bar"], imagemargin=1, colour_img=BAR["morale_fill"], callbacks=[
+            ("ContextFillBar", unit, "MoralePercent", {"update_constant": ""})]))
+    x = w // 2 + gap + ic  # the morale icon's left edge, px left of the point
+    top.add(pinned("pin_state", 2 * x, ic)).add(EM.C("state_gate", ic, ic, callbacks=seen)).add(EM.C(
+        "morale_state", ic, ic, props={"priority": 100, "update_constant": ""}, callbacks=[
+            ("ContextStateSetter", unit, "MoraleState"),
+            ("ContextVisibilitySetter", unit, "MoraleState >= %d" % BAR["morale_from"])],
+        states=[(s, icon(p, o, c)) for s, p, c, o in MORALE_STATES]))
+    x += gap + ic
+    top.add(pinned("pin_effects", 2 * x, ic)).add(EM.C("effects_gate", ic, ic, callbacks=seen)).add(EM.C(
+        "effects", ic, ic, callbacks=[
+            ("ContextVisibilitySetter", unit, "IsStringEmpty(ActiveEffectState(true))", dict(EFFECT_EVENTS, invert="")),
+            ("ContextStateSetter", unit, "ActiveEffectState", EFFECT_EVENTS)],
+        states=[(s, icon(p, o)) for s, p, o in EFFECT_STATES]))
     EM.assign(root, "D7B%d" % n)
     return EM.layout(root, "Third-Person Battles unit bar, lift %s m - GENERATED by tools/gen_third_person_hud.py"
                      % BAR["lifts"][n - 1])
@@ -418,9 +475,30 @@ def check(xml, lua):
     return bad
 
 
+def _comp(xml, cid):
+    """One component's block in <components>, by id; '' when none."""
+    m = re.search(r'\n\t\t<[\w]+\n\t\t\tthis="[^"]+"\n\t\t\tid="%s"\n.*?\n\t\t</[\w]+>' % cid, xml, re.S)
+    return m.group(0) if m else ""
+
+
+def _box(xml, cid):
+    """A component's (width, height), its first state's; (0, 0) when none."""
+    m = re.search(r'\n\t\t\t\t\twidth="(\d+)"\s+height="(\d+)"', _comp(xml, cid))
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def _calls(block, cb, fn):
+    """Whether a component's block carries callback cb on CcoBattleUnit's fn."""
+    return re.search(r'callback_id="%s"\s+context_object_id="CcoBattleUnit"\s+context_function_id="%s"'
+                     % (cb, re.escape(EM._esc(fn))), block) is not None
+
+
 def check_bar(xml, n):
-    """A bar layout against what it promises: CA's art, paired GUIDs, nothing that takes the mouse, the pin on the unit at
-    its lift, the fills under the base (their 100% is their parent), the fill coloured by side."""
+    """A bar layout against what it promises: CA's art, paired GUIDs, nothing that takes the mouse, every pin on the unit
+    at its lift, each pin's part hidden while the unit is unseen, the fills under their well (their 100% is their
+    parent), the health fill coloured by side and the strip by morale, the strip directly under the health bar and the
+    icons clear of the bars and of each other (a box's bottom centre on the point), CA's state names on both icons.
+    The strip's colour is its own and stays out of these checks: no file says what a colour reads like, the preview does."""
     bad = []
     have = EM._game_assets()
     for p in sorted(set(re.findall(r'imagepath="([^"]+)"', xml))):
@@ -435,26 +513,48 @@ def check_bar(xml, n):
         bad.append("bar %d: an interactive component would take the mouse off the battle" % n)
     shape = re.sub(r'\s*this="[^"]+"', "", hier)
     if not re.search(r"<root>\s*<derpy_tp_bar>\s*<pin>\s*<base>\s*<delayed/>\s*<fill/>\s*</base>\s*</pin>\s*"
+                     r"<pin_morale>\s*<morale_base>\s*<morale/>\s*</morale_base>\s*</pin_morale>\s*"
+                     r"<pin_state>\s*<state_gate>\s*<morale_state/>\s*</state_gate>\s*</pin_state>\s*"
+                     r"<pin_effects>\s*<effects_gate>\s*<effects/>\s*</effects_gate>\s*</pin_effects>\s*"
                      r"</derpy_tp_bar>\s*</root>", shape):
-        bad.append("bar %d: not root > derpy_tp_bar > pin > base > delayed, fill" % n)
-    top = re.search(r"\n\t\t<derpy_tp_bar\n.*?\n\t\t</derpy_tp_bar>", comps, re.S)
-    if not top or "callback_with_context" in top.group(0):
+        bad.append("bar %d: not root > derpy_tp_bar > pin (base > delayed, fill), pin_morale (morale_base > morale), "
+                   "pin_state (state_gate > morale_state), pin_effects (effects_gate > effects)" % n)
+    if "callback_with_context" in _comp(xml, "derpy_tp_bar"):
         bad.append("bar %d: a callback on the component hud.lua shows and hides (a pin's own visibility is the "
                    "engine's)" % n)
-    pin = re.search(r'callback_id="ContextWorldSpaceComponent"\s+context_object_id="CcoBattleUnit"\s+'
-                    r'context_function_id="Position">(.*?)</callback_with_context>', xml, re.S)
-    lift = pin and re.search(r'name="offset_y"\s+value="([^"]+)"', pin.group(1))
-    if not lift or float(lift.group(1)) != BAR["lifts"][n - 1]:
-        bad.append("bar %d: the pin is not on CcoBattleUnit.Position at %s m" % (n, BAR["lifts"][n - 1]))
-    for fn in ("HealthPercent", "DelayedHealthPercent"):
-        if not re.search(r'callback_id="ContextFillBar"\s+context_object_id="CcoBattleUnit"\s+context_function_id="%s"' % fn, xml):
+    lifts = re.findall(r'callback_id="ContextWorldSpaceComponent"\s+context_object_id="CcoBattleUnit"\s+'
+                       r'context_function_id="Position">.*?name="offset_y"\s+value="([^"]+)"', xml, re.S)
+    for pid in PINS:
+        if not _calls(_comp(xml, pid), "ContextWorldSpaceComponent", "Position"):
+            bad.append("bar %d: %s is not pinned on CcoBattleUnit.Position" % (n, pid))
+    if len(lifts) != len(PINS) or any(float(x) != BAR["lifts"][n - 1] for x in lifts):
+        bad.append("bar %d: the pins are not all on CcoBattleUnit.Position at %s m: %s" % (n, BAR["lifts"][n - 1], lifts))
+    for cid, fn in (("fill", "HealthPercent"), ("delayed", "DelayedHealthPercent"), ("morale", "MoralePercent")):
+        if not _calls(_comp(xml, cid), "ContextFillBar", fn):
             bad.append("bar %d: no fill on %s" % (n, fn))
-    if not re.search(r'callback_id="ContextColourSetter"\s+context_object_id="CcoBattleUnit"\s+'
-                     r'context_function_id="AllianceColour"', xml):
+    if not _calls(_comp(xml, "fill"), "ContextColourSetter", "AllianceColour"):
         bad.append("bar %d: the fill is not coloured by side" % n)
-    if not re.search(r'callback_id="ContextVisibilitySetter"\s+context_object_id="CcoBattleUnit"\s+'
-                     r'context_function_id="IsVisible"', xml):
-        bad.append("bar %d: a unit the player cannot see would show its bar" % n)
+    for cid in SEEN:
+        if not _calls(_comp(xml, cid), "ContextVisibilitySetter", "IsVisible"):
+            bad.append("bar %d: a unit the player cannot see would show its %s" % (n, cid))
+    # each box's bottom centre on the point: the health bar spans -pin_h .. -pin_h + base_h, the strip -strip_h .. 0
+    (pw, ph), (bw, bh), (sw, sh) = _box(xml, "pin"), _box(xml, "base"), _box(xml, "pin_morale")
+    if bh - ph != -sh or sw != bw or _box(xml, "morale_base")[0] != bw:
+        bad.append("bar %d: the morale strip does not sit under the health bar, as wide" % n)
+    right = -bw / 2.0
+    for pid, gid in (("pin_state", "state_gate"), ("pin_effects", "effects_gate")):
+        left = -_box(xml, pid)[0] / 2.0
+        if left + _box(xml, gid)[0] >= right:
+            bad.append("bar %d: %s's icon is over the bar or the icon beside it" % (n, pid))
+        right = left
+    for cid, fn, names in (("morale_state", "MoraleState", [s[0] for s in MORALE_STATES]),
+                           ("effects", "ActiveEffectState", [s[0] for s in EFFECT_STATES])):
+        block = _comp(xml, cid)
+        got = re.findall(r'\n\t\t\t\t<\w+\n\t\t\t\t\tthis="[^"]+"\n\t\t\t\t\tname="([^"]+)"', block)
+        if not _calls(block, "ContextStateSetter", fn) or got != names:
+            bad.append("bar %d: %s is not set by %s with CA's states %s: %s" % (n, cid, fn, names, got))
+    if not _calls(_comp(xml, "morale_state"), "ContextVisibilitySetter", "MoraleState >= %d" % BAR["morale_from"]):
+        bad.append("bar %d: the morale icon does not show from state %d" % (n, BAR["morale_from"]))
     return bad
 
 
@@ -469,6 +569,13 @@ def _pin_on_top(xml):
     xml = xml.replace(cb, "", 1)
     top = re.search(r"\n\t\t<derpy_tp_bar\n.*?\n\t\t</derpy_tp_bar>", xml, re.S).group(0)
     return xml.replace(top, top.replace("\t\t\t<states>", cb + "\t\t\t<states>", 1), 1)
+
+
+def _in(xml, cid, old, new):
+    """The selftest's break: old replaced by new inside one component's block, every place it appears there."""
+    block = _comp(xml, cid)
+    assert old in block, "%s not in %s" % (old, cid)
+    return xml.replace(block, block.replace(old, new), 1)
 
 
 def check_all(xml, lua, bar_xmls):
@@ -520,6 +627,15 @@ def selftest():
         ("a bar that takes the mouse", b.replace('name="standard"', 'name="standard"\n\t\t\t\t\tinteractive="true"', 1),
          "interactive"),
         ("the pin on the component hud.lua hides", _pin_on_top(b), "shows and hides"),
+        ("a strip on no morale", b.replace('"MoralePercent"', '"MoralePercnt"', 1), "no fill on MoralePercent"),
+        ("an icon shown for a unit he cannot see", _in(b, "effects_gate", '"IsVisible"', '"IsVisibel"'), "effects_gate"),
+        ("an icon pin on another lift", _in(b, "pin_state", 'value="4.5"', 'value="45"'), "not all on"),
+        ("the health bar's box no taller than the bar", _in(b, "pin", 'height="16"', 'height="10"'), "under the health bar"),
+        ("the morale icon over the bar", _in(b, "pin_state", 'width="80"', 'width="40"'), "over the bar"),
+        ("the effect icon over the morale icon", _in(b, "pin_effects", 'width="120"', 'width="80"'), "over the bar"),
+        ("no shattered state", _in(b, "morale_state", 'name="7"', 'name="8"'), "CA's states"),
+        ("effects in CA's order no more", _in(b, "effects", 'name="both"', 'name="all"'), "CA's states"),
+        ("the morale icon at every state", b.replace("MoraleState &gt;= 4", "MoraleState &gt;= 0", 1), "from state 4"),
     ]
     for what, x, want in bar_breaks:
         got = check_bar(x, 3)

@@ -127,8 +127,22 @@ return function(E)
 		F.cursor_shown = show
 		-- the interface hidden (S.keys.hide_ui), the freed mouse brings the cursor back and CA's interface stays off
 		if show and not F.ui_off then bm:enable_cinematic_ui(false, true, false) else bm:enable_cinematic_ui(true, show, false) end
-		-- the flags over every unit: the switch brings them back. enable_unit_ids would write it into the replay
-		bm.battle:set_banners_enabled(false)
+		-- the flags over every unit: the switch brings them back, so they are set again as the guide key has them (banners
+		-- below). enable_unit_ids would write it into the replay
+		bm.battle:set_banners_enabled(F.banners == true)
+	end
+
+	-- CA's own banners over every unit while the guide key shows its markers (a player, 2026-10-22: "Better visibility of
+	-- unit types and a way to quickly show friend from foe.. like a keybind to toggle unit banners"): unit type, side,
+	-- health, morale and status in CA's art. The pack's bars step aside meanwhile (hud.lua bars), and hud() shows their
+	-- holder. An MCT switch, on by default: off, the key is the markers alone, and "Health bars: With the markers key"
+	-- shows the bars with them, as before. ponytail: that CA draws them under the cinematic UI is read off the switch
+	-- bringing them back, not measured
+	local function banners(on)
+		on = on == true
+		if F.banners == on then return end
+		F.banners = on
+		bm.battle:set_banners_enabled(on)
 	end
 
 	-- everything the pack draws off, and CA's interface kept off (the author, 2026-10-15: "hide all ui"): the HUD here,
@@ -180,6 +194,9 @@ return function(E)
 			local c = find_uicomponent(root, id)
 			if c then hide(c, "root") end
 		end
+		-- the banners' holder while CA's banners show (banners above), its own visibility kept for the stop all the same
+		local ids = F.banners and find_uicomponent(root, "unit_id_holder")
+		if ids then ids:SetVisible(true) end
 	end
 
 	-- flying units: the game's own Toggle flying button lands and lifts them; no script call does
@@ -310,6 +327,7 @@ return function(E)
 			-- the markers under enemies and allies (the author, 2026-10-19: "show the ally/enemy guide while holding/ toggle
 			-- Alt, configurable using mct"): while held, or a press switches them; paused too
 			if S.guide_hold then F.guide = P.held(S.keys.guide) elseif P.pressed(S.keys.guide) then F.guide = not F.guide end
+			banners(F.guide and S.guide_banners and not F.ui_off) -- the interface hidden, no banners either
 			cursor(not F.dragging)
 			if F.dragging then P.hide_cursor() end -- every frame: the game's middle-button release shows it (platform.lua)
 			kf = (P.held(S.keys.forward) and 1 or 0) - (P.held(S.keys.back) and 1 or 0)
@@ -454,10 +472,17 @@ return function(E)
 	-- a camera taken over that long after the key would land on a player who has gone back to commanding the battle. Once
 	-- complete, a new press starts at once
 	local NET_DROP = 15
+	-- what the player is told is why the handshake is late (platform.lua M.handshake P.net_why), and who did not answer by
+	-- name, so a screenshot of it says which went wrong
 	local function waiting(gnow)
 		if P.net_play then M.start() return end
 		if gnow - F.asked >= NET_DROP then F.asked = nil return end
-		if P.net_late and not F.told then F.told = true E.say("derpy_tp_mp_needs_everyone") end
+		if P.net_late and not F.told then
+			F.told = true
+			if P.net_why == "self" then E.say("derpy_tp_mp_no_route")
+			elseif P.net_why == "players" then E.say("derpy_tp_mp_no_players")
+			else E.say("derpy_tp_mp_needs_everyone", P.net_missing or "?") end
+		end
 	end
 
 	-- multiplayer waits for "Deployed", where every machine builds the fragment table its disarm reads; a build that threw
@@ -465,13 +490,18 @@ return function(E)
 	-- Nothing said or logged: it simply waits. Then for every player's HELLO (platform.lua M.handshake, Rulings 25, 26 and
 	-- 29): the first press asks this machine to say HELLO and is kept; a press while it waits is ignored, sending nothing
 	-- and restarting nothing, and the kept press still starts it on completion. A spectator plays no army: CA does not say
-	-- what local_army() names on one, and a player's would be driven from the spectator's client. It is refused here, not
-	-- at the build, since its handshake still puts its gate in at the players' tick
+	-- what local_army() names on one, and a player's would be driven from the spectator's client. Nor does a partner
+	-- watching with units given to them (P.net_me.watching, CA's IsPassiveParticipant): those units are another player's
+	-- army. Both are refused here, not at the build, since their machines still say HELLO and put the gate in at the
+	-- players' tick (Ruling 30)
 	function M.start(unit)
 		if E.disabled or F.on or P.features.net and not P.net_ready then return end
 		if P.features.net then
 			local ok, watching = pcall(function() return bm:is_spectator() end)
-			if not ok or watching then E.once("spectator", "multiplayer: a spectator plays no army, so third person stays off") return end
+			if not ok or watching or P.net_me and P.net_me.watching then
+				E.once("spectator", "multiplayer: a spectator or a partner with units given to them plays no army, so third person stays off")
+				return
+			end
 		end
 		if P.features.net and not P.net_play then
 			if not F.asked then F.asked, F.told, P.net_asked = bm:time_elapsed_ms() / 1000, false, true end
@@ -544,6 +574,7 @@ return function(E)
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
+		F.banners = false
 		F.lead = nil -- his steering point at its full distance (move.lua)
 		F.fly_want = nil
 		F.target, F.lock_key = nil, nil
@@ -644,6 +675,7 @@ return function(E)
 		F.dragging = false
 		try(function() bm:disable_orders(false) end)
 		try(function() bm.battle:enable_tooltips(true) end)
+		F.banners = nil
 		try(function() bm.battle:set_banners_enabled(true) end)
 		try(function() bm.battle:suppress_unit_voices(false) end)
 		try(function() cam:enable_functionality("CAMERA_ALL_FUNCTIONS", true) end)

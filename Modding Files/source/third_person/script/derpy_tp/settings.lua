@@ -49,6 +49,7 @@ return function(mct, K)
 	S.bars = ({always = "always", guide = "guide", off = false})[get("display_bars_show", "always")]
 	S.bars_range = get("display_bars_range", 40)
 	S.guide_hold = get("display_guide_hold", true) == true
+	S.guide_banners = get("display_guide_banners", true) == true
 	S.debug = get("debug_log", false) == true
 	return S
 end

@@ -150,6 +150,9 @@ def _state(c, name, sguid, entries, target):
     already has a click sound, so it buys nothing.
     """
     kw = c.kw
+    # a state named by a number is a tag that starts with "_": CA's <_0 name="0"> (special_unit_tooltip.twui.xml), since
+    # an XML tag cannot start with a digit
+    tag = name if re.match(r"[A-Za-z]", name) else "_" + name
     st = ['this="%s"' % sguid, 'name="%s"' % name,
           'width="%d"' % c.w, 'height="%d"' % c.h]
     if kw.get("interactive"):
@@ -160,7 +163,7 @@ def _state(c, name, sguid, entries, target):
     # zzz_derpy_chd_exchange.lua positions every component explicitly. The same is true of
     # SetDockOffset at runtime.
     st.append('uniqueguid="%s"' % sguid)
-    out = "\t\t\t\t<%s\n\t\t\t\t\t%s>\n" % (name, "\n\t\t\t\t\t".join(st))
+    out = "\t\t\t\t<%s\n\t\t\t\t\t%s>\n" % (tag, "\n\t\t\t\t\t".join(st))
 
     if entries:
         out += "\t\t\t\t\t<imagemetrics>\n"
@@ -237,7 +240,7 @@ def _state(c, name, sguid, entries, target):
                    kw.get("colour", "#FFF8D7FF"), kw.get("leading", 3),
                    fontcat(kw)))
 
-    out += "\t\t\t\t</%s>\n" % name
+    out += "\t\t\t\t</%s>\n" % tag
     return out
 
 
@@ -329,8 +332,12 @@ def component(c):
     # harmless and keeps the index arithmetic below trivial.
     std_spec = _spec(kw, "layers")
     hov_spec = _spec(kw, "hover")
+    # NAMED STATES, for a ContextStateSetter: it picks the state whose NAME is what its expression answers, "0" to "7"
+    # for MoraleState (special_unit_tooltip.twui.xml), "positive", "negative" or "both" for ActiveEffectState
+    # (unit_banner.twui.xml). [(name, [layer, ...]), ...]; the first is the default. Third-Person Battles only
+    named = kw.get("states") or []
     layers = []
-    for i, lay in enumerate(std_spec + hov_spec):
+    for i, lay in enumerate(std_spec + hov_spec + [lay for _n, lays in named for lay in lays]):
         # Two fresh guid slots per layer, well inside the -D0xx- space at these layer counts.
         layers.append((c.gid.replace("-D000-", "-D%03d-" % (i * 2 + 1)),
                        c.gid.replace("-D000-", "-D%03d-" % (i * 2 + 2)), lay))
@@ -346,7 +353,13 @@ def component(c):
     # sparkline bars and the panel itself - and two where one is, wired to each other by the
     # transition map inside _state().
     out += "\t\t\t<states>\n"
-    if hov_spec:
+    if named:
+        k = len(std_spec) + len(hov_spec)
+        for i, (sname, lays) in enumerate(named):
+            out += _state(c, sname, c.sid if i == 0 else c.sid.replace("-D000-", "-E%03d-" % i), layers[k:k + len(lays)],
+                          None)
+            k += len(lays)
+    elif hov_spec:
         out += _state(c, "standard", c.sid, layers[:len(std_spec)], c.hid)
         out += _state(c, "hover", c.hid, layers[len(std_spec):], c.sid)
     else:

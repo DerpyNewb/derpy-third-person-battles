@@ -306,7 +306,10 @@ W.__index = W
 function W:tick()
 	self.t = self.t + 1
 	local due, rest = {}, {}
-	for _, c in ipairs(self.queue) do if c.due <= self.t then due[#due + 1] = c else rest[#rest + 1] = c end end
+	for _, c in ipairs(self.queue) do
+		if self.drop and self.drop(c) then self.lost[#self.lost + 1] = c
+		elseif c.due <= self.t then due[#due + 1] = c else rest[#rest + 1] = c end
+	end
 	self.queue = rest
 	table.sort(due, function(a, b)
 		if a.due ~= b.due then return a.due < b.due end
@@ -343,6 +346,8 @@ function W:tap(name, key)
 end
 
 function W:sent(name) return self.by[name].sent end
+-- whether a queued command is a HELLO (for opts.drop)
+function L.is_hello(c) return c.kind == "carrier" and (M.uncarrier(c.fields.hi, c.fields.lo) or {}).op == "HELLO" end
 function W:applied(name) return self.by[name].applied end
 
 -- the order gate on machine `name`: one {tick, on} each time its build or its script set it, the build's first
@@ -383,29 +388,40 @@ function W:diverged()
 end
 
 -- opts: machines = {{name, fps, army, mod = true, pairs = "normal" | "reverse", route = true, fresh = <H.fresh opts>,
--- deployed = true, hello_refusals = 0, hello_version}, ...}, armies = {{<H.unit opts>, ...}, ...} (one battle, the same on
--- every machine, each army its own alliance), delay_ticks, park_ticks (deliver), allow (default L.ALLOW), gate = false
--- (every machine's gate goes in and changes nothing), humans = "local" (army:is_player_controlled() true for this
--- machine's own army alone), hello = false (the world starts before the HELLO handshake completes; by default the
--- first machine with the mod asks for it, as its player's F2 press would, and the others answer).
+-- deployed = true, hello_refusals = 0, hello_version, spectator, passive}, ...}, armies = {{<H.unit opts>, ...}, ...} (one
+-- battle, the same on every machine, each army its own alliance), delay_ticks, park_ticks (deliver), allow (default
+-- L.ALLOW), gate = false (every machine's gate goes in and changes nothing), players = "local" (each machine's player
+-- list names it alone), drop (a function of a queued command: the network loses it before any machine runs it, kept in
+-- w.lost), hello = false (the world starts before the HELLO handshake completes; by default the first machine with the
+-- mod asks for it, as its player's F2 press would, and the others answer).
+-- Every machine is a player in every machine's list (CA's network player list, platform.lua M.players), client id
+-- "client_<name>", name "Player <name>", a machine without the mod too.
 -- route = false: that machine's fake platform, unit controllers and recorded calls act locally, as in single player.
 -- deployed = false: its "Deployed" waits for the test (H.phase.Deployed()). hello_refusals: its first pushes of a HELLO
 -- are refused; hello_version: its HELLOs carry another protocol version (an older or newer build); spectator = true: a
--- client spectating the battle (bm:is_spectator()), its army's view but not its player, so that army is human only if
--- another machine plays it
+-- client spectating the battle (bm:is_spectator(), its list entry spectating), seated on its army's side; passive = true: a
+-- partner watching with units given to them (CA's IsPassiveParticipant), seated in its army
 function L.new(opts)
 	opts = opts or {}
 	for k in next, _G do if not BASE[k] then rawset(_G, k, nil) end end -- the last world's globals
 	H = H0
 	local w = setmetatable({t = 0, delay = opts.delay_ticks or DELAY_TICKS, park = opts.park_ticks or 0, queue = {}, keys = {}, machines = {}, by = {},
-		allow = opts.allow or L.ALLOW}, W)
+		allow = opts.allow or L.ALLOW, drop = opts.drop, lost = {}}, W)
 	local armies = opts.armies or {{{general = true}}, {{general = true, z = 300}}}
 	-- one id per unit across the battle, army 1's first, so man 1001 is the same man on every machine
 	local ids, n = {}, 0
 	for a, list in ipairs(armies) do ids[a] = {} for i in ipairs(list) do n = n + 1 ids[a][i] = n end end
 	local specs = opts.machines or {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, pairs = "reverse"}}
-	local played = {} -- the armies a machine plays: a human's
-	for _, s in ipairs(specs) do if not s.spectator then played[s.army or 1] = true end end
+	-- machine s's player list: every machine, s's own entry its local player (players = "local": s's alone)
+	local function players_for(s)
+		local t = {}
+		for _, o in ipairs(specs) do
+			if opts.players ~= "local" or o == s then
+				t[#t + 1] = {id = "client_" .. o.name, name = "Player " .. o.name, me = o == s, spectating = o.spectator, passive = o.passive}
+			end
+		end
+		return t
+	end
 	for _, s in ipairs(specs) do
 		local mc = {name = s.name, fps = s.fps or 60, army = s.army or 1, mod = s.mod ~= false, sent = {}, applied = {}, parked = {}, seq = 0, g = {}}
 		local h = setmetatable({}, {__index = H0})
@@ -436,6 +452,7 @@ function L.new(opts)
 		end end
 		f.mp = true -- a multiplayer battle, as the game reports it; H.net puts the fake platform in net mode
 		f.spectator = s.spectator
+		f.players = players_for(s)
 		f.tick_ms = f.tick_ms or TICK * 1000
 		if not mc.mod then f.memreader = false end -- a peer without the mod: it loads nothing that runs
 		w.machines[#w.machines + 1], w.by[mc.name] = mc, mc
@@ -464,18 +481,6 @@ function L.new(opts)
 					f2.method = method
 					H.send("bm", nil, f2)
 				end
-			end
-			-- the battle's own alliances, in one order on every machine (the fake bm's are this machine's view): each army its
-			-- own alliance, human when a machine plays it (opts.humans = "local": this machine's alone). No units: only the
-			-- handshake reads them here (platform.lua M.handshake)
-			bm.alliances = function()
-				local list = {}
-				for a = 1, #armies do
-					local human = opts.humans == "local" and a == mc.army or opts.humans ~= "local" and played[a] == true
-					local army = {is_player_controlled = function() return human end}
-					list[a] = {armies = function() return listof({army}) end}
-				end
-				return listof(list)
 			end
 			bm.local_alliance = function() return mc.army end
 			bm.local_army = function() return 1 end

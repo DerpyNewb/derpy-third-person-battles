@@ -411,9 +411,10 @@ return function(E)
 	end
 
 	-- CA's tracker chevrons under the men of every unit the player does not command (unitcontroller:highlight; measured
-	-- 2026-10-19: red under an enemy, kept after release_control, the enemy back to its own control and moving), an
-	-- enemy only while the player can see it, and only while F.guide (the guide key, main.lua). None under his own: no
-	-- controller touches a unit of his
+	-- 2026-10-19: red under an enemy, green under ours, kept after release_control, each back to its own control and
+	-- moving), an enemy only while the player can see it, and only while F.guide (the guide key, main.lua). None under
+	-- his own, but the one an armed ability would hit (a player, 2026-10-22: "maybe show the outline of the targeted
+	-- unit"; no script call draws an outline, and the author ruled his own in that day)
 	local marked = {} -- unique_ui_id -> {uc, on}
 	local function mark(u, on)
 		local m = marked[u:unique_ui_id()]
@@ -425,27 +426,31 @@ return function(E)
 	end
 	local function unmark() for _, m in pairs(marked) do if m.on then m.on = false m.uc:highlight(false) m.uc:release_control() end end end
 
-	local guide_was, target_was = false, nil
+	local guide_was, target_was, aimed_was = false, nil, nil
 	local function bars(now)
-		-- the guide key and the lock-on answer at once, not at the next refresh; the locked enemy is marked with the
-		-- guide off too (combat.lua C.target)
+		-- the guide key, the lock-on and an armed ability's target answer at once, not at the next refresh; the locked
+		-- enemy and the target are marked with the guide off too (combat.lua C.target, abilities.lua A.update). CA's
+		-- banners change with the guide key, or with the interface hidden, and H.show starts the refresh over
 		local target = F.target and F.target:unique_ui_id()
-		if now < bars_at and (F.guide or false) == guide_was and target == target_was then return end
-		bars_at, guide_was, target_was = now + BARS_EVERY, F.guide or false, target
+		local aimed = F.armed and F.armed.unit and F.armed.unit:unique_ui_id()
+		if now < bars_at and (F.guide or false) == guide_was and target == target_was and aimed == aimed_was then return end
+		bars_at, guide_was, target_was, aimed_was = now + BARS_EVERY, F.guide or false, target, aimed
 		local holder = E.S.bars and part("bars")
 		if E.S.bars and not holder then error("no unit bar holder in the panel") end
 		local made, seen = 0, {}
 		-- near the unit he plays (the author, 2026-10-19: "currently is clogging the scene ... by default only near the
-		-- character"), always or with the markers key (MCT); 1000 m is every unit on the field
-		local show = E.S.bars == "always" or E.S.bars == "guide" and guide_was
+		-- character"), always or with the markers key (MCT); 1000 m is every unit on the field. None while CA's banners
+		-- show (main.lua banners): they carry a health bar of their own
+		local show = (E.S.bars == "always" or E.S.bars == "guide" and guide_was) and not F.banners
 		local mx, mz
 		if F.model then local x, _, z = E.P.model_pos(F.model) mx, mz = x, z else local q = F.unit:position() mx, mz = q:get_x(), q:get_z() end
 		local reach = E.S.bars_range >= 1000 and math.huge or E.S.bars_range * E.S.bars_range
 		each_unit(function(u, enemy)
 			local alive = u:number_of_men_alive() > 0
-			if not u:is_player_controlled() then
-				mark(u, (guide_was or u:unique_ui_id() == target) and alive and (not enemy or u:is_valid_target()))
-			end
+			local uid = u:unique_ui_id()
+			-- a unit of his never marked makes no controller here (mark answers an unchanged state first)
+			mark(u, (uid == aimed or not u:is_player_controlled() and (guide_was or uid == target)) and alive
+				and (not enemy or u:is_valid_target()))
 			if not holder then return end
 			local id = tostring(u:unique_ui_id())
 			seen[id] = true

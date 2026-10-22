@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-10-22, second update
+
+- Unit bars show morale under health.
+- An icon on a bar when that unit's morale wavers or breaks, and one while a spell or ability is on it, up for good and
+  down for bad.
+- Alt also brings back the game's own unit banners, and the bars step aside (MCT switch, on by default).
+- The unit an armed spell or ability would hit is marked, your own units too.
+- Multiplayer: everyone having the mod no longer ends in "no answer from" when only one side is human (a battle against
+  the AI with a friend watching). The handshake counts the game's network player list, not human armies.
+
 ## 2026-10-22
 
 - Multiplayer mode: every change goes through the game's own battle command queue, so both machines run the same

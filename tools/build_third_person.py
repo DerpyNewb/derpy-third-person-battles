@@ -38,7 +38,10 @@ LOC = {
     "derpy_tp_input_unavailable": "Third-Person Battles found memreader Plus but could not initialize keyboard and mouse input. The script log has the details.",
     "derpy_tp_multiplayer": "Third-Person Battles is off in replays. In multiplayer it needs an up-to-date memreader Plus and a supported game version on every machine; the script log has the details.",
     "derpy_tp_switched_off": "Third-Person Battles ran into three errors and is off until this battle ends. The script log has the details.",
-    "derpy_tp_mp_needs_everyone": "Third-Person Battles in multiplayer needs every player to have it and memreader Plus.",
+    # %s: the names of the players who did not answer (E.say's second argument)
+    "derpy_tp_mp_needs_everyone": "Third-Person Battles: no answer from %s. In multiplayer everyone in the battle, watchers too, needs this mod and memreader Plus.",
+    "derpy_tp_mp_no_route": "Third-Person Battles: your game's own multiplayer check never came back, so it can't start here. Please report this on the mod's page.",
+    "derpy_tp_mp_no_players": "Third-Person Battles can't see who is in this battle, so it stays off in multiplayer. The script log has the details.",
 }
 
 
@@ -388,7 +391,7 @@ def check_loc():
     """Every E.say key in the Lua has a loc row, and every loc row is said somewhere."""
     used = set()
     for full, _rel in lua_files():
-        used |= set(re.findall(r'say\("(derpy_tp_[a-z_]+)"\)', open(full, encoding="utf-8").read()))
+        used |= set(re.findall(r'say\("(derpy_tp_[a-z_]+)"[,)]', open(full, encoding="utf-8").read()))
     bad = ["E.say('%s') has no loc row" % k for k in sorted(used - set(LOC))]
     bad += ["loc row %s is never said" % k for k in sorted(set(LOC) - used)]
     return bad

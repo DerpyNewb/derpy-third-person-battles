@@ -181,7 +181,12 @@ local function make_bm()
 	-- the player on this machine: alliance 1's first army (CA: "In any singleplayer battle this should return 1")
 	function B:local_alliance() return 1 end
 	function B:local_army() return 1 end
-	function B:show_subtitle(key, full, force) rec("subtitle", key, full, force) end
+	function B:show_subtitle(key, full, force)
+		rec("subtitle", key, full, force)
+		local line = find_uicomponent(H.root, "scripted_subtitles", "text_child")
+			or H.comp("text_child", H.comp("scripted_subtitles", H.root))
+		line:SetStateText(common.get_localised_string(key), key)
+	end
 	function B:hide_subtitles() rec("hide_subtitles") end
 	function B:trigger_projectile_launch(key, from, to) rec("launch", key, from, to) end
 	-- every callback registered for the phase runs, in order, as CA's list (lib_battle_manager.lua)
@@ -360,8 +365,20 @@ function H.trigger(event, context)
 	end
 end
 function out(msg) H.log[#H.log + 1] = tostring(msg) end
+-- CA's network player list (platform.lua M.players reads it through CcoBattleRoot): H.players = {{id, name, me, spectating,
+-- passive, online}, ...}, or nil for a list that does not read (every expression answers nil). The fields as CA names them
+local function player_list(expr)
+	if not H.players then return nil end
+	if expr == "MultiplayerRootContext.PlayerList.Size" then return #H.players end
+	local i, field = expr:match("^MultiplayerRootContext%.PlayerList%.At%((%d+)%)%.(%a+)$")
+	local p = i and H.players[tonumber(i) + 1]
+	if not p then return nil end
+	return ({Id = p.id, Name = p.name, IsLocalPlayer = p.me == true, IsSpectating = p.spectating == true,
+		IsPassiveParticipant = p.passive == true, IsOnline = p.online ~= false})[field]
+end
 -- CA's unit context, by expression: H.cco[expr] is the value, or a function that returns it or throws
 common = {get_context_value = function(kind, id, expr)
+	if kind == "CcoBattleRoot" and type(expr) == "string" and expr:find("^MultiplayerRootContext") then return player_list(expr) end
 	if id == nil then -- one argument: a global expression. CA's WorldSpaceToScreenSpace answers H.w2s(x, y, z)
 		rec("cco_global", kind)
 		local x, y, z, f = kind:match("^WorldSpaceToScreenSpace%(ToVector4%(([^,]+),([^,]+),([^,]+),1%), false, false%)%.(%a)$")
@@ -377,7 +394,8 @@ common = {get_context_value = function(kind, id, expr)
 	local val = ((H.cco_ids or {})[id] or H.cco)[expr] -- H.cco_ids[id]: another unit's context, by its ui id
 	if type(val) == "function" then return val() end
 	return val
-end, call_context_command = function(kind, id, expr) rec("cco_cmd", kind, id, expr) end}
+end, call_context_command = function(kind, id, expr) rec("cco_cmd", kind, id, expr) end,
+	get_localised_string = function(key) return (H.loc or {})[key] or "" end}
 function H.default_cco()
 	return {IconPath = "ui/units/icons/test_card.png", Name = "Test Regiment", ["BattleAbilityList.Size"] = 0,
 		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000, IsHidden = false, IsUnspottable = false}
@@ -542,7 +560,7 @@ local function fake_platform()
 			return true
 		end
 		bm:repeat_callback(M.handshake(P, hello, function(slot) return H.heard[slot] == true end,
-			function(tag, text) if P.once then P.once(tag, text) end end), 100, "derpy_tp_hello")
+			function(tag, text) if P.once then P.once(tag, text) end end, M.players), 100, "derpy_tp_hello")
 	end
 	return P
 end
@@ -593,7 +611,8 @@ function H.down(name) H.keys[code(name)] = true end
 function H.up(name) H.keys[code(name)] = nil end
 function H.tap(name) H.down(name) H.step(1 / 60) H.up(name) H.step(1 / 60) end
 
--- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, spectator, features, problems
+-- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, spectator, features, problems,
+-- players (CA's network player list, player_list; a multiplayer battle's default is this machine and one other)
 function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
@@ -602,6 +621,7 @@ function H.fresh(opts)
 	H.model_timers, H.heard = {}, {}
 	H.units, H.enemies, H.allies, next_id = {}, {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
 	H.mp, H.replay, H.spectator = opts.mp or false, opts.replay or false, opts.spectator
+	H.players, H.loc = opts.players or opts.mp and {{id = "client_a", name = "Player A", me = true}, {id = "client_b", name = "Player B"}} or nil, {}
 	H.screen, H.tick_ms = opts.screen or {1920, 1080}, opts.tick_ms
 	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold, H.report_ms = 0, false, false, false, false, 0
 	H.features = opts.features or {input = true, anim = true, wheel = true}

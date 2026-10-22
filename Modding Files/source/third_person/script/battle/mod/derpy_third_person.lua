@@ -16,8 +16,12 @@ local ok, err = pcall(function()
 	_G.DERPY_TP = E
 	function E.log(msg) if E.S and E.S.debug then out("derpy_tp: " .. msg) end end
 	function E.once(tag, msg) if not E.logged[tag] then E.logged[tag] = true out("derpy_tp: " .. msg) end end
-	function E.say(key)
+	-- names: put in place of the text's %s, on the line CA's show_subtitle has just set (lib_battle_manager.lua: the
+	-- scripted_subtitles component's text_child)
+	function E.say(key, names)
 		bm:show_subtitle(key, true, true)
+		local line = names and find_uicomponent(core:get_ui_root(), "scripted_subtitles", "text_child")
+		if line then line:SetStateText((common.get_localised_string(key):gsub("%%s", function() return names end)), key) end
 		bm:remove_real_callback("derpy_tp_say")
 		bm:real_callback(function() bm:hide_subtitles() end, 6000, "derpy_tp_say")
 	end

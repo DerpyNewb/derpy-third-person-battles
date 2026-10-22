@@ -157,21 +157,44 @@ SIDES = (("ours", "#A2EC17"), ("ally", "#68CEFF"), ("enemy", "#FF2D2D"))
 
 
 
+# a row: health, its loss, morale, MoraleState, ActiveEffectState
+ROWS = ((1.0, 1.0, 1.0, 1, None), (0.66, 0.8, 0.55, 4, "positive"), (0.25, 0.4, 0.15, 6, "negative"))
+
+
 def render_bars(width):
     """The unit bar (ui/derpy_tp/bar_1, as shipped) for each side at full, two-thirds and a quarter health with the
-    loss behind it, over the battle screenshot, at the size the engine draws it on this screen."""
+    loss behind it, the morale strip under it and the morale and effect icons beside it, over the battle screenshot, at
+    the size the engine draws it on this screen. Each pin's box stands its bottom centre on the unit's point, as the
+    engine places it (measured 2026-10-19), and draws what it carries at its own corner."""
     from PIL import Image, ImageDraw
     model, rendering = PG._studio()
-    doc = model.Document(io.open(GEN.BAR_FILE % 1, encoding="utf-8").read())
+    xml = io.open(GEN.BAR_FILE % 1, encoding="utf-8").read()
+    doc = model.Document(xml)
     named = dict((c.get("id", c.tag), c) for c in doc.components)
-    _n, missing = PG.extract_art("hud", extra=[GEN.ART["bar"]], folder=FOLDER)
+    icons = [s[1] for s in GEN.MORALE_STATES] + [s[1] for s in GEN.EFFECT_STATES]
+    _n, missing = PG.extract_art("hud", extra=[GEN.ART["bar"]] + icons, folder=FOLDER)
     if missing:
         raise SystemExit("art not found in CA's packs: %s" % missing)
     scale = width / 1920.0
     size = (width, int(1080 * scale + 0.5))
     canvas = Image.open(GROUND).convert("RGBA").resize(size) if os.path.isfile(GROUND) else Image.new("RGBA", size, (96, 104, 88, 255))
     draw = ImageDraw.Draw(canvas)
-    bw, bh = GEN.BAR["size"]
+
+    def corner(pid, cx, cy):
+        pw, ph = GEN._box(xml, pid)
+        return cx - pw * scale / 2, cy - ph * scale
+
+    def icon(path, tint, offset, x, y):
+        side = int(GEN.BAR["icon"] * scale + 0.5)
+        img = Image.open(str(_asset(path))).convert("RGBA").resize((side, side))
+        if tint:  # CA's white leadership icon under the state's colour
+            want = [int(tint[i:i + 2], 16) for i in (1, 3, 5)]
+            px = img.load()
+            for i in range(side):
+                for j in range(side):
+                    r, g, b, a = px[i, j]
+                    px[i, j] = (r * want[0] // 255, g * want[1] // 255, b * want[2] // 255, a)
+        canvas.alpha_composite(img, (int(x + offset[0] * scale), int(y + offset[1] * scale)))
 
     def layer(comp, x, y, frac, colour=None):
         st = doc.state(comp)
@@ -194,11 +217,21 @@ def render_bars(width):
             canvas.alpha_composite(img, (int(x + ox * scale), int(y + oy * scale)))
 
     for col, (side, colour) in enumerate(SIDES):
-        for row, (hp, lost) in enumerate(((1.0, 1.0), (0.66, 0.8), (0.25, 0.4))):
-            x, y = (760 + col * 160) * scale, (420 + row * 60) * scale
+        for row, (hp, lost, morale, state, effect) in enumerate(ROWS):
+            cx, cy = (800 + col * 160) * scale, (446 + row * 60) * scale  # the unit's point
+            x, y = corner("pin", cx, cy)
             layer(named["base"], x, y, 1)
             layer(named["delayed"], x, y, lost)
             layer(named["fill"], x, y, hp, colour)
+            x, y = corner("pin_morale", cx, cy)
+            layer(named["morale_base"], x, y, 1)
+            layer(named["morale"], x, y, morale)
+            if state >= GEN.BAR["morale_from"]:
+                _name, path, tint, offset = GEN.MORALE_STATES[state]
+                icon(path, tint, offset, *corner("pin_state", cx, cy))
+            for name, path, offset in GEN.EFFECT_STATES:
+                if name == effect:
+                    icon(path, None, offset, *corner("pin_effects", cx, cy))
         draw.text(((760 + col * 160) * scale, 390 * scale), side, fill=TEXT, font=_font(int(14 * scale)))
     out = os.path.join(PG.CACHE, "tp_bars_%d.png" % width)
     canvas.convert("RGB").save(out)

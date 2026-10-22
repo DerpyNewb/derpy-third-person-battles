@@ -88,7 +88,9 @@ checkbox("combat", "combat_one_man", "Play one man of a regiment",
 m:add_new_section("display", "On the battlefield")
 local bars = m:add_new_option("display_bars_show", "dropdown")
 bars:set_text("Health bars")
-bars:set_tooltip_text("A health bar over each unit near you, in its side's colour. A unit you cannot see shows none.")
+bars:set_tooltip_text("A health bar over each unit near you, in its side's colour, with its morale under it. An icon beside "
+	.. "them shows when its morale wavers or breaks, and when a spell or ability is working on it. A unit you cannot see "
+	.. "shows none.")
 bars:add_dropdown_values({{key = "always", text = "Always", tt = "", is_default = true},
 	{key = "guide", text = "With the markers key", tt = "Only while the markers are shown (Alt unless changed under Keys).",
 	is_default = false}, {key = "off", text = "Never", tt = "", is_default = false}})
@@ -98,6 +100,9 @@ slider("display", "display_bars_range", "Health bar distance",
 checkbox("display", "display_guide_hold", "Hold to show enemies and allies",
 	"Coloured markers under the men of every unit you do not command, an enemy only while you can see it. On, they show "
 	.. "while the key is held (Alt unless changed under Keys). Off, a press shows or hides them.", true)
+checkbox("display", "display_guide_banners", "Unit banners with the markers",
+	"On, the game's own banners come back over every unit while the markers show: what each unit is, its side, its "
+	.. "health and morale. The health bars step aside meanwhile. Off, the key shows the markers alone.", true)
 
 m:add_new_section("debug", "Debug")
 checkbox("debug", "debug_log", "Write every order to the script log", "For bug reports. Off by default.", false)

@@ -614,6 +614,19 @@ end
 
 local function on(w, n) local r w:on(n, function() r = H.E.F.on end) return r end
 
+-- the subtitle line machine n's player sees, its needs-everyone text given as "no answer from %s."
+local function loc_names(w, n) w:on(n, function() H.loc[NEEDS] = "no answer from %s." end) end
+local function line(w, n)
+	local t
+	w:on(n, function() local c = find_uicomponent(H.root, "scripted_subtitles", "text_child") t = c and c.text end)
+	return t
+end
+local function logged(w, n, text)
+	local k = 0
+	w:on(n, function() for _, l in ipairs(H.log) do if l:find(text, 1, true) then k = k + 1 end end end)
+	return k
+end
+
 local MIXED = {hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, mod = false}}}
 
 -- B has no mod, and nobody presses F2: A has the mod installed and forges nothing at all, not even a HELLO, so nothing
@@ -638,8 +651,10 @@ T.ls_a_peer_without_the_mod_is_never_sent_to = function()
 	w:run(4.5)
 	check(hellos(w, "A") == 1, "A's press said HELLO, once: " .. hellos(w, "A"))
 	check(said(w, "A", NEEDS) == 0, "not told before the handshake is late")
+	loc_names(w, "A")
 	w:run(1.0)
 	check(said(w, "A", NEEDS) == 1, "told once it is: " .. said(w, "A", NEEDS))
+	check(line(w, "A") == "no answer from Player B.", "B named: " .. tostring(line(w, "A")))
 	check(not on(w, "A"), "A never started")
 	check(#sent_for_men(w, "A") == 0, "A sent nothing for a man: " .. table.concat(sent_for_men(w, "A"), " "))
 	check(#w:gates("A") == 0, "the gate never went in on A: " .. gate_text(w:gates("A")))
@@ -679,8 +694,8 @@ T.ls_a_second_press_while_waiting_sends_nothing = function()
 end
 
 -- a spectating client with the pack (CA: battle:is_spectator()) never starts third person, by a press before the
--- handshake or after it, and forges nothing. Its handshake still follows the players' bits and puts its gate in at their
--- tick, which a spectator that runs the battle needs (the record's Ruling 27)
+-- handshake or after it, and forges nothing but its HELLO: its machine runs the battle, so it answers the players' and
+-- the gate waits for it (Ruling 30), going in on every machine at one tick (Ruling 27)
 T.ls_a_spectator_never_starts = function()
 	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, pairs = "reverse"},
 		{name = "S", fps = 50, army = 1, spectator = true}}})
@@ -698,10 +713,10 @@ T.ls_a_spectator_never_starts = function()
 	w:tap("S", "F2")
 	w:run(0.5)
 	check(not on(w, "S"), "nor does a press after it start S")
-	check(#w:sent("S") == 0, "S forged nothing: " .. #w:sent("S"))
-	local k = 0
-	w:on("S", function() for _, l in ipairs(H.log) do if l:find("a spectator plays no army", 1, true) then k = k + 1 end end end)
-	check(k == 1, "said once in S's log: " .. k)
+	check(#w:sent("S") == 1 and hellos(w, "S") == 1, "S forged its HELLO and nothing else: " .. #w:sent("S"))
+	local gb = w:gates("B")
+	check(#gb == 1 and gb[1].tick == ga[1].tick, "B's at that tick too: " .. gate_text(gb))
+	check(logged(w, "S", "plays no army") == 1, "said once in S's log: " .. logged(w, "S", "plays no army"))
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
@@ -731,15 +746,15 @@ T.ls_play_starts_once_everyone_said_hello = function()
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
--- B runs another build, whose HELLO carries another protocol version: no machine counts it, nor answers it, and nobody
--- starts
+-- B runs another build, whose HELLO carries another protocol version (here 1, the army-slot build of 2026-10-21 and 22):
+-- no machine counts it, nor answers it, and nobody starts
 T.ls_a_hello_of_another_version_is_not_counted = function()
 	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1},
-		{name = "B", fps = 40, army = 2, pairs = "reverse", hello_version = 2}}})
+		{name = "B", fps = 40, army = 2, pairs = "reverse", hello_version = 1}}})
 	w:tap("B", "F2")
 	w:run(1.0)
 	local b = w:sent("B")
-	check(#b == 1 and b[1].kind == "carrier" and b[1].fields.lo == 2 * 256 + 1, "B said HELLO for its army, slot 1, version 2")
+	check(#b == 1 and b[1].kind == "carrier" and b[1].fields.lo == 1 * 256 + 1, "B said HELLO for its player, slot 1, version 1")
 	check(#w:sent("A") == 0, "A did not answer it")
 	for _, n in ipairs({"A", "B"}) do
 		local dropped = false
@@ -794,24 +809,90 @@ T.ls_a_lost_hello_push_goes_again = function()
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
--- army:is_player_controlled() meaning "the local player" in multiplayer (unmeasured: the record's live checklist item 8)
--- leaves each machine one human army, its own HELLO the only one it waits for: it would start alone. Fewer than two human
--- armies is refused, said once in the log with the armies it saw, and no HELLO is sent, since it could never complete
-T.ls_fewer_than_two_humans_never_starts = function()
-	local w = L.new({hello = false, humans = "local"})
+-- a player list naming this machine alone would start it alone: refused on every machine, no HELLO, and the player told
+-- the list is the trouble, with why in the log
+T.ls_a_list_naming_only_this_machine_never_starts = function()
+	local w = L.new({hello = false, players = "local"})
 	w:tap("A", "F2")
 	w:run(6.0)
 	check(hellos(w, "A") == 0 and hellos(w, "B") == 0, "no HELLO from either")
-	check(not on(w, "A") and said(w, "A", NEEDS) == 1, "A cannot start, and is told")
-	for _, n in ipairs({"A", "B"}) do
-		check(#w:gates(n) == 0, n .. " never put the gate in: " .. gate_text(w:gates(n)))
-		local k = 0
-		w:on(n, function()
-			for _, l in ipairs(H.log) do if l:find("human armies " .. (n == "A" and 0 or 1) .. " of 2, and with fewer than two it would start alone", 1, true) then k = k + 1 end end
-		end)
-		check(k == 1, n .. " says why once, naming its one human army: " .. k)
-	end
+	check(not on(w, "A") and said(w, "A", "derpy_tp_mp_no_players") == 1, "A cannot start, and is told the list is why")
+	for _, n in ipairs({"A", "B"}) do check(#w:gates(n) == 0, n .. " never put the gate in: " .. gate_text(w:gates(n))) end
+	check(logged(w, "A", "the player list cannot be used: it names 1 player") == 1, "the log says why")
 	check(#sent_for_men(w, "A") == 0, "A sent nothing for a man")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- the report of 2026-10-22, a campaign battle against the AI: A plays the one human army, B (the partner, with the mod)
+-- watches. Counting armies, it never started on either machine; counting players, A's press is answered by B's machine,
+-- A starts, and B, watching, does not
+T.ls_a_battle_against_the_ai_starts_with_the_partner_watching = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, pairs = "reverse", spectator = true}}})
+	w:tap("A", "F2")
+	w:tap("B", "F2")
+	w:run(1.0)
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 1, "A's HELLO, and B's answer: " .. hellos(w, "A") .. " " .. hellos(w, "B"))
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the gate in on both at one tick: " .. gate_text(ga) .. " " .. gate_text(gb))
+	check(on(w, "A") and not on(w, "B"), "A plays, B watches")
+	check(said(w, "A", NEEDS) + said(w, "B", NEEDS) == 0, "nobody told to get the mod")
+	w:on("A", function() H.down("W") end)
+	w:run(1.0)
+	check(sent_kinds(w, "A").move, "A plays")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- the partner joins on A's side with units A gave them (CA's IsPassiveParticipant): one army, two machines. Their
+-- machine says HELLO and the handshake completes; A starts, the partner's F2 starts nothing
+T.ls_a_partner_given_units_counts_and_does_not_start = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, pairs = "reverse", passive = true}}})
+	w:tap("A", "F2")
+	w:run(1.0)
+	check(on(w, "A") and hellos(w, "B") == 1, "B's machine answered, and A starts")
+	w:tap("B", "F2")
+	w:run(0.5)
+	check(not on(w, "B"), "B's press starts nothing")
+	check(logged(w, "B", "plays no army") == 1, "said once in B's log")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- a watcher without the mod: their machine runs the battle and would not run A's commands, so nobody starts, and A's
+-- player is told who did not answer
+T.ls_a_watcher_without_the_mod_holds_everyone_back = function()
+	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, spectator = true, mod = false}}})
+	loc_names(w, "A")
+	w:tap("A", "F2")
+	w:run(6.0)
+	check(not on(w, "A") and #w:gates("A") == 0, "A never starts, the gate never in")
+	check(line(w, "A") == "no answer from Player B.", "the watcher named: " .. tostring(line(w, "A")))
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- the network loses every HELLO (the forged command never runs on any machine): each player is told their own check
+-- never came back, which no missing mod explains
+T.ls_a_hello_the_network_loses_is_told_as_this_machines_own = function()
+	local w = L.new({hello = false, drop = L.is_hello})
+	w:tap("A", "F2")
+	w:tap("B", "F2")
+	w:run(6.0)
+	check(#w.lost == 2, "both HELLOs lost: " .. #w.lost)
+	for _, n in ipairs({"A", "B"}) do
+		check(not on(w, n) and #w:gates(n) == 0, n .. " never starts")
+		check(said(w, n, "derpy_tp_mp_no_route") == 1 and said(w, n, NEEDS) == 0, n .. " told its own check failed")
+	end
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- the host runs its own forged command and drops the client's: A is told B did not answer, B that its own did not land
+T.ls_a_client_hello_the_host_drops = function()
+	local w = L.new({hello = false, drop = function(c) return L.is_hello(c) and c.from == "B" end})
+	loc_names(w, "A")
+	w:tap("A", "F2")
+	w:tap("B", "F2")
+	w:run(6.0)
+	check(not on(w, "A") and not on(w, "B"), "nobody starts")
+	check(line(w, "A") == "no answer from Player B.", "A names B: " .. tostring(line(w, "A")))
+	check(said(w, "B", "derpy_tp_mp_no_route") == 1, "B is told its own check failed")
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 

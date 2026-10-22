@@ -36,7 +36,7 @@ K.labels = {toggle = "Third person on and off", forward = "Walk forward", back =
 	fly = "Fly or land (flying units)", zoom_in = "Zoom in", zoom_out = "Zoom out", cheer = "Cheer",
 	hide_ui = "Hide or show the interface (works paused)", minimap = "Show or hide the minimap",
 	view = "First or third person view",
-	guide = "Markers under enemies and allies (hold, or press: see On the battlefield)",
+	guide = "Markers and unit banners (hold, or press: see On the battlefield)",
 	page = "Next page of the ability bar (abilities, spells)",
 	ability_1 = "Ability 1", ability_2 = "Ability 2", ability_3 = "Ability 3", ability_4 = "Ability 4",
 	ability_5 = "Ability 5", ability_6 = "Ability 6", ability_7 = "Ability 7", ability_8 = "Ability 8",

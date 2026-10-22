@@ -24,7 +24,7 @@ from the cave's first instruction, mov rax, <block>):
     has_angle  steer: write buf's angle in place; near: steer: he is at the point, build no walk
     count      multiplayer: how many guard entries are claimed (0 in single player, so the table scan is skipped whole)
     nfrags, fragtab   the copy table's row count, and a pointer to it (its own game_alloc); DISARM/ARM read it
-    hello      multiplayer: a 32-bit mask, bit n set once army slot n's HELLO landed (the carrier cave sets it, lock or)
+    hello      multiplayer: a 32-bit mask, bit n set once player slot n's HELLO landed (the carrier cave sets it, lock or)
     find       scratch: the 16-bit id the carrier cave resolves, so &id can be passed to the map lookup
     skip, map_lookup   the carrier cave's two baked pointers: the store-skip target (exe+2ecfcc5) and exe+17aece4
     buf        the walk builder's 0x60-byte parameter block (platform.lua fills it as it always did)
@@ -71,9 +71,10 @@ CARRIER_RVA, RESUME_RVA, SKIP_RVA = 0x2ecfcb7, 0x2ecfcbd, 0x2ecfcc5
 CARRIER_SITE = bytes.fromhex("f30f10442430")  # movss xmm0, dword ptr [rsp + 0x30]
 MAGIC = 0xD7
 OPS = {"GUARD_ON": 1, "GUARD_OFF": 2, "DISARM": 3, "ARM": 4, "HELLO": 5}
-# HELLO's 16 bits: the protocol version (15-8) and the sender's army slot (7-0), one bit of MB hello. A HELLO of another
-# version, or a slot past the mask, sets nothing. The version is platform.lua's HELLO_VERSION too: agreement() ties them
-HELLO_VERSION, HELLO_SLOTS = 1, 32
+# HELLO's 16 bits: the protocol version (15-8) and the sender's player slot (7-0), one bit of MB hello. A HELLO of another
+# version, or a slot past the mask, sets nothing. The version is platform.lua's HELLO_VERSION too: agreement() ties them.
+# 2 since 2026-10-22: version 1's slot was an army's place
+HELLO_VERSION, HELLO_SLOTS = 2, 32
 # the record's battle object and the map lookup the MOVE/HALT handlers use (exe+2eaf094 reads a tag-0x23 model id, then
 # resolves it in battle+0x80 through exe+17aece4(map, &id) -> &value, value the model). The carrier carries no 0x23 field,
 # so the cave resolves its own 16-bit id the same way: battle = [record+0x30], map = battle+0x80, lookup by &id.
@@ -1035,7 +1036,7 @@ def carrier_scenarios(ccode, cat):
                "op %d: dropped unresolved, no action" % op)
         kept(r, "op %d" % op)
 
-    # HELLO (the feasibility record's Ruling 25) names no man: its army slot's bit goes into MB hello, the store is skipped
+    # HELLO (the feasibility record's Ruling 25) names no man: its player slot's bit goes into MB hello, the store is skipped
     def hello(version, slot, mask=0, flags=0):
         return crun(ccode, cat, word(OPS["HELLO"], flags, version * 256 + slot), known_id=ID, model=CMODEL, hello=mask)
     r = hello(HELLO_VERSION, 3)
@@ -1043,7 +1044,7 @@ def carrier_scenarios(ccode, cat):
            "HELLO slot 3: its bit alone, the store skipped, nobody resolved, got %x" % r["hello"])
     kept(r, "HELLO")
     expect(not r["hello_unlocked"], "HELLO: the mask is written by a locked instruction, not %s" % r["hello_unlocked"])
-    for slot, mask, want, what in ((0, 1 << 5, (1 << 5) | 1, "another army's bit kept, this one added"),
+    for slot, mask, want, what in ((0, 1 << 5, (1 << 5) | 1, "another player's bit kept, this one added"),
                                    (31, 0, 1 << 31, "the last slot"),
                                    (3, (1 << 3) | (1 << 7), (1 << 3) | (1 << 7), "a second HELLO for a slot set changes nothing")):
         r = hello(HELLO_VERSION, slot, mask)
@@ -1170,12 +1171,13 @@ def _cave_classify(ccode, cat, hi, lo):
 
 def agreement(ccode, cat):
     """The cave never disagrees with M.uncarrier: every op 0..15 x flag nibble x a few ids, plus 0.2/-1.0. The ids
-    include HELLO's version 1 and its neighbours with in- and out-of-mask slots, so the two sides' HELLO_VERSION and
+    include HELLO's version and its neighbours with in- and out-of-mask slots, so the two sides' HELLO_VERSION and
     slot bound are tied: a version moved on one side alone fails here."""
     words = []
+    v = HELLO_VERSION * 256
     for op in range(16):
         for flags in range(16):
-            for mid in (1, 1001, 4265, 0x0100, 0x011f, 0x0120, 0x01ff, 0x0003, 0x0203):
+            for mid in (1, 1001, 4265, v, v + 0x1f, v + 0x20, v + 0xff, v - 256 + 3, v + 256 + 3):
                 words.append((MAGIC * 256 + op * 16 + flags, mid))
     words += [(0x3E4C, 0xCCCD), (0xBF80, 0x0000)]     # 0.2 and -1.0 as hi, lo halves
     want = _uncarrier_sample(words)

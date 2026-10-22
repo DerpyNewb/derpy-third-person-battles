@@ -523,15 +523,16 @@ then the man.
 
 **The carrier word.** 32 bits: 31-24 the magic `0xD7`; 23-20 the op, 1 GUARD_ON, 2 GUARD_OFF, 3 DISARM, 4 ARM, 5
 HELLO; 19-16 flags, bit 16 shots and bit 17 charge, bits 18-19 unassigned and ignored by both sides (a HELLO's flags are
-not read); 15-0 the body's id, his `+0x258`, or for HELLO the protocol version in 15-8 (`HELLO_VERSION`, 1, in
-`platform.lua` and in `tools/third_person_cave.py`) and the sender's army slot in 7-0, 0 to 31. Game Lua numbers are float32, so the word is never one Lua number:
+not read); 15-0 the body's id, his `+0x258`, or for HELLO the protocol version in 15-8 (`HELLO_VERSION`, 2 since
+2026-10-22, in `platform.lua` and in `tools/third_person_cave.py`; version 1 carried an army slot) and the sender's
+player slot in 7-0, 0 to 31. Game Lua numbers are float32, so the word is never one Lua number:
 `M.carrier` returns two u16 halves, `hi = 0xD7 * 256 + op * 16 + flags` and `lo = id`, and `out.carrier` writes `lo`
 then `hi` as the four raw bytes of RELOAD_TIME's float field (tag `0xa`), so the u32 on the wire is `hi << 16 | lo`. As
 a float it is a normal negative number between -1.4e14 and -2.8e14, never a NaN or a denormal. An id over 0xFFFF is
 refused, never wrapped: that body is left out of guarding, with one log line (`a man is left out of multiplayer
 guarding`). Task 2 read ids 1 to 4,265 in a 20-against-20 battle. A HELLO slot past 31 is refused the same way.
 `M.uncarrier` decodes the same layout, and a HELLO of another version or past the mask to nil; the selftest runs it
-under `lua.exe` against the cave over every op, every flag nibble and nine ids, HELLO's versions 0 to 2 and slots in and
+under `lua.exe` against the cave over every op, every flag nibble and nine ids, HELLO's version and its neighbours, slots in and
 past the mask among them, so a version changed on one side alone fails it.
 
 **The carrier cave** (code; 613 bytes) sits on the RELOAD_TIME handler's `movss xmm0, [rsp+0x30]` at `exe+2ecfcb7`, past
@@ -541,7 +542,7 @@ the read-error test, and goes in at build on every machine. It reads the word at
   value is stored as vanilla stores it;
 - the magic with an op outside 1-5: it jumps to the handler's epilogue `exe+2ecfcc5`, skipping the store, and does
   nothing else;
-- HELLO (5): no man is resolved. Version 1 and a slot below 32 set the slot's bit of the block's 32-bit mask at `+0x5c`
+- HELLO (5): no man is resolved. Version 2 and a slot below 32 set the slot's bit of the block's 32-bit mask at `+0x5c`
   with `lock or`; anything else sets nothing. Either way it skips the store;
 - ops 1-4: it resolves the 16-bit id as the MOVE handler's resolver `exe+2eaf094` does (the battle object at the
   command record's `+0x30`, its map at `+0x80`, `exe+17aece4(map, &id)`; id 0 is no man), acts, then skips the store.
@@ -580,49 +581,57 @@ that throws leaves net play off for that battle. Numeric loops and `ipairs` only
 machine; only the addresses differ, and the cave matches by pointer. A unit spawned later (a summon, a reinforcement)
 has no row, so a DISARM naming its fragment is dropped, on every machine alike.
 
-**The HELLO handshake** (code; the record's Rulings 25 to 27). A peer without the pack, without memreader Plus or on
-another build would run a different simulation from the first forged command, or from the gate alone, so net play and
-the gate wait until every human army's machine has said HELLO. `M.handshake` (pure Lua, so the simulation's fake
-platform runs the same lines) is a model callback, every 100 model ms on every machine, a replay too:
+**The HELLO handshake** (code; the record's Rulings 25 to 27 and 30). A peer without the pack, without memreader Plus
+or on another build would run a different simulation from the first forged command, or from the gate alone, so net
+play and the gate wait until every machine in the battle has said HELLO. `M.handshake` (pure Lua, so the simulation's
+fake platform runs the same lines) is a model callback, every 100 model ms on every machine, a replay too:
 
-- **The slot.** An army's place in `bm:alliances()` order, counted from 0 over every army: the same on every machine.
-  The human ones are those whose `army:is_player_controlled()` is true, CA's "controlled by a human player"; what it
-  returns on each machine of a multiplayer battle is unmeasured (the record's checklist item 8). Fewer than two human
-  armies is refused with one log line naming the slots it saw, `multiplayer waits: the battle reports human armies
-  <slots> of <armies>, and with fewer than two it would start alone`, and no HELLO goes: a local meaning would leave
-  each machine waiting for its own HELLO alone.
+- **The players.** CA's network player list, `MultiplayerRootContext.PlayerList` (a CCO global function, read with
+  `common.get_context_value("CcoBattleRoot", "", ...)`; CA's battle UI reads the same list in `mp_team_list.twui.xml`),
+  through `M.players`: every entry online, with its `Id` (CA's "unique mp client id"), `Name`, `IsLocalPlayer`, and
+  `IsSpectating` or `IsPassiveParticipant` ("spectating but can receive units from active players to join in"). A
+  spectator and a partner given units count like any player, because each one's machine runs the battle. Until
+  2026-10-22 it counted human armies through `army:is_player_controlled()`, which refused every battle with one human
+  army (a campaign battle against the AI with a partner watching) and told both players to get the pack (Ruling 30).
+- **The slot.** A player's place in the list sorted by `Id`, from 0: the same on every machine that sees the same
+  players, whatever order its own list is in. A list that does not read, names one player (this machine would start
+  alone), lacks this machine, repeats an id, or names more than 32 is not used: no HELLO goes and the gate stays out.
 - **The send.** Nothing goes until someone wants to play: this machine says HELLO once its player has pressed F2 in net
-  mode (`P.net_asked`, set by `main.lua`) or another human army's HELLO has landed, so a modded peer answers by itself.
-  Either way only once its own copy table is built (`P.net_ready`), so a HELLO that executed also says that machine's
-  table is there. One HELLO, for its own army, the one at `bm:local_alliance()` / `bm:local_army()` when that army is
-  human, through the carrier route. A push that did not go goes again the next tick. None goes in a replay, whose
-  recorded HELLOs land again, nor from a spectator (`bm:is_spectator()`, CA's "whether the local game client is
-  spectating the battle"; a throw from either call counts as watching), whose local army, if CA names one, is a
-  player's. A lobby where nobody presses F2 therefore carries nothing at all.
-- **Late.** Once a handshake is under way here (a press or a heard HELLO, after `P.net_ready`), it may take
-  `HELLO_WAIT`, 5,000 model ms: a press needs two queue delays and three callbacks, 300 ms, and 5 s allows 2.3 s a
-  trip. Past it, with an army still missing, `P.net_late` is set and one line names it, `multiplayer waits: human
-  armies <slots> of <armies>, no HELLO from <slots> after 5000 model ms`; a completion in that same step is not late.
-- **The gate.** Once every human army's bit is set in the mask, it puts the gate in (`P.gate(true)`), sets `P.net_play`
-  and logs once `human armies <slots> of <armies> all said HELLO by <ms> model ms: the order gate is in`. The bits are
-  set by commands, so the callback that first sees the last one is inferred to run at the same model tick on every
-  machine; where in the tick it runs is untraced (section 14), and the equal model ms in both logs is the evidence the
-  live session reads. The gate then stays in to the battle's end (section 8). A gate that does not go in is logged and
+  mode (`P.net_asked`, set by `main.lua`) or another player's HELLO has landed, so a modded peer answers by itself, a
+  spectator's too. Either way only once its own copy table is built (`P.net_ready`), so a HELLO that executed also says
+  that machine's table is there. One HELLO, for its own slot, through the carrier route. A push that did not go goes
+  again the next tick. None goes in a replay, whose recorded HELLOs land again (a throw from `bm:is_replay()` sends
+  none and is logged). A lobby where nobody presses F2 therefore carries nothing at all. At the first step under way
+  one line names the list by slot: `multiplayer: players <slots> of <n>, this machine <slot>, watching <slots>`.
+- **Late.** Once a handshake is under way here, it may take `HELLO_WAIT`, 5,000 model ms: a press needs two queue
+  delays and three callbacks, 300 ms, and 5 s allows 2.3 s a trip. Past it, with the list unusable or a player missing,
+  `P.net_late` is set with `P.net_why`: `players` (`multiplayer waits: the player list cannot be used: <why>`); `self`,
+  this machine's own HELLO has not landed, which no missing pack explains and says the forged command did not come
+  back through the queue; or `missing`, with the others' names in `P.net_missing`. Both of the last log `multiplayer
+  waits: players <slots> of <n>, no HELLO from <slots> after 5000 model ms`. The log names players by slot only: a
+  player posts it, and the names are their friends'. A completion in that same step is not late.
+- **The gate.** Once every player's bit is set in the mask, it puts the gate in (`P.gate(true)`), sets `P.net_play`
+  and logs once `players <slots> of <n> all said HELLO by <ms> model ms: the order gate is in`. The bits are set by
+  commands, so the callback that first sees the last one is inferred to run at the same model tick on every machine;
+  where in the tick it runs is untraced (section 14), and the equal model ms in both logs is the evidence the live
+  session reads. The gate then stays in to the battle's end (section 8). A gate that does not go in is logged and
   tried again the next tick; the build's proof makes that unlikely.
 
 `main.lua` starts net play only with `P.net_play`. A press before it, after "Deployed", is kept rather than refused: it
-sets `P.net_asked`, third person starts by itself when the handshake completes, with no second press, and the player is
-shown `derpy_tp_mp_needs_everyone` ("Third-Person Battles in multiplayer needs every player to have it and memreader
-Plus.") once `P.net_late` is set. A second press while one is kept is ignored (the record's Ruling 29): it sends no
-HELLO, restarts no clock and adds no message, and the kept press still starts third person when the handshake
-completes. A kept press is dropped 15 model s after it (`NET_DROP`),
-three times the handshake's allowance, because a camera taken over later than that lands on a player who has gone back
-to commanding the battle. Any start spends a kept press, including a key press that starts directly in the frame the
-handshake completes, so F2 stops a session as before and it stays stopped. A spectator (`bm:is_spectator()` true, or a
-throw) never starts: `M.start` refuses it with one log line, `multiplayer: a spectator plays no army, so third person
-stays off`, and keeps no press; its handshake still puts its gate in at the players' tick. A machine without the pack stores a HELLO in
-RELOAD_TIME's global, which no code is known to read, so a HELLO alone is taken to leave a mixed lobby in step (the
-record's checklist item 12 measures it), and one goes only when a player presses F2. Single player has no handshake.
+sets `P.net_asked`, third person starts by itself when the handshake completes, with no second press, and once
+`P.net_late` is set the player is told why, by `P.net_why`: `derpy_tp_mp_needs_everyone` with the missing players'
+names in place of its `%s` (`E.say` sets them on the line CA's `show_subtitle` has just set), `derpy_tp_mp_no_route`,
+or `derpy_tp_mp_no_players`. A second press while one is kept is ignored (the record's Ruling 29): it sends no HELLO,
+restarts no clock and adds no message, and the kept press still starts third person when the handshake completes. A
+kept press is dropped 15 model s after it (`NET_DROP`), three times the handshake's allowance, because a camera taken
+over later than that lands on a player who has gone back to commanding the battle. Any start spends a kept press,
+including a key press that starts directly in the frame the handshake completes, so F2 stops a session as before and
+it stays stopped. A spectator (`bm:is_spectator()` true, or a throw) and a partner given units (`P.net_me.watching`)
+never start: `M.start` refuses them with one log line, `multiplayer: a spectator or a partner with units given to them
+plays no army, so third person stays off`, and keeps no press; their machines still say HELLO and put the gate in at the
+players' tick. A machine without the pack stores a HELLO in RELOAD_TIME's global, which no code is known to read, so a
+HELLO alone is taken to leave a mixed lobby in step (the record's checklist item 12 measures it), and one goes only
+when a player presses F2. Single player has no handshake.
 
 **The sending rules** (`M.net_rules`, pure Lua, the same lines the simulation's fake platform runs):
 
@@ -660,8 +669,8 @@ problems>`, loads nothing else, and F2 shows `derpy_tp_multiplayer` ("Third-Pers
 multiplayer it needs an up-to-date memreader Plus and a supported game version on every machine; the
 script log has the details."). A replay is always off; in a replay of a multiplayer battle `install_net` still
 runs if `bm:is_multiplayer()` is true there, so the recorded carriers meet a cave, and the recorded HELLOs are inferred
-to put the gate in at the tick they did in the battle, if `is_player_controlled()` names the same human armies in the
-replay (checklist item 13).
+to put the gate in at the tick they did in the battle, if the replay's player list names the battle's players; an
+empty one leaves the gate out for the whole replay (checklist item 13).
 
 In net mode, F2 before "Deployed" does nothing and says nothing: `P.net_ready` is set only once this machine's copy
 table is built. A table that threw leaves it unset for the battle, F2 silent, this machine's HELLO unsent (so no peer
@@ -717,12 +726,11 @@ which lengthens the windows that wait for a clip to show; the simulation uses `D
   - Whether a vanilla man ever parks an action in his queued holder. If none does, the gate, in from the handshake to
     the battle's end, is inert where nobody plays; if one does, it changes the battle from the handshake on, and a
     per-man gate keyed off the guard table is the redesign (10).
-  - What `army:is_player_controlled()` returns on each machine (8). The handshake's human armies are the ones it
-    names, so every machine must name the same set, the armies with a player at a keyboard; the copy table does not
-    depend on it. Once, a campaign battle with a player's reinforcing army: if it is a human army entry of its own, the
-    handshake never completes, safe, but the message tells players who all have the pack that one does not.
-  - Whether a WH3 lobby has spectators: what `bm:is_spectator()`, `local_alliance()` and `local_army()` return on one,
-    and whether it simulates the battle. A modded spectator sends no HELLO and never starts third person.
+  - What CA's player list reads from Lua in battle, and whether every machine lists the same players (8, 21). The
+    handshake's slots come from it (Ruling 30). Whether a campaign partner who is not in the battle is still listed:
+    then the handshake never completes, safe, and the message names them.
+  - What `bm:is_spectator()` returns on a watching partner, and whether a watcher's machine simulates the battle. A
+    modded watcher says HELLO and never starts third person.
   - Whether HALT cuts a clip that is playing: its stop replaces any command (15). How far FOLLOW turns a standing man
     toward the crosshair before a shot (14; Task 2: 55 of 90 degrees in 1.3 s).
   - Whether `bm:disable_orders(true)` is local (11); whether a lobby starts when one player lacks the pack (12); what
