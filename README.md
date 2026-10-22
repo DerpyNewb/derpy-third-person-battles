@@ -48,8 +48,8 @@ engine, and the design record.
   distance, height, lag and melee distance, turning speed, hold or toggle to run, cooldowns,
   reload time, volley scatter, when the health bars show and how far, and hold or press for the
   markers.
-- **Single player on the Workshop.** The Workshop release does nothing in multiplayer or replays.
-  The source here has a multiplayer mode, built and tested offline but not yet run on two
+- **Multiplayer is experimental.** It runs when every player has the mod and memreader Plus,
+  and does nothing in replays. It was built and tested offline but has not yet been run on two
   machines (`docs/history/MP_FEASIBILITY_20261021_THIRD_PERSON.md`).
 
 It needs **memreader Plus**, a separate Workshop mod that lets Lua scripts read and write the

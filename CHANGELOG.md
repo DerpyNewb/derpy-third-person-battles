@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (not on the Workshop)
+## 2026-10-22
 
 - Multiplayer mode: every change goes through the game's own battle command queue, so both machines run the same
   battle. Built and tested offline in a two-machine simulation; not yet run on two machines.
