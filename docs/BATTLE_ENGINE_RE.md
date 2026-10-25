@@ -589,20 +589,25 @@ fake platform runs the same lines) is a model callback, every 100 model ms on ev
 - **The players.** CA's network player list, `MultiplayerRootContext.PlayerList` (a CCO global function, read with
   `common.get_context_value("CcoBattleRoot", "", ...)`; CA's battle UI reads the same list in `mp_team_list.twui.xml`),
   through `M.players`: every entry online, with its `Id` (CA's "unique mp client id"), `Name`, `IsLocalPlayer`, and
-  `IsSpectating` or `IsPassiveParticipant` ("spectating but can receive units from active players to join in"). A
-  spectator and a partner given units count like any player, because each one's machine runs the battle. Until
-  2026-10-22 it counted human armies through `army:is_player_controlled()`, which refused every battle with one human
-  army (a campaign battle against the AI with a partner watching) and told both players to get the pack (Ruling 30).
+  `IsSpectating` or `IsPassiveParticipant` ("spectating but can receive units from active players to join in"; bit
+  `0x10` and all of `0x25` of the network player's `+0x138`, getters `exe+1f07930` and `exe+1f076e8`). A player reading
+  either is watching: listed and given a slot, but not waited for, and its machine sends nothing, since every queued
+  push is dropped on a machine whose battle `+0x3b0` (`is_spectator()`) is set (Ruling 34, 2026-10-24: waiting for it,
+  no battle a partner watched ever started). Until 2026-10-22 it counted human armies through
+  `army:is_player_controlled()`, which refused every battle with one human army and told both players to get the pack
+  (Ruling 30).
 - **The slot.** A player's place in the list sorted by `Id`, from 0: the same on every machine that sees the same
   players, whatever order its own list is in. A list that does not read, names one player (this machine would start
-  alone), lacks this machine, repeats an id, or names more than 32 is not used: no HELLO goes and the gate stays out.
+  alone), lacks this machine, repeats an id, names more than 32, or has everyone watching is not used: no HELLO goes
+  and the gate stays out.
 - **The send.** Nothing goes until someone wants to play: this machine says HELLO once its player has pressed F2 in net
-  mode (`P.net_asked`, set by `main.lua`) or another player's HELLO has landed, so a modded peer answers by itself, a
-  spectator's too. Either way only once its own copy table is built (`P.net_ready`), so a HELLO that executed also says
+  mode (`P.net_asked`, set by `main.lua`) or another player's HELLO has landed, so a modded peer answers by itself; a
+  watching machine never does. Either way only once its own copy table is built (`P.net_ready`), so a HELLO that executed also says
   that machine's table is there. One HELLO, for its own slot, through the carrier route. A push that did not go goes
   again the next tick. None goes in a replay, whose recorded HELLOs land again (a throw from `bm:is_replay()` sends
   none and is logged). A lobby where nobody presses F2 therefore carries nothing at all. At the first step under way
-  one line names the list by slot: `multiplayer: players <slots> of <n>, this machine <slot>, watching <slots>`.
+  one line names the list by slot: `multiplayer: players <slots> of <n>, this machine <slot>, watching <slots>,
+  offline <slots>, waits for <slots>`. `HELLO_VERSION` is 3 since Ruling 34.
 - **Late.** Once a handshake is under way here, it may take `HELLO_WAIT`, 5,000 model ms: a press needs two queue
   delays and three callbacks, 300 ms, and 5 s allows 2.3 s a trip. Past it, with the list unusable or a player missing,
   `P.net_late` is set with `P.net_why`: `players` (`multiplayer waits: the player list cannot be used: <why>`); `self`,
@@ -610,7 +615,7 @@ fake platform runs the same lines) is a model callback, every 100 model ms on ev
   back through the queue; or `missing`, with the others' names in `P.net_missing`. Both of the last log `multiplayer
   waits: players <slots> of <n>, no HELLO from <slots> after 5000 model ms`. The log names players by slot only: a
   player posts it, and the names are their friends'. A completion in that same step is not late.
-- **The gate.** Once every player's bit is set in the mask, it puts the gate in (`P.gate(true)`), sets `P.net_play`
+- **The gate.** Once every playing player's bit is set in the mask, it puts the gate in (`P.gate(true)`), sets `P.net_play`
   and logs once `players <slots> of <n> all said HELLO by <ms> model ms: the order gate is in`. The bits are set by
   commands, so the callback that first sees the last one is inferred to run at the same model tick on every machine;
   where in the tick it runs is untraced (section 14), and the equal model ms in both logs is the evidence the live
@@ -628,8 +633,9 @@ over later than that lands on a player who has gone back to commanding the battl
 including a key press that starts directly in the frame the handshake completes, so F2 stops a session as before and
 it stays stopped. A spectator (`bm:is_spectator()` true, or a throw) and a partner given units (`P.net_me.watching`)
 never start: `M.start` refuses them with one log line, `multiplayer: a spectator or a partner with units given to them
-plays no army, so third person stays off`, and keeps no press; their machines still say HELLO and put the gate in at the
-players' tick. A machine without the pack stores a HELLO in RELOAD_TIME's global, which no code is known to read, so a
+plays no army, so third person stays off`, and keeps no press; their machines send nothing and put the gate in at the
+players' tick. A watcher without the pack or memreader Plus is not caught: its machine runs without the gate and
+desyncs (Ruling 34's cost). A machine without the pack stores a HELLO in RELOAD_TIME's global, which no code is known to read, so a
 HELLO alone is taken to leave a mixed lobby in step (the record's checklist item 12 measures it), and one goes only
 when a player presses F2. Single player has no handshake.
 
@@ -729,8 +735,8 @@ which lengthens the windows that wait for a clip to show; the simulation uses `D
   - What CA's player list reads from Lua in battle, and whether every machine lists the same players (8, 21). The
     handshake's slots come from it (Ruling 30). Whether a campaign partner who is not in the battle is still listed:
     then the handshake never completes, safe, and the message names them.
-  - What `bm:is_spectator()` returns on a watching partner, and whether a watcher's machine simulates the battle. A
-    modded watcher says HELLO and never starts third person.
+  - What `bm:is_spectator()` returns on a watching partner, and what a watcher's desync does to the others (Ruling 34:
+    a watcher is not waited for, so one without the pack desyncs).
   - Whether HALT cuts a clip that is playing: its stop replaces any command (15). How far FOLLOW turns a standing man
     toward the crosshair before a shot (14; Task 2: 55 of 90 degrees in 1.3 s).
   - Whether `bm:disable_orders(true)` is local (11); whether a lobby starts when one player lacks the pack (12); what

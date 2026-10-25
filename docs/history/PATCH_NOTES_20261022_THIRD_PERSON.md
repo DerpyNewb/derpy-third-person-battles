@@ -41,4 +41,4 @@ and read back, 23 files and 7 loc rows). Same 27 paths as `906b1c92`. Live check
 
 Uploaded 2026-10-22 19:52 Manila, same route as the first: Steam log `Uploaded new content ( ManifestID
 3618937761616428547 )`, `Upload finished ... : OK`. Title and tags unchanged. The other 91 Workshop packs had the same
-size and timestamp right after. Repo not pushed.
+size and timestamp right after. Repo push `52e9976`.

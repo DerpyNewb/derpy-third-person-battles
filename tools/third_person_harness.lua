@@ -53,6 +53,8 @@ function UNIT:position() if self._error then error("test: position() failed") en
 function UNIT:bearing() return self._bearing end
 -- where the engine has him going: his own spot once halted or attacking (CA's entry for ordered_position)
 function UNIT:ordered_position() local o = self._ordered return o and v(o[1], 0, o[2]) or self:position() end
+-- on its way somewhere: the walk a unit had (o.prior_walk) or CA's own order gave it (H.ca_order), until a halt
+function UNIT:is_moving() return self._prior_walk == true end
 function UNIT:type() return self._type end
 function UNIT:name() return self._type end
 function UNIT:unique_ui_id() return self._id end
@@ -60,6 +62,11 @@ function UNIT:is_commanding_unit() return self._general end
 function UNIT:is_infantry() return not self._arty end
 function UNIT:is_artillery() return self._arty end
 function UNIT:is_war_machine() return self._war_machine or self._arty end
+-- command mode's groups (command.lua group_of): CA's getters, and land_units.class ("com" for lords and heroes)
+function UNIT:is_cavalry() return self._cavalry == true end
+function UNIT:is_chariot() return self._chariot == true end
+function UNIT:is_war_beasts() return self._beast == true end
+function UNIT:unit_class() return self._class end
 function UNIT:is_currently_flying() return self._flying end
 function UNIT:can_fly() return self._can_fly == true end
 function UNIT:trigger_sound_taunt() rec("taunt", self._id) end
@@ -83,8 +90,9 @@ function UNIT:can_use_behaviour(b) return b == "fire_at_will" or b == "defend" e
 function UNIT:ordered_width() return 20 end
 function UNIT:select_in_ui() rec("select_in_ui", self._id) H.select(self) end
 function UNIT:owned_non_passive_special_abilities() return self._abilities end
--- his army: its winds (army:winds_of_magic_current) from _army_winds; none set, the read throws
-function UNIT:army() local u = self return {winds_of_magic_current = function() return assert(u._army_winds, "test: no army winds") end} end
+-- his army: its winds (army:winds_of_magic_current) from _army_winds; none set, the read throws. use_special_ability: H.cast
+function UNIT:army() local u = self return {winds_of_magic_current = function() return assert(u._army_winds, "test: no army winds") end,
+	use_special_ability = function(_, key, pos) H.cast(u, key, pos) end} end
 function UNIT:can_perform_special_ability(key) return self._can[key] ~= false end
 function UNIT:unary_hitpoints() return self._hp end
 function UNIT:initial_number_of_men() return #self._models end
@@ -92,7 +100,8 @@ function UNIT:is_invulnerable() return self._invulnerable == true end
 function UNIT:is_player_controlled() return not (self._enemy or self._ally) end
 
 local next_id = 0
--- o: type, men, x, z, bearing, range, ammo, start_ammo, arty, general, abilities, can, men_ok, enemy, hp
+-- o: type, men, x, z, bearing, range, ammo, start_ammo, arty, general, abilities, can, men_ok, enemy, hp, cavalry, chariot,
+-- beast, class (default "com" for a general, else "inf_mel")
 function H.unit(o)
 	next_id = next_id + 1
 	local u = setmetatable({_type = o.type or "wh_test_unit", _x = o.x or 0, _z = o.z or 0, _bearing = o.bearing or 0,
@@ -100,7 +109,8 @@ function H.unit(o)
 		_range = o.range or 0, _ammo = o.ammo or 0, _start_ammo = o.start_ammo or o.ammo or 0, _arty = o.arty or false, _war_machine = o.war_machine or false,
 		_general = o.general or false, _abilities = o.abilities or {}, _can = o.can or {}, _routing = false,
 		_id = next_id, _models = {}, _men_ok = o.men_ok, _flying = o.flying or false, _can_fly = o.can_fly, _melee = o.melee, _prior_walk = o.prior_walk,
-		_hidden = o.hidden, _enemy = o.enemy, _ally = o.ally}, UNIT)
+		_hidden = o.hidden, _enemy = o.enemy, _ally = o.ally, _cavalry = o.cavalry, _chariot = o.chariot, _beast = o.beast,
+		_class = o.class or (o.general and "com" or "inf_mel"), _phases = {}}, UNIT)
 	if o.hold_fire then u._faw = false end -- the player's own hold fire
 	u._defend = o.defend == true -- the player's own guard
 	local men = o.men or 1
@@ -116,6 +126,39 @@ function H.unit(o)
 end
 local function listof(items) return {count = function() return #items end, item = function(_, i) return items[i] end} end
 
+-- an army ability cast by script, as measured 2026-10-24 (memory wh3-script-cast-army-ability-on-one-unit): it lands on
+-- the engine's next tick; while its phase is on a unit (H.phases[key]) the cast takes it off and nothing lands, else the
+-- phase goes on the caster's side's unit nearest the point within STAT_RANGE (10 m, build_third_person.py). H.drop_casts: the
+-- next n casts never land (a cast the engine refused)
+function H.cast(caster, key, pos)
+	rec("army_ability", key, pos.x, pos.z)
+	H.casts[#H.casts + 1] = {key = key, x = pos.x, z = pos.z, side = caster._enemy and H.enemies or caster._ally and H.allies
+		or H.units, due = H.model_ms() + 100}
+end
+function H.give(u, key) u._phases[key], H.phases[key] = true, u end -- a phase already on a unit (not by the script)
+local function land_casts()
+	local now, keep = H.model_ms(), {}
+	for _, c in ipairs(H.casts) do
+		if now < c.due then keep[#keep + 1] = c
+		elseif H.drop_casts > 0 then H.drop_casts = H.drop_casts - 1
+		elseif H.phases[c.key] then H.phases[c.key]._phases[c.key], H.phases[c.key] = nil, nil
+		else
+			local best, d = nil, 10
+			for _, u in ipairs(c.side) do
+				local du = math.sqrt((u._x - c.x) ^ 2 + (u._z - c.z) ^ 2)
+				if u:number_of_men_alive() > 0 and du <= d then best, d = u, du end
+			end
+			if best then best._phases[c.key], H.phases[c.key] = true, best end
+		end
+	end
+	H.casts = keep
+end
+local function unit_by_id(id)
+	for _, list in ipairs({H.units, H.enemies, H.allies}) do
+		for _, u in ipairs(list) do if tostring(u._id) == id then return u end end
+	end
+end
+
 -- unit controllers record every call as "uc:<method>", unit id, args
 local UC = {}
 local ORDERS = {goto_location = true, goto_location_angle_width = true, attack_unit = true, attack_location = true, halt = true}
@@ -125,29 +168,34 @@ UC.__index = function(self, name)
 		if name:find("^perform_special_ability") and H.refuse_cast and H.refuse_cast[(...)] then
 			error("calling 'perform_special_ability' on bad self (error: unit '1' does not support this special ability)")
 		end
-		rec("uc:" .. name, self._u._id, ...)
-		-- an order within 0.5 s of the one before is dropped (the recorder, 2026-10-15: a walk 0.4 s after a halt left him
-		-- ordered to his own spot, idle, for as long as W was held)
-		local u = self._u
-		if ORDERS[name] then
-			-- in net mode the order lands at delivery on every machine, so it is timed by the model clock they share; the
-			-- frame clock differs from machine to machine
-			local now = H.net and H.model_ms() / 1000 or H.T
-			local dropped = now - (u._order_t or -1e9) < 0.5 - 1e-9 -- 30 frames of 1/60 sum to under 0.5
-			u._order_t = now
-			if dropped then rec("dropped_order", u._id, name)
-			elseif name == "goto_location" or name == "goto_location_angle_width" then local p = ... u._ordered = {p.x, p.z}
-			else u._ordered = nil end
+		-- a controller over several units (command mode's orders) records the call once for each, with its id
+		for _, u in ipairs(self._us) do
+			rec("uc:" .. name, u._id, ...)
+			-- an order within 0.5 s of the one before is dropped (the recorder, 2026-10-15: a walk 0.4 s after a halt left him
+			-- ordered to his own spot, idle, for as long as W was held)
+			if ORDERS[name] then
+				-- in net mode the order lands at delivery on every machine, so it is timed by the model clock they share; the
+				-- frame clock differs from machine to machine
+				local now = H.net and H.model_ms() / 1000 or H.T
+				local dropped = now - (u._order_t or -1e9) < 0.5 - 1e-9 -- 30 frames of 1/60 sum to under 0.5
+				u._order_t = now
+				if dropped then rec("dropped_order", u._id, name)
+				elseif name == "goto_location" or name == "goto_location_angle_width" then local p = ... u._ordered = {p.x, p.z}
+				else u._ordered = nil end
+			end
+			-- u._faw_lags: fire at will lands on the engine's next tick, as every uc: call does (MP_FEASIBILITY_20261021)
+			if name == "fire_at_will" and not u._faw_lags then u._faw = (...) end
+			if name == "change_behaviour_active" then local b, on = ... if b == "defend" then u._defend = on end end
+			-- CA's halt also turns fire at will off, and it stays off (measured 2026-10-19 on Dragon Guard Crossbowmen: firing,
+			-- halted, silent; defend left it on)
+			-- u._halt_lags: the halt lands on the engine's next tick, as in game, so the unit moves a moment more
+			if name == "halt" then if not u._halt_lags then u._prior_walk = false end u._faw = false end
+			if name == "set_invincible" then u._invulnerable = (...) end
 		end
-		if name == "fire_at_will" then self._u._faw = (...) end
-		if name == "change_behaviour_active" then local b, on = ... if b == "defend" then self._u._defend = on end end
-		-- CA's halt also turns fire at will off, and it stays off (measured 2026-10-19 on Dragon Guard Crossbowmen: firing,
-		-- halted, silent; defend left it on)
-		if name == "halt" then self._u._prior_walk = false self._u._faw = false end
-		if name == "set_invincible" then self._u._invulnerable = (...) end
 	end
 end
-function create_unitcontroller(u) return setmetatable({_u = u}, UC) end
+-- CA's lib_battle_misc.lua:188: units only, one or more, of one army
+function create_unitcontroller(...) return setmetatable({_us = {...}}, UC) end
 
 -- the battle manager --------------------------------------------------------------------------------
 local function make_bm()
@@ -174,13 +222,28 @@ local function make_bm()
 	function B:enable_cinematic_ui(a, b, c) rec("cinematic_ui", a, b, c) end
 	function B:disable_shortcut(name, off) rec("disable_shortcut", name, off) end
 	B.battle = {enable_tooltips = function(_, b) rec("tooltips", b) end, set_banners_enabled = function(_, b) rec("banners", b) end,
-		suppress_unit_voices = function(_, b) rec("voices_off", b) end} -- CA's battle interface, bm.battle
+		suppress_unit_voices = function(_, b) rec("voices_off", b) end, -- CA's battle interface, bm.battle
+		-- the speed of the model's last tick: one asked reads back H.speed_lag real s later (measured 2026-10-23: 0.25 to 1
+		-- read back 656 ms after the call)
+		current_battle_speed = function()
+			while H.asked[1] and H.T >= H.asked[1].at - 1e-9 do H.seen = table.remove(H.asked, 1).s end
+			return H.seen
+		end,
+		add_ping_icon = function(_, x, y, z, t) rec("ping", x, y, z, t) end,
+		remove_ping_icon = function(_, x, y, z) rec("unping", x, y, z) end}
+	-- CA's wrapper (lib_battle_manager.lua) logs and calls battle:modify_battle_speed: model time runs at H.speed, 0 stops it
+	function B:modify_battle_speed(s)
+		rec("speed", s)
+		H.speed = s
+		H.asked[#H.asked + 1] = {s = s, at = H.T + (H.speed_lag or 0)}
+	end
 	function B:is_multiplayer() return H.mp end
 	function B:is_replay() return H.replay end
 	function B:is_spectator() return H.spectator == true end -- CA: "whether the local game client is spectating the battle"
-	-- the player on this machine: alliance 1's first army (CA: "In any singleplayer battle this should return 1")
+	-- the player on this machine: alliance 1 (CA: "In any singleplayer battle this should return 1"), and its first army
+	-- unless opts.local_army = 2, the second human of a side, whose partner's army (H.allies) is the first
 	function B:local_alliance() return 1 end
-	function B:local_army() return 1 end
+	function B:local_army() return H.local_army end
 	function B:show_subtitle(key, full, force)
 		rec("subtitle", key, full, force)
 		local line = find_uicomponent(H.root, "scripted_subtitles", "text_child")
@@ -197,10 +260,14 @@ local function make_bm()
 	function B:register_unit_selection_callback(u, fn) H.selection_cbs[#H.selection_cbs + 1] = {u, fn} end
 	function B:num_units_selected() local n = 0 for _ in pairs(H.sel) do n = n + 1 end return n end
 	function B:clear_selection() rec("clear_selection") H.select(nil) end
-	function B:get_player_army() return {units = function() return listof(H.units) end} end
-	function B:get_player_alliance()
-		return {armies = function() return listof({B:get_player_army(), {units = function() return listof(H.allies) end}}) end}
+	-- CA's get_player_army is the alliance's FIRST army (lib_battle_manager.lua), whichever machine's it is
+	local function our_armies()
+		local mine, theirs = {units = function() return listof(H.units) end}, {units = function() return listof(H.allies) end}
+		if H.local_army == 2 then return {theirs, mine} end
+		return {mine, theirs}
 	end
+	function B:get_player_army() return our_armies()[1] end
+	function B:get_player_alliance() return {armies = function() return listof(our_armies()) end} end
 	function B:get_non_player_alliance()
 		return {armies = function() return listof({{units = function() return listof(H.enemies) end}}) end}
 	end
@@ -211,7 +278,7 @@ local function make_bm()
 		local function army(units, human) return {is_player_controlled = function() return human end,
 			units = function() return listof(units) end} end
 		local ours = {army(H.units, true)}
-		if #H.allies > 0 then ours[2] = army(H.allies, true) end
+		if #H.allies > 0 then table.insert(ours, H.local_army == 2 and 1 or 2, army(H.allies, true)) end
 		return listof({
 			{armies = function() return listof(ours) end},
 			{armies = function() return listof({army(H.enemies, H.mp == true)}) end},
@@ -226,6 +293,15 @@ function H.select(u)
 	H.selected, H.sel = u, u and {[u] = true} or {}
 	if was and was ~= u then for _, cb in ipairs(H.selection_cbs) do if cb[1] == was then cb[2](was, false) end end end
 	if u then for _, cb in ipairs(H.selection_cbs) do if cb[1] == u then cb[2](u, true) end end end
+end
+-- CA's own order to the selection, a right-click in game (command mode's Vanilla style): each selected unit walks, and
+-- the order counts toward its 0.5 s gap as a controller's does (UC above), by the same clock
+function H.ca_order(x, z)
+	for u in pairs(H.sel) do
+		rec("ca_order", u._id, x, z)
+		u._ordered, u._prior_walk = {x, z}, true
+		u._order_t = H.net and H.model_ms() / 1000 or H.T
+	end
 end
 
 -- UI: components with ids and children; SetVisible refuses a non-boolean the way the game should
@@ -313,6 +389,7 @@ function COMP:Resize(w, h)
 end
 function COMP:SetImageRotation(i, a) rec("rot", self.id, i, a) self.rot = self.rot or {} self.rot[i] = a end
 function COMP:SetInteractive(b) self.interactive = b end
+function COMP:IsInteractive() return self.interactive ~= false end
 function COMP:SetContextObject(o) self.context = o end
 function COMP:GetContextObjectId(kind) if kind == "CcoBattleUnit" then return self.cco end end
 function COMP:MoveTo(x, y) self.x, self.y = x, y end
@@ -326,7 +403,13 @@ function COMP:Adopt(c, i)
 	c.parent = self
 	if i and i >= 0 then table.insert(self.kids, math.min(i + 1, #self.kids + 1), c) else self.kids[#self.kids + 1] = c end
 end
-function COMP:SimulateLClick() rec("click", self.id) end
+-- a unit card selects its unit, as a player's click on it does, on this machine only
+function COMP:SimulateLClick()
+	rec("click", self.id)
+	if self.parent and self.parent.id == "cards_panel" then
+		for _, u in ipairs(H.units) do if tostring(u._id) == self.id then H.select(u) end end
+	end
+end
 function COMP:GetCurrentStateImageOpacity(i) return (self.opacity or {})[i] or 255 end
 function COMP:SetCurrentStateImageOpacity(i, o)
 	if type(i) ~= "number" or type(o) ~= "number" then error("SetCurrentStateImageOpacity(" .. tostring(i) .. ", " .. tostring(o) .. ")") end
@@ -353,7 +436,14 @@ core = {get_env = function() return H.env end, get_ui_root = function() return H
 	end,
 	remove_listener = function(_, name)
 		for i = #H.listeners, 1, -1 do if H.listeners[i].name == name then table.remove(H.listeners, i) end end
-	end}
+	end,
+	-- the player's preferences (H.prefs), and CA's registry (H.svr), which outlives the battle and the game: a name never
+	-- saved reads "" (measured 2026-10-23 on the svr, the registry's sibling)
+	get_integer_preference = function(_, name) return H.prefs[name] end,
+	set_integer_preference = function(_, name, v) rec("pref", name, v) H.prefs[name] = v end,
+	svr_save_registry_string = function(_, name, v) H.svr[name] = v end,
+	svr_load_registry_string = function(_, name) return H.svr[name] or "" end}
+H.svr = {}
 H.listeners = {}
 -- core's event: each listener for it whose condition holds runs, and one not persistent goes after its first run
 function H.trigger(event, context)
@@ -366,13 +456,18 @@ function H.trigger(event, context)
 end
 function out(msg) H.log[#H.log + 1] = tostring(msg) end
 -- CA's network player list (platform.lua M.players reads it through CcoBattleRoot): H.players = {{id, name, me, spectating,
--- passive, online}, ...}, or nil for a list that does not read (every expression answers nil). The fields as CA names them
+-- passive, online, ai}, ...}, or nil for a list that does not read (every expression answers nil). The fields as CA names
+-- them; an entry's army reads human unless ai (a lobby's AI slot, measured 2026-10-23), and a spectator or a partner with
+-- units given to them has none (nil)
 local function player_list(expr)
 	if not H.players then return nil end
 	if expr == "MultiplayerRootContext.PlayerList.Size" then return #H.players end
-	local i, field = expr:match("^MultiplayerRootContext%.PlayerList%.At%((%d+)%)%.(%a+)$")
+	local i, field = expr:match("^MultiplayerRootContext%.PlayerList%.At%((%d+)%)%.([%a%.]+)$")
 	local p = i and H.players[tonumber(i) + 1]
 	if not p then return nil end
+	if field == "CurrentGameArmyContext.IsHuman" then
+		if p.ai then return false elseif p.spectating or p.passive then return nil else return true end
+	end
 	return ({Id = p.id, Name = p.name, IsLocalPlayer = p.me == true, IsSpectating = p.spectating == true,
 		IsPassiveParticipant = p.passive == true, IsOnline = p.online ~= false})[field]
 end
@@ -391,6 +486,15 @@ common = {get_context_value = function(kind, id, expr)
 		for u in pairs(H.sel) do if tostring(u:unique_ui_id()) == id then return true end end
 		return false
 	end
+	-- the phases on a unit, by key (H.cast), and the army abilities its army owns (H.owned: every stat ability unless a test
+	-- says otherwise)
+	if kind == "CcoBattleUnit" and expr == "ActiveEffectList(false).JoinString(PhaseRecordContext.Key, \",\")" then
+		local u, t = unit_by_id(id), {}
+		for k in pairs(u and u._phases or {}) do t[#t + 1] = k end
+		table.sort(t)
+		return table.concat(t, ",")
+	end
+	if kind == "CcoBattleUnit" and expr == "ArmyContext.ArmyAbilitiesList(false).JoinString(RecordKey, \",\")" then return H.owned end
 	local val = ((H.cco_ids or {})[id] or H.cco)[expr] -- H.cco_ids[id]: another unit's context, by its ui id
 	if type(val) == "function" then return val() end
 	return val
@@ -547,10 +651,12 @@ local function fake_platform()
 	-- the HELLO handshake: platform.lua's own M.handshake, the lines the real platform runs, every 100 model ms. H.heard is
 	-- the block's mask, set as the carrier cave sets it, from M.uncarrier's HELLO (tools/third_person_lockstep.lua deliver;
 	-- the cave selftest ties M.uncarrier to the cave). Unrouted, this machine's own HELLO lands on it alone.
-	-- H.hello_refusals: that many pushes are refused first (a push the queue did not take); H.hello_version: another build's
+	-- H.hello_refusals: that many pushes are refused first (a push the queue did not take); H.hello_version: another build's.
+	-- A spectator's every push is refused, as the exe refuses it: battle +0x3b0, what is_spectator() returns, set
 	if modded then
 		local M = H.platform_module()
 		local function hello(slot)
+			if H.spectator then rec("hello_refused", slot) return false end
 			if (H.hello_refusals or 0) > 0 then H.hello_refusals = H.hello_refusals - 1 rec("hello_refused", slot) return false end
 			local hi, lo = M.carrier("HELLO", slot)
 			lo = lo + ((H.hello_version or M.HELLO_VERSION) - M.HELLO_VERSION) * 256
@@ -576,15 +682,16 @@ function H.step(seconds)
 	local fps = H.fps or 60
 	for _ = 1, math.max(1, math.floor(seconds * fps + 0.5)) do
 		H.T = H.T + 1 / fps
-		if not H.paused then H.game_ms = H.game_ms + 1000 / fps end
+		if not H.paused then H.game_ms = H.game_ms + 1000 / fps * H.speed end
 		-- the model's timers, each once a model time it falls due (a lockstep machine steps a tick in several frames)
 		if not H.paused then
 			local now = H.model_ms()
 			for _, t in ipairs({unpack(H.model_timers)}) do if now >= t.at then t.at = now + t.every t.fn() end end
+			land_casts()
 		end
 		if not H.paused then for _, u in ipairs(H.units) do if u._prior_walk then
-			u._z = u._z + 1 / fps
-			for _, m in ipairs(u._models) do m.z = m.z + 1 / fps end
+			u._z = u._z + H.speed / fps
+			for _, m in ipairs(u._models) do m.z = m.z + H.speed / fps end
 		end end end
 		local due = {}
 		for id, t in pairs(H.timers) do if H.T >= t.at - 1e-9 then due[#due + 1] = id end end
@@ -612,18 +719,30 @@ function H.up(name) H.keys[code(name)] = nil end
 function H.tap(name) H.down(name) H.step(1 / 60) H.up(name) H.step(1 / 60) end
 
 -- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, spectator, features, problems,
--- players (CA's network player list, player_list; a multiplayer battle's default is this machine and one other)
+-- players (CA's network player list, player_list; a multiplayer battle's default is this machine and one other),
+-- speed_lag, unit_flags, keep_svr
 function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
 	H.T, H.calls, H.timers, H.keys, H.focus, H.mouse, H.wheel_notches = 100, {}, {}, {}, true, {0, 0}, 0
 	H.log, H.phase, H.selection_cbs, H.selected, H.sel, H.listeners = {}, {}, {}, nil, {}, {}
 	H.model_timers, H.heard = {}, {}
+	H.casts, H.phases, H.drop_casts = {}, {}, 0
+	-- the army abilities this army owns: every stat ability (stat_rows gives one to every CA faction), or opts.owned
+	local T, owned = assert(real_loadfile(file("script/derpy_tp/stats")))(), {}
+	for _, s in ipairs(T.order) do for _, step in ipairs(T.steps(s)) do owned[#owned + 1] = T.ability(s, step) end end
+	H.owned = opts.owned or table.concat(owned, ",")
 	H.units, H.enemies, H.allies, next_id = {}, {}, {}, 0 -- ids restart, so the second unit's men are 2001, 2002...
 	H.mp, H.replay, H.spectator = opts.mp or false, opts.replay or false, opts.spectator
+	H.local_army = opts.local_army or 1
 	H.players, H.loc = opts.players or opts.mp and {{id = "client_a", name = "Player A", me = true}, {id = "client_b", name = "Player B"}} or nil, {}
 	H.screen, H.tick_ms = opts.screen or {1920, 1080}, opts.tick_ms
 	H.game_ms, H.paused, H.block_loads, H.in_oneshot, H.anim_hold, H.report_ms = 0, false, false, false, false, 0
+	H.speed = 1 -- bm:modify_battle_speed
+	H.seen, H.asked, H.speed_lag = 1, {}, opts.speed_lag -- bm.battle:current_battle_speed
+	-- the player's 3D flags on; the registry kept across H.fresh only when a test restarts a battle (opts.keep_svr)
+	H.prefs = {ui_unit_flags = opts.unit_flags or 2}
+	if not opts.keep_svr then H.svr = {} end
 	H.features = opts.features or {input = true, anim = true, wheel = true}
 	H.problems = opts.problems
 	H.root = comp("root")
@@ -651,7 +770,18 @@ function H.fresh(opts)
 	for _, o in ipairs(opts.units or {{general = true}}) do H.unit(o) end
 	for _, o in ipairs(opts.enemies or {}) do o.enemy = true H.unit(o) end
 	for _, o in ipairs(opts.allies or {}) do o.ally = true H.unit(o) end
-	local cards = comp("cards_panel", comp("hud_battle", H.root))
+	local hud = comp("hud_battle", H.root)
+	local cards = comp("cards_panel", hud)
+	-- CA's holders anchored 1x1 on the screen's centre pixel, interactive (measured 2026-10-23): the parked cursor is on them
+	for _, id in ipairs({"spawn_zone_icons_parent", "reinforcement_icons_parent"}) do
+		local c = comp(id, hud) c.w, c.h, c.interactive = 1, 1, true
+	end
+	-- CA's bottom band, measured at 1600x900 on 2026-10-23 and put on this 1920x1080 screen: the orders and cards, the
+	-- winds (the porthole, its highest part, is the tests' own: several build one with their buttons). Command mode's
+	-- Vanilla style stands the pack's panel on it (hud.lua H.place)
+	for _, b in ipairs({{"battle_orders", 510, 852, 900, 228}, {"winds_of_magic", 1684, 835, 236, 245}}) do
+		local c = comp(b[1], hud) c.x, c.y, c.w, c.h = b[2], b[3], b[4], b[5]
+	end
 	for _, u in ipairs(H.units) do comp(tostring(u._id), cards).cco = "cco_" .. u._id end
 	H.P = fake_platform()
 	if real_loadfile(file("script/battle/mod/derpy_third_person")) then

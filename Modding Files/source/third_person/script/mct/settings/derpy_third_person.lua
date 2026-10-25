@@ -33,11 +33,19 @@ local function checkbox(section, key, text, tooltip, default)
 end
 
 m:add_new_section("keys", "Keys")
+-- the pairs that may share one key (keys.lua K.shares): each one's tooltip names the other
+local partner = {}
+for a, b in pairs(K.shares) do partner[a], partner[b] = b, a end
 for _, action in ipairs(K.order) do
 	local o = m:add_new_option("key_" .. action, "dropdown")
 	o:set_text(K.labels[action])
-	o:set_tooltip_text("Default: " .. K.defaults[action] .. ". A key already used by an action higher in this list "
-		.. "is not taken twice: this action goes back to its default.")
+	local tip = "Default: " .. K.defaults[action] .. ". A key already used by an action higher in this list "
+		.. "is not taken twice: this action goes back to its default."
+	if partner[action] then
+		tip = tip .. ' The one exception: it shares its key with "' .. K.labels[partner[action]]
+			.. '", as the two never work at the same time.'
+	end
+	o:set_tooltip_text(tip)
 	local list = {}
 	for i, name in ipairs(K.names) do list[i] = {key = name, text = name, tt = "", is_default = name == K.defaults[action]} end
 	o:add_dropdown_values(list)
@@ -77,8 +85,11 @@ slider("combat", "combat_charge_cooldown", "Time between charge attacks",
 	"Tenths of a second between two charge attacks.", 100, 0, 600)
 slider("combat", "combat_jump_cooldown", "Time between jump attacks",
 	"Tenths of a second between two jump attacks.", 100, 5, 300)
-slider("combat", "combat_reload", "Reload time",
-	"Percent of the unit's own reload when you shoot with one man. 100 is the game's time.", 100, 25, 300)
+slider("combat", "combat_reload", "Reload time (one man)",
+	"How long the one man you play takes to reload, as a percent of the game's time: lower is faster. 25 reloads in a "
+	.. 'quarter of the time, 300 takes three times as long. Only with "Play one man of a regiment" on, for a man who '
+	.. "shoots alone: a whole regiment, a hero, a monster with a crew such as a stegadon, and artillery reload at the "
+	.. "game's own speed.", 100, 25, 300)
 slider("combat", "combat_spread", "Volley scatter",
 	"Tenths of a metre each shot of a several-shot volley lands from your aim. 0 sends them all to one point.", 15, 0, 50)
 checkbox("combat", "combat_one_man", "Play one man of a regiment",
@@ -103,6 +114,49 @@ checkbox("display", "display_guide_hold", "Hold to show enemies and allies",
 checkbox("display", "display_guide_banners", "Unit banners with the markers",
 	"On, the game's own banners come back over every unit while the markers show: what each unit is, its side, its "
 	.. "health and morale. The health bars step aside meanwhile. Off, the key shows the markers alone.", true)
+
+m:add_new_section("command", "Command mode")
+local style = m:add_new_option("command_style", "dropdown")
+style:set_text("Command style")
+style:set_tooltip_text("Vanilla: the game's own controls, the camera on you. Right-click and drag to order, click to "
+	.. "select, the number keys pick units, a middle click frees the cursor. Bannerlord: the number keys pick groups, clicks "
+	.. "and F keys give the orders.")
+style:add_dropdown_values({{key = "vanilla", text = "Vanilla", tt = "", is_default = true},
+	{key = "bannerlord", text = "Bannerlord", tt = "", is_default = false}})
+style:set_assigned_section("command")
+local speed = m:add_new_option("command_speed", "dropdown")
+speed:set_text("Battle speed in command mode")
+speed:set_tooltip_text("How fast the battle runs while you give orders. Play your general or a hero and press the "
+	.. "command key (Q unless changed under Keys). Multiplayer battles keep their speed.")
+speed:add_dropdown_values({{key = "normal", text = "Normal", tt = "", is_default = false},
+	{key = "half", text = "Half", tt = "", is_default = false}, {key = "quarter", text = "Quarter", tt = "", is_default = true},
+	{key = "paused", text = "Paused", tt = "", is_default = false}})
+speed:set_assigned_section("command")
+slider("command", "command_distance", "Command view distance",
+	"Metres behind you the camera moves out to while you give orders. 0 keeps the view as it is.", 20, 0, 40)
+checkbox("command", "command_any_unit", "Any unit can command",
+	"Off, only your general and heroes can give orders in command mode. On, any unit you play can.", false)
+
+-- one dropdown a stat, its steps from script/derpy_tp/stats, the list the battle script and the build read too
+local stats = loadfile("/script/derpy_tp/stats")
+local T = stats and stats()
+if T then
+	m:add_new_section("stats", "Unit stats")
+	for _, stat in ipairs(T.order) do
+		local s = T.stats[stat]
+		local o = m:add_new_option("stat_" .. stat, "dropdown")
+		o:set_text(s.label)
+		o:set_tooltip_text("Raises or lowers the " .. s.label:lower() .. " of the unit you play"
+			.. (s.points and " by the points shown" or " by a percent of its own") .. ", for as long as you play it. It shows "
+			.. "in the unit's list of effects. Not in multiplayer.")
+		local list = {{key = "none", text = "None", tt = "", is_default = true}}
+		for _, step in ipairs(T.steps(stat)) do
+			list[#list + 1] = {key = T.step_key(step), text = T.text(stat, step), tt = "", is_default = false}
+		end
+		o:add_dropdown_values(list)
+		o:set_assigned_section("stats")
+	end
+end
 
 m:add_new_section("debug", "Debug")
 checkbox("debug", "debug_log", "Write every order to the script log", "For bug reports. Off by default.", false)

@@ -33,12 +33,13 @@ local ok, err = pcall(function()
 		bm:register_phase_change_callback("Deployed", once)
 	end
 	E.K = load("keys")
+	E.T = load("stats")
 	E.settings = load("settings") -- read again at every toggle, but loaded only here
-	E.S = E.settings(get_mct and get_mct(), E.K)
+	E.S = E.settings(get_mct and get_mct(), E.K, E.T)
 	-- in battle MCT reads its saved values after every mod script has run, so the read above has its defaults: a rebound
 	-- toggle only worked after one F2 (a player, 2026-10-21). MctInitialized is MCT saying the values are in
 	core:remove_listener("derpy_tp_mct")
-	core:add_listener("derpy_tp_mct", "MctInitialized", true, function() E.S = E.settings(get_mct(), E.K) end, false)
+	core:add_listener("derpy_tp_mct", "MctInitialized", true, function() E.S = E.settings(get_mct(), E.K, E.T) end, false)
 	local mr = _G.memreader_plus
 	if not mr then
 		when_shown(function() E.say("derpy_tp_needs_memreader") end)
@@ -66,6 +67,8 @@ local ok, err = pcall(function()
 	E.combat = load("combat")(E)
 	E.abilities = load("abilities")(E)
 	E.hud = load("hud")(E)
+	E.command = load("command")(E)
+	E.buffs = load("buffs")(E)
 	E.main = load("main")(E)
 end)
 if not ok then out("derpy_tp: failed to load: " .. tostring(err)) end

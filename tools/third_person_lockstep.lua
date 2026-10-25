@@ -28,15 +28,24 @@ local TICK = 0.1 -- s: the battle's model tick
 local ACTIONS = {move = true, halt = true, follow = true, play = true}
 
 -- battle calls outside the platform that the engine RECORDS (the feasibility record's Replay table: trigger_projectile_launch
--- and set_current_ammo_unary replayed at the same tick), so in net mode they are queued like a uc: call: kind "bm" or "unit"
-local BM_QUEUED = {trigger_projectile_launch = true}
-local UNIT_QUEUED = {set_current_ammo_unary = true}
+-- and set_current_ammo_unary replayed at the same tick), so in net mode they are queued like a uc: call: kind "bm", "unit"
+-- or "cam". The camera and UI ones too, read off the exe on 2026-10-24 (build 6acec6f4): each binding pushes a BCQ_
+-- command and its handler runs on every machine with no sender in it, so the other players' camera and UI took them (the
+-- Workshop report of 2026-10-24: "when me or my friend uses third person ... the other ... cannot do anything anymore").
+-- enable_cinematic_ui is applied on the caller at once as well (BM_LOCAL); enable_functionality is queued unless its
+-- third argument bypasses the queue, as CA's docs say; change_height_range and select_in_ui only push
+local BM_QUEUED = {trigger_projectile_launch = true, enable_cinematic_ui = true}
+local BM_LOCAL = {enable_cinematic_ui = true}
+local UNIT_QUEUED = {set_current_ammo_unary = true, select_in_ui = true}
+local CAM_QUEUED = {change_height_range = function() return true end,
+	enable_functionality = function(_, _, _, bypass) return bypass ~= true end} -- (camera, name, on, bypass)
 
 -- the battle writes the fake records (H.calls), compared machine against machine each tick. Every uc: call is one too.
 -- Not compared, because they are local to the player's own machine: the camera (terrain_floor, camera_*), the cursor
 -- (look_begin, hide_cursor), the UI (vis, img, text, resize, rot, adopt, click, select_in_ui, clear_selection,
 -- disable_orders, disable_shortcut, cinematic_ui, tooltips, banners, subtitle, hide_subtitles, cco*), and sound
--- (sound, taunt, voices_off)
+-- (sound, taunt, voices_off). The queued ones among them reach every machine all the same (CAM_QUEUED above): a test
+-- reads the other machine's records for them (ls_one_players_third_person_leaves_the_others_camera_and_ui_alone)
 local COMPARED = {steer = true, hold = true, face = true, play = true, guard = true, disarm = true, arm = true,
 	place = true, gate = true, launch = true, set_ammo = true, slide = true, dropped_order = true}
 
@@ -161,6 +170,7 @@ local function target(c)
 		if type(a) == "table" and a.unit and not find_unit(a.unit) then return nil end
 	end
 	if c.kind == "bm" then return bm end
+	if c.kind == "cam" then return H.cam end
 	local u = find_unit(c.model_id)
 	return u and unit_alive(u) and u or nil
 end
@@ -190,6 +200,7 @@ local function apply(c, x)
 		local fn, self
 		if c.kind == "uc" then self = real_unitcontroller(x) fn = self[f.method]
 		elseif c.kind == "unit" then self, fn = x, UNIT_ORIG[f.method]
+		elseif c.kind == "cam" then self, fn = x, H.ls.cam_orig[f.method]
 		else self, fn = x, H.ls.bm_orig[f.method] end
 		if not pcall(fn, self, unpack(args, 1, f.n)) then return c.kind .. "_refused", f end
 	end
@@ -287,14 +298,18 @@ function H0.send(kind, model_id, fields)
 		fields = kind == "carrier" and M.uncarrier(fields.hi, fields.lo) or deep(fields)}
 end
 
--- in net mode a unit controller's every call is queued with its method and arguments, and applied at delivery
-function create_unitcontroller(u)
-	if not routed() then return real_unitcontroller(u) end
-	return setmetatable({_u = u}, {__index = function(_, method)
+-- in net mode a unit controller's every call is queued with its method and arguments, once for each of its units (command
+-- mode orders several at once), and applied at delivery
+function create_unitcontroller(...)
+	if not routed() then return real_unitcontroller(...) end
+	local us = {...}
+	return setmetatable({}, {__index = function(_, method)
 		return function(_, ...)
-			local f = wire_args(...)
-			f.method = method
-			H.send("uc", u._id, f)
+			for _, u in ipairs(us) do
+				local f = wire_args(...)
+				f.method = method
+				H.send("uc", u._id, f)
+			end
 		end
 	end})
 end
@@ -391,7 +406,8 @@ end
 -- deployed = true, hello_refusals = 0, hello_version, spectator, passive}, ...}, armies = {{<H.unit opts>, ...}, ...} (one
 -- battle, the same on every machine, each army its own alliance), delay_ticks, park_ticks (deliver), allow (default
 -- L.ALLOW), gate = false (every machine's gate goes in and changes nothing), players = "local" (each machine's player
--- list names it alone), drop (a function of a queued command: the network loses it before any machine runs it, kept in
+-- list names it alone), online = "self" (each machine's list reads every other player offline, CA's IsOnline), ai = n
+-- (every machine's list also holds n AI slots, as a lobby's does: id "0", "CPU <k>", their army not human), drop (a function of a queued command: the network loses it before any machine runs it, kept in
 -- w.lost), hello = false (the world starts before the HELLO handshake completes; by default the first machine with the
 -- mod asks for it, as its player's F2 press would, and the others answer).
 -- Every machine is a player in every machine's list (CA's network player list, platform.lua M.players), client id
@@ -417,9 +433,11 @@ function L.new(opts)
 		local t = {}
 		for _, o in ipairs(specs) do
 			if opts.players ~= "local" or o == s then
-				t[#t + 1] = {id = "client_" .. o.name, name = "Player " .. o.name, me = o == s, spectating = o.spectator, passive = o.passive}
+				t[#t + 1] = {id = "client_" .. o.name, name = "Player " .. o.name, me = o == s, spectating = o.spectator, passive = o.passive,
+					online = opts.online ~= "self" or o == s}
 			end
 		end
+		for k = 1, opts.ai or 0 do t[#t + 1] = {id = "0", name = "CPU " .. k, ai = true, online = false} end
 		return t
 	end
 	for _, s in ipairs(specs) do
@@ -477,9 +495,20 @@ function L.new(opts)
 				mc.bm_orig[method] = bm[method]
 				bm[method] = function(_, ...)
 					if not routed() then return mc.bm_orig[method](bm, ...) end
+					if BM_LOCAL[method] then mc.bm_orig[method](bm, ...) end
 					local f2 = wire_args(...)
 					f2.method = method
 					H.send("bm", nil, f2)
+				end
+			end
+			mc.cam_orig = {}
+			for method, queued in next, CAM_QUEUED do
+				mc.cam_orig[method] = H.cam[method]
+				H.cam[method] = function(c, ...)
+					if not (routed() and queued(c, ...)) then return mc.cam_orig[method](c, ...) end
+					local f2 = wire_args(...)
+					f2.method = method
+					H.send("cam", nil, f2)
 				end
 			end
 			bm.local_alliance = function() return mc.army end

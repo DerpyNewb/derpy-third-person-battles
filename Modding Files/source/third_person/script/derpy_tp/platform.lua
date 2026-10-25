@@ -343,7 +343,7 @@ local CARRIER = {
 	0xff, 0xe0, -- jmp rax
 	0x44, 0x89, 0xd9, -- mov ecx, r11d
 	0xc1, 0xe9, 0x08, -- shr ecx, 8
-	0x80, 0xf9, 0x02, -- cmp cl, 2
+	0x80, 0xf9, 0x03, -- cmp cl, 3
 	0x75, 0x19, -- jne 0x25c
 	0x44, 0x89, 0xd9, -- mov ecx, r11d
 	0x81, 0xe1, 0xff, 0x00, 0x00, 0x00, -- and ecx, 0xff
@@ -397,8 +397,10 @@ local CARRIER_MAGIC = 0xD7
 -- HELLO's 16 bits are the handshake's protocol version (15-8) and the sender's player slot (7-0), one bit of the block's
 -- 32-bit mask (M.handshake). A HELLO of another version is not counted, here or in the cave (HELLO_VERSION in
 -- tools/third_person_cave.py, whose agreement run ties the two): raise it when two builds of the pack would disagree.
--- 2 since 2026-10-22: version 1's slot was an army's place, and a machine of each would read one bit as two things
-local HELLO_VERSION, HELLO_SLOTS = 2, 32
+-- 2 since 2026-10-22: version 1's slot was an army's place, and a machine of each would read one bit as two things.
+-- 3 since 2026-10-24: version 2 waits for a watcher, which this one does not (Ruling 34), so with a watcher in the
+-- battle a machine of each would put the gate in at different ticks
+local HELLO_VERSION, HELLO_SLOTS = 3, 32
 M.HELLO_VERSION = HELLO_VERSION
 -- how long a handshake under way may take before the player is told and the missing players logged, in model ms. From a
 -- press it takes this machine's next callback, one queue delay, the peer's callback, a second delay and one more callback:
@@ -542,43 +544,57 @@ function M.net_rules(P, out, key)
 end
 
 -- The battle's network players, read off CA's player list (CcoMultiplayerRoot.PlayerList, through the CCO global function
--- MultiplayerRootContext; CA's own battle UI reads it there, mp_team_list.twui.xml): {id, name, me, watching} for each one
--- online, in the list's order, or nil and why it could not be read. id is CA's "unique mp client id"; watching, a spectator
--- or a partner given units to play (IsPassiveParticipant, CA: "spectating but can receive units from active players to
--- join in"). Pure but for common.get_context_value, which the harness answers by expression
+-- MultiplayerRootContext; CA's own battle UI reads it there, mp_team_list.twui.xml): {id, name, me, watching, online} for
+-- each one, in the list's order, or nil and why it could not be read. id is CA's "unique mp client id"; watching, a
+-- spectator or a partner given units to play (IsPassiveParticipant, CA: "spectating but can receive units from active
+-- players to join in"). An entry reading offline counts as CA's team list counts it, which never reads IsOnline: the build
+-- that left those out refused every battle with "it names 1 player" (the report of 2026-10-23, Ruling 31), and one
+-- machine leaving out a player the others count would give its players other bits. Measured in a multiplayer battle
+-- hosted alone (2026-10-23): every entry reads offline, this machine's too, and a lobby's AI slot is an entry ("CPU 1", id
+-- "0"). An AI slot is no machine and says no HELLO, so an entry whose army reads not human (CurrentGameArmyContext.IsHuman
+-- false) is left out and counted in ai; one with no army, a spectator or a partner with units, stays. online is kept for
+-- the log, as is humans, CA's count of the humans in the battle (GetHumanNetworkPlayersParticipatingInAllianceList), read
+-- apart so it spoils nothing. Pure but for common.get_context_value, which the harness answers by expression
 local PLAYERS = "MultiplayerRootContext.PlayerList"
 function M.players()
 	local function v(expr) return common.get_context_value("CcoBattleRoot", "", PLAYERS .. expr) end
 	local ok, res = pcall(function()
 		local n = v(".Size")
 		if type(n) ~= "number" then return "its size read " .. tostring(n) end
-		local t = {}
+		local t = {ai = 0}
 		for i = 0, n - 1 do
 			local at = ".At(" .. i .. ")."
-			local id = v(at .. "Id")
-			if type(id) ~= "string" or id == "" then return "player " .. i .. "'s id read " .. tostring(id) end
-			if v(at .. "IsOnline") ~= false then
+			if v(at .. "CurrentGameArmyContext.IsHuman") == false then
+				t.ai = t.ai + 1
+			else
+				local id = v(at .. "Id")
+				if type(id) ~= "string" or id == "" then return "player " .. i .. "'s id read " .. tostring(id) end
 				t[#t + 1] = {id = id, name = tostring(v(at .. "Name") or ""), me = v(at .. "IsLocalPlayer") == true,
-					watching = v(at .. "IsSpectating") == true or v(at .. "IsPassiveParticipant") == true}
+					watching = v(at .. "IsSpectating") == true or v(at .. "IsPassiveParticipant") == true,
+					online = v(at .. "IsOnline") ~= false}
 			end
 		end
 		return t
 	end)
 	if not ok then return nil, "it threw: " .. tostring(res) end
 	if type(res) == "string" then return nil, res end
+	local got, humans = pcall(common.get_context_value, "CcoBattleRoot", "", "GetHumanNetworkPlayersParticipatingInAllianceList.Size")
+	res.humans = got and humans or nil
 	return res
 end
 
--- The HELLO handshake (MP_FEASIBILITY_20261021_THIRD_PERSON.md, Rulings 25, 26 and 30), pure (no mr), so the harness's
--- fake platform runs these same lines. Net play and the order gate wait until every machine in the battle has said HELLO:
--- a machine without the pack, memreader Plus or this build never does, and one machine's gate and commands alone desync
--- the battle. Every player counts, a spectator and a partner watching with units given to them too, since each one's
--- machine runs the battle (Ruling 30: until 2026-10-22 human armies were counted, so a battle against the AI never started,
--- nor one a partner joined on the player's side). Nothing is sent until someone wants to play: a machine says HELLO once
--- this player has pressed F2 (P.net_asked, main.lua) or another player's HELLO has landed, and only once its copy table is
--- built (P.net_ready), so a HELLO that executed also says that machine's table is there; a lobby where nobody presses F2
--- carries nothing. The carrier cave sets the player's bit on every machine at one tick, and this, run each model tick on
--- every machine (a replay too, Ruling 17), puts the gate in once every player's bit is set: inferred to be the same tick
+-- The HELLO handshake (MP_FEASIBILITY_20261021_THIRD_PERSON.md, Rulings 25, 26, 30, 31 and 34), pure (no mr), so the
+-- harness's fake platform runs these same lines. Net play and the order gate wait until every player who plays has said
+-- HELLO: a machine without the pack, memreader Plus or this build never does, and one machine's gate and commands alone
+-- desync the battle. A player watching (a spectator, or a partner who could be given units) is not waited for and says
+-- nothing: the exe drops every queued push from a machine whose battle +0x3b0, what is_spectator() returns, is set, so a
+-- watcher's HELLO never went and a battle with one never started (Ruling 34, a report of 2026-10-24). A watcher's machine
+-- still runs this and puts the gate in at the players' tick; one without the pack is not caught, and desyncs. Nothing is
+-- sent until someone wants to play: a machine says HELLO once this player has pressed F2 (P.net_asked, main.lua) or
+-- another player's HELLO has landed, and only once its copy table is built (P.net_ready), so a HELLO that executed also
+-- says that machine's table is there; a lobby where nobody presses F2 carries nothing. The carrier cave sets the player's
+-- bit on every machine at one tick, and this, run each model tick on every machine (a replay too, Ruling 17), puts the
+-- gate in once every playing player's bit is set: inferred to be the same tick
 -- everywhere, since a model callback's place in the tick is untraced (BATTLE_ENGINE_RE.md section 14).
 -- hello(slot): push one HELLO, whether it went (one that did not goes again next tick); heard(slot): its bit is set;
 -- players(): M.players. A player's slot is their place in the list sorted by client id, so every machine that sees the same
@@ -586,6 +602,7 @@ end
 -- under way here P.net_late is set, and P.net_why says why, for main.lua to tell a waiting player: "players", the list
 -- cannot be used (P.net_problem); "self", this machine's own HELLO has not landed; "missing", another's has not
 -- (P.net_missing, their names). The log names players by slot only: a player posts it, and the names are their friends'.
+-- A list it cannot use is logged as CA listed it too, each slot's flags and CA's count of the humans in the battle.
 -- Returns the model callback; a throw in it is logged, never let into CA's timer list
 function M.handshake(P, hello, heard, once, players)
 	local sent, since
@@ -594,12 +611,13 @@ function M.handshake(P, hello, heard, once, players)
 	local function step()
 		if P.net_play then return end
 		local list, why = players()
-		local mine, seen, all, watching = nil, {}, {}, {}
+		local mine, seen, all, watching, need, offline = nil, {}, {}, {}, {}, {}
 		if list then
 			table.sort(list, function(a, b) return a.id < b.id end)
 			for i, p in ipairs(list) do
 				all[i] = i - 1
-				if p.watching then watching[#watching + 1] = i - 1 end
+				if p.watching then watching[#watching + 1] = i - 1 else need[#need + 1] = i - 1 end
+				if p.online == false then offline[#offline + 1] = i - 1 end
 				if seen[p.id] then why = "two players share one id" end
 				seen[p.id] = true
 				if p.me then
@@ -611,25 +629,26 @@ function M.handshake(P, hello, heard, once, players)
 			-- where starting alone is not
 			why = why or #list < 2 and "it names " .. #list .. " player" .. (#list == 1 and "" or "s")
 				or #list > HELLO_SLOTS and "it names " .. #list .. " players, past the HELLO mask"
-				or not mine and "this machine is not in it" or nil
+				or not mine and "this machine is not in it" or #need == 0 and "everyone in it is watching" or nil
 		end
 		P.net_me = not why and list[mine + 1] or nil
 		local missing, other = {}, false
 		if not why then
-			for _, s in ipairs(all) do
+			for _, s in ipairs(need) do
 				if not heard(s) then missing[#missing + 1] = s elseif s ~= mine then other = true end
 			end
 		end
 		local of = list_of(all) .. " of " .. #all
 		if P.net_ready and (P.net_asked or other) then
 			if not since and not why then
-				log("hello_list", "multiplayer: players " .. of .. ", this machine " .. mine .. ", watching " .. list_of(watching))
+				log("hello_list", "multiplayer: players " .. of .. ", this machine " .. mine .. ", watching " .. list_of(watching)
+					.. ", offline " .. list_of(offline) .. ", waits for " .. list_of(need))
 			end
 			since = since or bm:time_elapsed_ms()
 			-- not from a replay, which has its recorded HELLOs; one that cannot say whether it is one sends nothing
 			local ok, replay = pcall(function() return bm:is_replay() end)
 			if not ok then log("hello_replay", "multiplayer waits: is_replay threw: " .. tostring(replay)) end
-			if ok and not replay and not why and not sent then
+			if ok and not replay and not why and not sent and not P.net_me.watching then
 				local pushed, went = pcall(hello, mine)
 				sent = pushed and went or nil
 			end
@@ -639,10 +658,19 @@ function M.handshake(P, hello, heard, once, players)
 				if why then
 					P.net_why, P.net_problem = "players", why
 					log("hello_players", "multiplayer waits: the player list cannot be used: " .. why)
+					if list then
+						local slots = {}
+						for i, p in ipairs(list) do
+							slots[i] = "slot " .. (i - 1) .. (p.me and " this machine" or "") .. (p.watching and " watching" or "")
+								.. (p.online == false and " offline" or "")
+						end
+						log("hello_players_raw", "multiplayer: CA's list: " .. table.concat(slots, ", ") .. "; CA counts "
+							.. tostring(list.humans) .. " humans in the battle; AI slots left out: " .. tostring(list.ai))
+					end
 				else
 					log("hello_missing", "multiplayer waits: players " .. of .. ", no HELLO from " .. list_of(missing) .. " after "
 						.. HELLO_WAIT .. " model ms")
-					if not heard(mine) then
+					if not P.net_me.watching and not heard(mine) then
 						P.net_why = "self"
 						log("hello_self", "multiplayer waits: this machine's own HELLO, player " .. mine .. ", has not landed")
 					else

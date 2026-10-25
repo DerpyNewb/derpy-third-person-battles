@@ -2,8 +2,8 @@
 -- is absent or an option is missing. return function(mct, K) -> S.
 -- Two actions on one key: the later one falls back to its own default; when that default is taken too,
 -- the action stays unbound. Each case goes into S.conflicts, and main.lua logs it once. K.shares names the
--- pairs that may sit on one key (a click and a hold).
-return function(mct, K)
+-- pairs that may sit on one key (a click and a hold). T: stats.lua, whose steps S.stats holds by stat ("none" leaves one out).
+return function(mct, K, T)
 	local mod = mct and mct:get_mod_by_key("derpy_third_person")
 	local function get(key, default)
 		local o = mod and mod:get_option_by_key(key)
@@ -19,7 +19,7 @@ return function(mct, K)
 		if K.vk[name] == nil then name = K.defaults[action] end
 		if owner[name] and owner[name] ~= K.shares[action] then
 			local fallback = K.defaults[action]
-			local now = not owner[fallback] and fallback or nil
+			local now = (not owner[fallback] or owner[fallback] == K.shares[action]) and fallback or nil
 			S.conflicts[#S.conflicts + 1] = {action = action, key = name, taken_by = owner[name], now = now}
 			name = now
 		end
@@ -50,6 +50,16 @@ return function(mct, K)
 	S.bars_range = get("display_bars_range", 40)
 	S.guide_hold = get("display_guide_hold", true) == true
 	S.guide_banners = get("display_guide_banners", true) == true
+	S.command_speed = ({normal = 1, half = 0.5, quarter = 0.25, paused = 0})[get("command_speed", "quarter")] or 0.25
+	S.command_distance = get("command_distance", 20)
+	S.command_any_unit = get("command_any_unit", false) -- off: the general and heroes only
+	-- Vanilla: CA's own controls at the crosshair; Bannerlord: the 2026-10-22 build (the author, 2026-10-23)
+	S.command_style = get("command_style", "vanilla") == "bannerlord" and "bannerlord" or "vanilla"
 	S.debug = get("debug_log", false) == true
+	S.stats = {}
+	for _, stat in ipairs(T and T.order or {}) do
+		local chosen = get("stat_" .. stat, "none")
+		for _, step in ipairs(T.steps(stat)) do if T.step_key(step) == chosen then S.stats[stat] = step end end
+	end
 	return S
 end

@@ -31,10 +31,20 @@ return function(E)
 		return ok and type(r) == "number" and r > 0 and r or RANGE
 	end
 
-	-- the unit, enemy or friendly, nearest the camera's ray by angle, inside CONE and in front of the camera; never the
-	-- caster. By metres off the ray, a far unit in a screen corner won when nothing was near (seen in game 2026-10-14).
-	-- Past range m from the caster it is no target; far says one on the crosshair was (the author: "no enemy in range")
-	local function nearest_to_ray(enemy, range)
+	-- u is a unit ability key may land on, by the invalid target flags data.lua carries: lords and heroes only, or never
+	-- them (a player, 2026-10-23: Grimgor's You're Next! aimed at a regiment never landed and cooled down all the same).
+	-- ponytail: the other flags (flying, large, undead...) and a modded ability's are left to the engine, as before; no
+	-- context names them
+	local function may_target(key, u)
+		local t = E.D.targets and E.D.targets[key]
+		return not t or (u:unit_class() == "com") == (t == "com")
+	end
+
+	-- the unit, enemy or friendly, nearest the camera's ray by angle, inside CONE and in front of the camera, that ability
+	-- key may land on; never the caster. By metres off the ray, a far unit in a screen corner won when nothing was near
+	-- (seen in game 2026-10-14). Past range m from the caster it is no target; far says one on the crosshair was (the
+	-- author: "no enemy in range")
+	local function nearest_to_ray(enemy, range, key)
 		local R = E.rig
 		if not R.ex then return nil end -- before the camera's first frame
 		local ox, oz
@@ -52,7 +62,7 @@ return function(E)
 				local u = units:item(i)
 				-- an enemy the game will not let be attacked (hidden, arriving, leaving) is no target either
 				if u:unique_ui_id() ~= F.unit:unique_ui_id() and u:number_of_men_alive() > 0 and not u:is_routing()
-					and (not enemy or u:is_valid_target()) then
+					and (not enemy or u:is_valid_target()) and may_target(key, u) then
 					local p = u:position()
 					local px, py, pz = p:get_x() - R.ex, p:get_y() - R.ey, p:get_z() - R.ez
 					local t = px * dx + py * dy + pz * dz
@@ -98,17 +108,23 @@ return function(E)
 		local kind = kind_of(n, key)
 		local up = over and E.hud.upgraded(n)
 		local ok, err, via_context
+		local base = key
 		key = up or key
 		if kind == "ground" then
 			local x, _, z = E.combat.aim_point(reach(n))
 			if not x then return "no aim yet" end
-			ok, err = pcall(F.uc.perform_special_ability_ground, F.uc, key, v(x, bm:get_terrain_height(x, z), z))
+			-- along his view, a bearing in degrees as CA's orders take unit:bearing(): left out, it is 0, and every wind
+			-- spell went one way (players, 2026-10-23 and 24: "they seem to always go one direction")
+			ok, err = pcall(F.uc.perform_special_ability_ground, F.uc, key, v(x, bm:get_terrain_height(x, z), z),
+				math.deg(E.rig.yaw) % 360)
 		elseif kind == "enemy" then
-			local target, far = nearest_to_ray(true, reach(n))
+			local target, far = nearest_to_ray(true, reach(n), base)
 			if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key end
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, target)
-		elseif kind == "friend" then -- no ally on the crosshair: himself (the engine refuses it if he cannot be)
-			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, nearest_to_ray(false, reach(n)) or F.unit)
+		elseif kind == "friend" then -- no ally on the crosshair: himself, if it may land on him
+			local target = nearest_to_ray(false, reach(n), base) or may_target(base, F.unit) and F.unit
+			if not target then return "no ally near the crosshair for " .. key end
+			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, target)
 		elseif kind == "none" and up then -- CA's activation knows no overcast: the controller, on himself
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, F.unit)
 		elseif kind == "none" then -- no target at all: any unit order is refused, so activate it as CA's button does
@@ -188,7 +204,7 @@ return function(E)
 		local kind = kind_of(n, key)
 		if not AIMED[kind] and not E.hud.upgraded(n) then A.cancel() return A.cast(n) end
 		E.combat.stand_down(now) -- the author: "stop melee or shooting"
-		F.armed = {n = n, kind = kind, label_at = -1e9, range = reach(n)}
+		F.armed = {n = n, key = key, kind = kind, label_at = -1e9, range = reach(n)}
 		E.hud.armed(n)
 		E.hud.overcast(n, false)
 		E.hud.cost(cost(n, false))
@@ -225,9 +241,11 @@ return function(E)
 					or "No ground in sight"
 			else
 				local far
-				a.unit, far = nearest_to_ray(a.kind == "enemy", a.range)
+				a.unit, far = nearest_to_ray(a.kind == "enemy", a.range, a.key)
+				local lords = E.D.targets and E.D.targets[a.key] == "com"
 				s = a.unit and E.hud.unit_name(a.unit)
-					or (a.kind ~= "enemy" and "On himself") or (far and "Out of range") or "No enemy in sight"
+					or (a.kind ~= "enemy" and (may_target(a.key, F.unit) and "On himself" or "No ally in sight"))
+					or (far and "Out of range") or (lords and "No lord or hero in sight") or "No enemy in sight"
 			end
 			E.hud.target(s)
 		end

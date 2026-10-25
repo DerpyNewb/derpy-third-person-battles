@@ -6,7 +6,7 @@ slot on the wire, and Task 1b found CA's own per-man overrides on the same queue
 forged MOVE, hold a HALT, a standing turn CA's FOLLOW_FIRST_PERSON, a clip the play command as before, and the guard,
 disarm and arm a 32-bit carrier word in a forged RELOAD_TIME, read on every machine by a cave at `exe+2ecfcb7` that
 keeps a 16-entry guard table and points men at a fragment copy table built at "Deployed". A HELLO carrier from every
-player's machine, watchers too, gates it all (Rulings 25, 26 and 30), and none is sent until a player presses F2: the order gate goes
+playing player's machine gates it all, a watcher's machine sends none and is not waited for (Rulings 25, 26, 30 and 34), and none is sent until a player presses F2: the order gate goes
 in on every machine once the last one lands (one tick everywhere is inferred) and stays to the battle's end, and play
 waits for it. Nothing writes a man's fields outside the queue. It is tested
 offline only (the caves under an emulator, the sending rules in a two-machine simulation); no two machines have run it,
@@ -458,6 +458,94 @@ Ruling 8 (the open-ground re-send control) is the control row of "The overrides,
   desync, which is expected only when a player drops during the handshake. Unverified: the CCO read from Lua (a
   single-player battle can check it), and whether a campaign partner who is not in the battle is still listed (then
   refused and named, which is safe). A replay whose list is empty never puts the gate in (item 13).
+- **31.** (2026-10-23, from the second Workshop report: two players, both with the pack, shown `derpy_tp_mp_no_players`
+  in every battle - assisting, playing the AI's army, spectating, and the lobby's multiplayer battles. The host's log:
+  `the player list cannot be used: it names 1 player`.) Every entry in CA's list counts; an entry reading offline
+  (`CcoNetworkPlayer.IsOnline` false) is no longer left out. Inferred, not measured: the reader counted entries whose
+  `IsOnline` did not read false, and counted one, in lobby battles too, where CA's own team list (`mp_team_list.twui.xml`,
+  `PlayerList.Filter(IsSpectating == false)`) shows both players from the same list; no CA layout reads a network
+  player's `IsOnline` at all (the one `IsOnline` CA reads is `CcoGameCore`'s, "connected to an online service"), so the
+  filter was ours. Counting every entry is also the safe direction: a player listed but gone sends no HELLO, and the
+  handshake refuses and names them, where a machine that leaves out a player the others count gives its players other
+  bits. The reader keeps `online` for the log and reads CA's count of the humans in the battle
+  (`GetHumanNetworkPlayersParticipatingInAllianceList.Size`) apart, so a throw there spoils nothing. `hello_list` gains
+  `offline <slots>`, and a refused list logs `hello_players_raw`: each slot's flags (this machine, watching, offline)
+  and CA's count, no names. The lockstep simulation reproduced the report before the change (`online = "self"`: no
+  HELLO from either machine) and passes after (`ls_a_player_reading_offline_still_counts`). If wrong, the list really
+  names one player in those battles: still refused, and the raw line says so, with CA's count beside it to read instead.
+  The same report answers Ruling 30's open question only in part: CA's pre-battle vote
+  (`pre_battle_post_battle.twui.xml`: `SPECTATE`, `SUPPORT_ATTACKER` / `SUPPORT_DEFENDER`, `PLAY_AS_AI`,
+  `PLAY_AS_SELF`) has no "stay on the map", so a campaign partner is inferred to load into every battle. Checked live in
+  a single-player custom battle the same day (the source over the bridge, build `6acec6f4`): `M.players()` a list of 0,
+  `humans` 0, `PlayerList.Size` 0, `At(0).IsOnline` nil, nothing threw, F2 started at once and the log had no `hello_*`
+  line. Single player cannot show the multiplayer case; the next report's `hello_list` or `hello_players_raw` line will.
+  A third report the same day, on the published build, sent BOTH machines' logs of one co-op siege: one human army (17
+  units, alliance 1), the partner supporting it. The partner's machine ran the battle - the same armies, `Deployed` at
+  the same 3100 model ms, the same 20-fragment table on both - so a campaign partner is measured in the battle, and the
+  host's reader still counted one player. Only the host clicked CA's MP start button; the partner's log has nothing after
+  its fragment table, as it should when the host's list is refused before any HELLO.
+- **32.** (2026-10-23, live, one machine: a multiplayer battle hosted alone. Main menu, Multiplayer, lobbies, Host
+  Battle with a password, the open Team 2 slot removed, `button_add_ai`, `button_autogen` for the host's army, Ready;
+  `bm:is_multiplayer()` true. The deployment's start button is `finish_deployment > deployment_end_mp >
+  button_battle_start`; a hidden `deployment_end_sp` one is found first by a bare `find_uicomponent` and does nothing.)
+  Measured, settling Ruling 31's inference: every entry in `PlayerList` reads `IsOnline` false, this machine's too, and
+  so do `LocalPlayerContext.IsOnline` and `HostPlayerContext.IsOnline`, so the published reader left out this machine in
+  every battle. Also measured, a new fault: a lobby's AI slot is an entry - `Size` 2, the second `Name` "CPU 1", `Id`
+  "0", `SessionPlayerId` 32, `TeamId` 1 - and the build counting every entry waited for its HELLO and named it
+  (`multiplayer waits: players 0,1 of 2, no HELLO from 0`, `derpy_tp_mp_needs_everyone`), while this machine's own HELLO
+  landed through CA's multiplayer command path. The ruling: an entry whose army reads not human
+  (`CurrentGameArmyContext.IsHuman` false; "CPU 1" read false, the host read true, both `IsContextValid`) is no machine and
+  is left out, counted in `ai` for the log (`AI slots left out: N`); an entry with no army, a spectator or a partner with
+  units, stays. `GetHumanNetworkPlayersParticipatingInAllianceList.Size` read 0 with one human in the alliance, so it is
+  not a count of the battle's humans. The edited `platform.lua`, loaded from disk into that battle, read one entry (this
+  machine, offline) and one AI slot left out, and its handshake refused the lone human with `it names 1 player` and
+  `CA's list: slot 0 this machine offline; CA counts 0 humans in the battle; AI slots left out: 1`, sending nothing.
+  Lockstep: `ls_a_lobby_battle_with_an_ai_slot_starts` (failed before: the gate never went in),
+  `ls_one_human_against_the_ai_is_refused_and_says_why`. If wrong, an entry whose army context does not read in some
+  battle shape counts as a machine: the handshake waits and names it, which is safe. Still unmeasured: two humans.
+- **33.** (2026-10-24, from three Workshop reports with two humans: "when me or my friend uses third person and the
+  other doesn't I cannot do anything anymore and am just watching his unit in third person"; "cannot rotate our units at
+  all"; and a player told the other needs the mod while they had it.) The camera and UI calls the pack treated as local
+  are queued battle commands, read off the exe (build `6acec6f4`, static): each binding tests battle `+0x3b0`/`+0x3b1`
+  and pushes a `BCQ_` command (`BCQ_ENABLE_CINEMATIC_UI` pusher `exe+2e9b744` from `exe+2edc5e0`, which also applies it
+  at once; `BCQ_SELECT_UNIT_FROM_SCRIPT` `exe+2e9c8c4` from `select_in_ui` `exe+2f0e2dc`, push only;
+  `BCQ_CAMERA_HEIGHT_RANGE` `exe+2e9aef4` from `change_height_range` `exe+2ec50f0`, push only;
+  `BCQ_CAMERA_DISABLE_FUNCTIONALITY` / `_ENABLE_` from `enable_functionality` `exe+2edc794` unless its third argument,
+  CA's "bypass command queue", is true). Their handlers (`exe+2ecf128`, `exe+2ed4838`, `exe+2ecdc98`, ...) read no
+  sender and post to the battle's own listeners, so one player's third person locked the other's camera, hid their
+  interface and cursor, clamped their camera to 100 m and selected his unit on their screen. `cam:move_to` is safe: its
+  sixth argument false (the pack's) calls the camera directly (`exe+2ef81e4`) and pushes nothing. Checked the same way
+  and local: `set_banners_enabled`, `enable_tooltips`, `suppress_unit_voices`, `disable_orders`, `disable_shortcut`,
+  `add_ping_icon`, `remove_ping_icon`; `bm:clear_selection` is a CCO call. The ruling: `enable_functionality` passes the
+  bypass everywhere; in net mode the pack makes no `enable_cinematic_ui` or `change_height_range` call, and selects by
+  clicking the unit's card (`E.select`; single player keeps `select_in_ui`). The lockstep simulation now queues these
+  four as the exe does, and `ls_one_players_third_person_leaves_the_others_camera_and_ui_alone` failed with all four
+  on B before the change and passes after. If wrong: in multiplayer CA's selection markers show in third person, CA's
+  cursor can flash between frames (as in command mode's Vanilla style), and the default camera floor stands, so the
+  eye can sit higher close in. Not measured: the card click selecting in game, and two machines. The third report
+  (the needs-everyone message) is not explained by this; a peer a Workshop update behind sends a HELLO of the old
+  version, which is not counted, so the message now says "on the same update".
+- **34.** (2026-10-24, a player's report on build `6d48215c`: a campaign battle, the host playing Tamurkhan's army
+  against the AI and the partner watching. The host's log: `players 0,1 of 2, this machine 0, watching 1, offline 0`,
+  then `no HELLO from 1 after 5000 model ms`, and `derpy_tp_mp_needs_everyone` twice. The host's own HELLO landed.)
+  Read off the exe (static): every queued push from script, CA's 27 wrappers and the pack's `queue()` alike, is dropped
+  while the battle's `+0x3b0` or `+0x3b1` is set, and `+0x3b0` is what `battle:is_spectator()` returns (`exe+2eeb604`).
+  So a spectator's HELLO never goes, and since Ruling 30 the handshake waited for it: no battle with a spectator in it
+  could start, and the player was told the watcher had no mod. The two CCO flags the list reads are separate bits of the
+  network player's `+0x138`: `IsSpectating` bit `0x10` (getter `exe+1f07930`), `IsPassiveParticipant` all of `0x25`
+  (`exe+1f076e8`). What sets the battle's `+0x3b0` was not found (a scan for byte stores at `+0x3b0` found 14; the four
+  read were other objects'), so whether a passive participant's push is refused too is not read; the ruling does not depend on
+  it. The ruling: a player whose entry reads watching (either flag) is not waited for and sends no HELLO; the gate goes in
+  once every other player's bit is set, on the watcher's machine too, at the same tick. A list where everyone watches is
+  refused (`everyone in it is watching`). `hello_list` gains `waits for <slots>`. `HELLO_VERSION` is 3 in the Lua and
+  the cave: a version 2 machine waits for a watcher where version 3 does not, so with a watcher in the battle the two
+  would put the gate in at different ticks. The cost: a watcher without the pack or memreader Plus is no longer caught,
+  and its machine runs the battle without the gate and desyncs from the first melee of the man played; what a
+  spectator's desync does to the others is not known. Lockstep: the simulation now refuses a spectator's push as the
+  exe does, and `ls_a_battle_against_the_ai_starts_with_the_partner_watching` failed as the report did (A told "no
+  answer from Player B") before the change and passes after; `ls_a_watcher_without_the_mod_is_not_caught` records the
+  cost. Mutants round 67, 5 of 5. Not measured: a watcher's own script log (it would show `hello_list` and nothing
+  sent), and two machines.
 
 ## Live session checklist
 
@@ -470,8 +558,8 @@ mid-battle does on every machine.
 
 ### Before the session
 
-- **Two machines.** The author knows of no LAN mode in WH3 (not checked here), so each player needs a Steam account
-  that owns WH3. One PC is an unverified option: a second Steam client and account under Sandboxie, a route reported for
+- **Two machines.** WH3 has a LAN mode: the multiplayer lobby list has a "Local Network" tab (`button_lan`) beside
+  "Online Games" (seen 2026-10-23, not tried). Online, each player needs a Steam account that owns WH3. One PC is an unverified option: a second Steam client and account under Sandboxie, a route reported for
   WH2 (source not recorded) and not tried on WH3. Its latency is the best case only, so item 2 measured that way is a
   lower bound.
 - **The same pack on both**, built after the last code change. After copying it in, delete `loadfast_cache_<env>.bin`,

@@ -24,6 +24,17 @@ local LIFT_TOL, BOOM_MIN, BOOM_IN, BOOM_OUT, MOVED, TURNED = 0.3, 0.1, 3, 0.5, 1
 -- changed every 0.14-0.24 s, measured 2026-10-17, probes/zz_tp_fp.lua: any less and the eye stops between steps), where
 -- third person's lag would leave the eye trailing his head; it looks up as far as FP_PITCH_MIN
 local FP_EYE, FP_AHEAD, FP_LAG, FP_PITCH_MIN = 0.92, 0.35, 0.25, -1.2
+-- command mode (command.lua, spec 3.4): the eye S.command_distance m from his feet, behind him and up at CMD_ELEV rad,
+-- whatever the zoom; the mouse turns the view about the eye, so its pitch aims the crosshair near or far, as Bannerlord
+-- aims a banner. The look never rises above CMD_LOOK_MIN rad down (ground ~290 m out from a 9 m eye); entering puts the
+-- pitch at CMD_START (ground ~45 m out); the look point is CMD_AHEAD m along the view
+local CMD_ELEV, CMD_LOOK_MIN, CMD_START, CMD_AHEAD = 0.45, 0.03, 0.2, 30
+-- its own zoom, a factor on S.command_distance (the author, 2026-10-24: "cannot zoom out or in in command mode"), his
+-- third-person zoom kept for his return
+local CMD_ZOOM_MIN, CMD_ZOOM_MAX = 0.4, 4
+-- s the zoom takes to catch up with the wheel or the keys (the author, 2026-10-24: "make the zooming more smooth"): a
+-- notch was a 16% jump in one frame
+local ZOOM_EASE = 0.12
 
 return function(E)
 	local R = {}
@@ -31,8 +42,9 @@ return function(E)
 	function R.start(now, x, y, z, yaw, zoom, ranged)
 		R.samples, R.sx, R.sy, R.sz = {{now, x, y, z}}, x, y, z
 		R.yaw, R.pitch, R.zoom, R.ots, R.close, R.centre = yaw, 0, zoom, ranged and 1 or 0, 0, ranged and 0 or 1
-		R.want_yaw, R.want_pitch = yaw, 0
+		R.want_yaw, R.want_pitch, R.want_zoom = yaw, 0, zoom
 		R.ey, R.ey1, R.ey2, R.boom, R.cap = nil, nil, nil, 1, nil
+		R.cmd, R.cmd_pitch, R.cmd_zoom, R.want_cmd_zoom = 0, nil, 1, 1
 		-- no eye until this session's first frame: the aim's "no eye yet" reads R.ex, and the last session's x with this
 		-- one's cleared height threw on fire held as F2 went on (2026-10-17)
 		R.ex, R.ez, R.lx, R.ly, R.lz = nil, nil, nil, nil, nil
@@ -43,12 +55,31 @@ return function(E)
 		local S = E.S
 		R.want_yaw = R.want_yaw + dx * S.sensitivity
 		if S.invert_y then dy = -dy end
-		R.want_pitch = math.max(R.first and FP_PITCH_MIN or PITCH_MIN, math.min(PITCH_MAX, R.want_pitch + dy * S.sensitivity))
+		-- the mouse stops where command mode's view does (behind), or the way back down from past it moved nothing
+		local top = R.first and FP_PITCH_MIN or PITCH_MIN
+		if E.F.command and S.command_distance > 0 then top = CMD_LOOK_MIN end
+		R.want_pitch = math.max(top, math.min(PITCH_MAX, R.want_pitch + dy * S.sensitivity))
 	end
 
-	function R.zoom_by(steps) -- natural-log steps: positive zooms out; true at the closest zoom
-		R.zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, R.zoom * math.exp(steps)))
-		return R.zoom <= ZOOM_MIN
+	-- command mode on or off (command.lua): his own pitch kept while the view tilts to place orders, given back after
+	function R.command(on)
+		if on then
+			R.cmd_pitch = R.want_pitch
+			if E.S.command_distance > 0 then R.want_pitch = CMD_START end
+		elseif R.cmd_pitch then
+			R.want_pitch, R.cmd_pitch = R.cmd_pitch, nil
+		end
+	end
+
+	-- natural-log steps: positive zooms out; true at the closest zoom. Where it is going: R.update eases the view there.
+	-- In command mode, its own view's
+	function R.zoom_by(steps)
+		if E.F.command and E.S.command_distance > 0 then
+			R.want_cmd_zoom = math.max(CMD_ZOOM_MIN, math.min(CMD_ZOOM_MAX, R.want_cmd_zoom * math.exp(steps)))
+			return false
+		end
+		R.want_zoom = math.max(ZOOM_MIN, math.min(ZOOM_MAX, R.want_zoom * math.exp(steps)))
+		return R.want_zoom <= ZOOM_MIN
 	end
 
 	-- the eye and the point it looks at, behind him at zoom zm and over his shoulder as far as R.ots, before the ground
@@ -68,6 +99,16 @@ return function(E)
 			local c, sn = math.cos(R.pitch), math.sin(R.pitch)
 			local ax, ay, az = ox + fx * c * OTS_AHEAD, oy - sn * OTS_AHEAD, oz + fz * c * OTS_AHEAD
 			local k = R.ots
+			ex, ey, ez = ex + (ox - ex) * k, ey + (oy - ey) * k, ez + (oz - ez) * k
+			lx, ly, lz = lx + (ax - lx) * k, ly + (ay - ly) * k, lz + (az - lz) * k
+		end
+		if R.cmd > 0.001 then
+			local d = S.command_distance * R.cmd_zoom
+			local ox, oy, oz = R.sx - fx * d * math.cos(CMD_ELEV), R.sy + d * math.sin(CMD_ELEV), R.sz - fz * d * math.cos(CMD_ELEV)
+			local p = math.max(R.pitch, CMD_LOOK_MIN)
+			local c, sn = math.cos(p), math.sin(p)
+			local ax, ay, az = ox + fx * c * CMD_AHEAD, oy - sn * CMD_AHEAD, oz + fz * c * CMD_AHEAD
+			local k = R.cmd
 			ex, ey, ez = ex + (ox - ex) * k, ey + (oy - ey) * k, ez + (oz - ez) * k
 			lx, ly, lz = lx + (ax - lx) * k, ly + (ay - ly) * k, lz + (az - lz) * k
 		end
@@ -101,6 +142,12 @@ return function(E)
 	function R.update(now, dt, x, y, z, ranged, melee, got_y, height, centre)
 		local S, Q = E.S, R.samples
 		R.first = height ~= nil
+		-- eased here, before first person's return: it must come back to 0 whichever view he leaves command mode in
+		local want_cmd = E.F.command and S.command_distance > 0 and 1 or 0
+		R.cmd = R.cmd + (want_cmd - R.cmd) * math.min(1, OTS_RATE * dt)
+		local ease = 1 - math.exp(-dt / ZOOM_EASE)
+		R.zoom = R.zoom + (R.want_zoom - R.zoom) * ease
+		R.cmd_zoom = R.cmd_zoom + (R.want_cmd_zoom - R.cmd_zoom) * ease
 		if not R.first and R.want_pitch < PITCH_MIN then R.want_pitch = PITCH_MIN end
 		-- the view eases to where the mouse put it over S.smooth s, in real time (the author, 2026-10-17: "smoothness of the
 		-- camera turning"): a frame's mouse step is whole pixels, in the bursts the mouse's own rate sets, and applied raw

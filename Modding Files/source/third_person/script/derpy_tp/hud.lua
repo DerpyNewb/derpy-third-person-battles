@@ -5,6 +5,10 @@
 -- return function(E) -> H.
 local CCO_EVERY, MAX_ERRORS = 0.2, 3 -- s between unit-context reads (each is an expression the engine parses)
 local RELOAD_SCALE = 1 -- ReloadPercentMax is 0..1 (plan 2 Task 1 measures)
+-- CA's bottom band under hud_battle, its parts' tops measured 2026-10-23 (porthole highest): command mode's Vanilla style
+-- stands the panel on them
+local CA_BAND = {"porthole_parent", "battle_orders", "winds_of_magic"}
+local BACK = {"back_plate", "back", "back_keyplate", "back_key"}
 -- CA's context constructor: in the script environment this file runs in, not in _G (measured 2026-10-19: _G.cco nil,
 -- the bare name a callable table, as CA's lib_battle_script_unit.lua uses it); taken before cco() below hides it
 local context = cco
@@ -33,7 +37,18 @@ return function(E)
 		last[key] = value
 		write(c, value)
 	end
-	local function vis(id, b) put(part(id), id .. ".vis", b == true, function(c, x) c:SetVisible(x) end) end
+	-- the parts command mode's Vanilla style sets aside (H.back; the author, 2026-10-23, from the live frames): his plate,
+	-- which CA's unit information panel covers, the action buttons, and the bar's keys and page tab, whose keys the mode
+	-- gives to other things (the number keys pick units, E pages, Shift slows). away holds them while set aside, and vis
+	-- shows none of them; asked is what each part was last asked to show, what H.back gives back
+	local AWAY, away, asked = {}, {}, {}
+	for id, at in pairs(L.at) do
+		if at[1] == "left" or at[1] == "actions" or id:match("^slot_%d+_key") or id:match("^tab") then AWAY[id] = true end
+	end
+	local function vis(id, b)
+		asked[id] = b == true
+		put(part(id), id .. ".vis", asked[id] and not away[id], function(c, x) c:SetVisible(x) end)
+	end
 	local function text(id, s) put(part(id), id .. ".text", s, function(c, x) c:SetStateText(x, "derpy_tp_hud") end) end
 	local function img(id, path) put(part(id), id .. ".img", path, function(c, x) c:SetImagePath(x, 0) end) end
 
@@ -49,7 +64,7 @@ return function(E)
 	end
 	for n = 1, L.slots do
 		for _, s in ipairs({"frame", "icon", "active_l", "active_r", "windup_l", "windup_r", "dim", "armed", "over", "coolplate",
-			"cool", "usesplate", "uses", "keyplate", "key"}) do
+			"cool", "usesplate", "uses", "manaplate", "mana", "keyplate", "key"}) do
 			GROUPS.slots[#GROUPS.slots + 1] = "slot_" .. n .. "_" .. s
 		end
 	end
@@ -85,11 +100,41 @@ return function(E)
 		if ok then return v end
 	end
 
-	-- every part from its group's corner; the scale is what the engine drew the probe part at against its design size
+	-- command mode's Vanilla style brings CA's whole HUD back (command.lua): the panel stands a margin over CA's bottom
+	-- band, the corner buttons a margin under its radar (the author, 2026-10-23, picked the pack's panel with CA's HUD),
+	-- and his skills on CA's portrait, from its left edge (later that day: "move back the skills to the character
+	-- portrait"). floor, top, left: the screen's floor, the margin and nil with none
+	local placed, band_at = {}, 0 -- what H.place last stood the panel on; H.update places again when it moves
+	local function band(sh, m)
+		local floor, top, left = sh, m, nil
+		if E.command and E.command.vanilla() then
+			local h = find_uicomponent(core:get_ui_root(), "hud_battle")
+			-- only the parts CA shows: one CA hides may be parked anywhere (the final review). While third person hides
+			-- CA's HUD, CA's own visibility is what main.lua kept (F.hidden_ui)
+			local kept = F.hidden_ui and F.hidden_ui.hud_battle or {}
+			for _, id in ipairs(CA_BAND) do
+				local c = h and find_uicomponent(h, id)
+				local ca_shows = kept[id]
+				if ca_shows == nil then ca_shows = c and c:Visible() end
+				if c and ca_shows then local _, y = c:Position() floor = math.min(floor, y) end
+			end
+			local r = h and find_uicomponent(h, "radar_holder")
+			if r then local _, y = r:Position() local _, rh = r:Dimensions() top = math.max(top, y + rh + m) end
+			local p = h and find_uicomponent(h, "porthole_parent")
+			if p then left = p:Position() end
+		end
+		return floor, top, left
+	end
+
+	-- what the engine drew the probe part at against its design size
+	local function scale()
+		local probe = part(L.probe)
+		return probe and select(1, probe:Dimensions()) / L.size[L.probe][1] or 1
+	end
+	-- every part from its group's corner, at scale()
 	function H.place()
 		local sw, sh = core:get_screen_resolution()
-		local probe = part(L.probe)
-		local s = probe and select(1, probe:Dimensions()) / L.size[L.probe][1] or 1
+		local s = scale()
 		local m = L.margin * s
 		local g = L.groups
 		-- the bar centres on the slots it shows, not on all ten: its full width less a pitch per empty slot
@@ -100,7 +145,7 @@ return function(E)
 		local gap = -L.at.tab_plate[2] - L.size.tab_plate[1]
 		local tab_w, tab_dw = 0, nil
 		local tp, tt = part("tab_plate"), part("tab")
-		if tab_text and tp and tt then
+		if tab_text and tp and tt and not away.tab then
 			tab_dw = math.ceil(tt:TextDimensionsForText(tab_text) / s) + 2 * L.pad
 			for c, w in pairs({[tp] = tab_dw, [tt] = tab_dw - 2 * L.pad}) do
 				local _, h = c:Dimensions()
@@ -109,13 +154,18 @@ return function(E)
 			end
 			tab_w = tab_dw + gap
 		end
-		local o = {left = {m, sh - m - g.left[2] * s}, bar = {(sw - (bar_w + tab_w) * s) / 2 + tab_w * s, sh - m - g.bar[2] * s},
-			right = {sw - m - g.right[1] * s, sh - m - g.right[2] * s},
-			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}, toggle = {sw - m - g.toggle[1] * s, m},
+		local floor, top, left = band(sh, m)
+		placed[1], placed[2] = floor, top
+		local bar_x = left and left + tab_w * s or (sw - (bar_w + tab_w) * s) / 2 + tab_w * s
+		local o = {left = {m, floor - m - g.left[2] * s}, bar = {bar_x, floor - m - g.bar[2] * s},
+			right = {sw - m - g.right[1] * s, floor - m - g.right[2] * s},
+			centre = {(sw - g.centre[1] * s) / 2, sh / 2 + L.target_y * s}, toggle = {sw - m - g.toggle[1] * s, top},
 			screen = {0, 0}}
 		-- the shown action buttons packed against the right edge, over the right plate
 		local aw = math.max(0, #acts * L.action_pitch - (L.action_pitch - L.size.act_attack_frame[1]))
-		o.actions = {sw - m - aw * s, sh - m - (g.right[2] + L.stack + g.actions[2]) * s}
+		o.actions = {sw - m - aw * s, floor - m - (g.right[2] + L.stack + g.actions[2]) * s}
+		-- the way back out of command mode over the bar, from its left edge
+		o.back = {o.bar[1], o.bar[2] - (L.stack + g.back[2]) * s}
 		-- reaching over the ability bar (all eight beside ten abilities; seven left 22 px at 1600 in the preview,
 		-- 2026-10-15), the buttons go up a row, clear of it
 		if #keys > 0 and o.actions[1] < o.bar[1] + bar_w * s and o.actions[2] + g.actions[2] * s > o.bar[2] then
@@ -205,7 +255,7 @@ return function(E)
 			local on = keys[n] ~= nil
 			for _, s in ipairs({"frame", "icon", "keyplate", "key", "cool"}) do vis("slot_" .. n .. "_" .. s, on) end
 			for _, s in ipairs({"dim", "coolplate", "armed", "over", "active_l", "active_r", "windup_l", "windup_r", "usesplate",
-				"uses"}) do
+				"uses", "manaplate", "mana"}) do
 				vis("slot_" .. n .. "_" .. s, false)
 			end
 			cooling[n] = nil
@@ -426,15 +476,18 @@ return function(E)
 	end
 	local function unmark() for _, m in pairs(marked) do if m.on then m.on = false m.uc:highlight(false) m.uc:release_control() end end end
 
-	local guide_was, target_was, aimed_was = false, nil, nil
+	local guide_was, target_was, aimed_was, pick_was = false, nil, nil, nil
 	local function bars(now)
-		-- the guide key, the lock-on and an armed ability's target answer at once, not at the next refresh; the locked
-		-- enemy and the target are marked with the guide off too (combat.lua C.target, abilities.lua A.update). CA's
-		-- banners change with the guide key, or with the interface hidden, and H.show starts the refresh over
+		-- the guide key, the lock-on, an armed ability's target and a command mode pick answer at once, not at the next
+		-- refresh; the locked enemy, the target and the picked units are marked with the guide off too (combat.lua
+		-- C.target, abilities.lua A.update, command.lua). CA's banners change with the guide key, or with the interface
+		-- hidden, and H.show starts the refresh over
 		local target = F.target and F.target:unique_ui_id()
 		local aimed = F.armed and F.armed.unit and F.armed.unit:unique_ui_id()
-		if now < bars_at and (F.guide or false) == guide_was and target == target_was and aimed == aimed_was then return end
-		bars_at, guide_was, target_was, aimed_was = now + BARS_EVERY, F.guide or false, target, aimed
+		local picked, pick = F.command and F.command.picked or {}, F.command and F.command.v
+		if now < bars_at and (F.guide or false) == guide_was and target == target_was and aimed == aimed_was
+			and pick == pick_was then return end
+		bars_at, guide_was, target_was, aimed_was, pick_was = now + BARS_EVERY, F.guide or false, target, aimed, pick
 		local holder = E.S.bars and part("bars")
 		if E.S.bars and not holder then error("no unit bar holder in the panel") end
 		local made, seen = 0, {}
@@ -449,7 +502,7 @@ return function(E)
 			local alive = u:number_of_men_alive() > 0
 			local uid = u:unique_ui_id()
 			-- a unit of his never marked makes no controller here (mark answers an unchanged state first)
-			mark(u, (uid == aimed or not u:is_player_controlled() and (guide_was or uid == target)) and alive
+			mark(u, (uid == aimed or picked[uid] or not u:is_player_controlled() and (guide_was or uid == target)) and alive
 				and (not enemy or u:is_valid_target()))
 			if not holder then return end
 			local id = tostring(u:unique_ui_id())
@@ -478,7 +531,7 @@ return function(E)
 		-- a session starts whole: three part errors turned it off until the battle ended (a player, 2026-10-19: "the HUD
 		-- stayed off for the rest of the match", after a transformation)
 		if on then off, errors = false, 0 end
-		if not on then pcall(unmark) end
+		if not on then pcall(unmark) H.back(false) end
 		if off then return end
 		if not on then if ui then ui:SetVisible(false) end return end
 		local root = core:get_ui_root()
@@ -502,9 +555,37 @@ return function(E)
 		ui:SetVisible(true)
 		vis("bars", E.S.bars ~= false)
 		H.target(nil) H.mark(nil)
-		H.unit() -- first: the bar centres on how many abilities he has
+		H.back(E.command ~= nil and E.command.vanilla()) -- before the parts it sets aside are shown
+		H.unit() -- then: the bar centres on how many abilities he has
 		H.place()
 	end
+
+	-- the way back out of command mode's Vanilla style, its key beside it (the author, 2026-10-23: "theres also no buttons
+	-- or custom hud to be found for the unit and to switch back to 3rd person mode"). The plate takes the freed cursor's
+	-- click (the listener below); the parked cursor sits at the screen's centre, never on it
+	function H.back(on)
+		local was = away
+		away = on and AWAY or {}
+		-- set aside, or given back as each was last asked to show (the final review: not by drawing the HUD over). A part
+		-- no update asks about (the health and stamina bars, which are only sized) is given back as it stood: given back
+		-- hidden, it stayed so (the author, 2026-10-24: "healthbar is gone")
+		if on or was == AWAY then
+			for id in pairs(AWAY) do
+				local c = asked[id] == nil and part(id)
+				if c then asked[id] = c:Visible() end
+				vis(id, asked[id])
+			end
+		end
+		for _, id in ipairs(BACK) do vis(id, on) end
+		-- hidden, it takes no click either: a hidden interactive component is a dead zone where it last stood, over CA's
+		-- cards once the mode is left (the final review, 2026-10-23; seen live at y 755 of 900)
+		put(part("back_plate"), "back_plate.click", on == true, function(c, x) c:SetInteractive(x) end)
+		if on then text("back", "Back to third person") text("back_key", E.S.names.command or "") end
+	end
+	-- CA runs a listener unguarded in the released game (lib_core.lua event_unprotected_callback): the click only asks,
+	-- and the tick leaves the mode inside its guard (main.lua)
+	core:add_listener("derpy_tp_back", "ComponentLClickUp", function(ctx) return ctx.string == "back_plate" end,
+		function() if F.command then F.back_click = true end end, true)
 
 	-- one man played: his own hit points (the author, 2026-10-15: "should be health of the individual unit not the whole
 	-- battalion"); nil when played whole, or when what the model holds is not a health
@@ -565,6 +646,15 @@ return function(E)
 			if card and card:GetContextObjectId("CcoBattleUnit") then H.show(true) end
 		end
 		if off or not ui then return end
+		-- CA's band moves under the panel: placed once at Q, as the mode turned CA's interface on, it stood where third person
+		-- puts it, on CA's unit cards (the author's picture, 2026-10-23: "even conflicting ui"). Read again every CCO_EVERY
+		-- real s: the mode's quarter speed stretches model time four times, and its pause stops it
+		if E.command and E.command.vanilla() and os.clock() >= band_at then
+			band_at = os.clock() + CCO_EVERY
+			local _, sh = core:get_screen_resolution()
+			local floor, top = band(sh, L.margin * scale())
+			if floor ~= placed[1] or top ~= placed[2] then H.place() end
+		end
 		local u = F.unit
 		guard("bars", bars, now)
 		guard("health", function()
@@ -629,6 +719,13 @@ return function(E)
 					local left = okl and limited == true and cco(at .. "RemainingUses")
 					text("slot_" .. n .. "_uses", left and tostring(left) or "")
 					vis("slot_" .. n .. "_uses", left ~= false) vis("slot_" .. n .. "_usesplate", left ~= false)
+					-- a spell's winds (ManaUsed; CA shows them in its tooltip only), the overcast's while it is armed
+					-- overcast (data.lua overcasts, as abilities.lua prices it); an ability that costs none shows nothing
+					local mana, a = H.mana(n), F.armed
+					local over = a and a.n == n and a.over and E.D.overcasts and E.D.overcasts[keys[n]]
+					local winds = mana > 0 and (over or mana)
+					text("slot_" .. n .. "_mana", winds and tostring(winds) or "")
+					vis("slot_" .. n .. "_mana", winds ~= false) vis("slot_" .. n .. "_manaplate", winds ~= false)
 					vis("slot_" .. n .. "_active_l", active) vis("slot_" .. n .. "_active_r", active)
 					vis("slot_" .. n .. "_windup_l", winding) vis("slot_" .. n .. "_windup_r", winding)
 				end
@@ -681,6 +778,15 @@ return function(E)
 				vis(p .. "dim", empty or wait and not still)
 			end
 			show("attack", F.next_swing - now)
+			-- a unit that cannot shoot swings on the mode key too (combat.lua swing): both named, "mouse" said once (the
+			-- author, 2026-10-24: "no right button mention"); a shooter's is its mode, out of ammo it swings again
+			if act_at.attack then
+				local n = E.S.names
+				local a, m = n.attack or "", n.mode or ""
+				local both = (a:match("^(.-) mouse$") and m:match("^(.-) mouse$")) and a:gsub(" mouse$", "") .. " / "
+					.. m:gsub(" mouse$", "") or a .. " / " .. m
+				text("act_attack_key", E.can_shoot() and a or both)
+			end
 			show("jump", F.next_jump - now)
 			-- the sprint: its charge attack's seconds; dim only with too little stamina to start one
 			show("sprint", F.next_charge - now, not E.combat.can_sprint(), true)

@@ -47,13 +47,20 @@ engine, and the design record.
   down for bad. Holding Alt shows the game's own markers under the men of every unit you do not
   command, an enemy only while you can see it, and brings back the game's own unit banners in
   place of the bars. The unit an armed spell or ability would hit is marked, your own units too.
+- **Command mode.** Q, while playing your general or a hero, slows the battle and lets you order
+  the rest of the army: in the vanilla style with the game's own clicks and drags at the crosshair
+  and the full HUD, or in the Bannerlord style with numbered groups and follow, charge and hold.
+- **Unit stats.** The MCT can buff or debuff the unit you play (melee attack and defence, weapon
+  strength, charge, armour, missile strength, speed, leadership), all off by default. Spells show
+  their winds cost on the hotbar.
 - **Every key and setting in the Mod Configuration Tool.** That covers 29 keys, the camera's
   distance, height, lag and melee distance, turning speed, hold or toggle to run, cooldowns,
   reload time, volley scatter, when the health bars show and how far, hold or press for the
   markers, and whether Alt brings the game's banners.
 - **Multiplayer is experimental.** It runs when every player has the mod and memreader Plus,
-  and does nothing in replays. It was built and tested offline but has not yet been run on two
-  machines (`docs/history/MP_FEASIBILITY_20261021_THIRD_PERSON.md`).
+  and does nothing in replays. Someone only watching the battle is not waited for, but still needs
+  the mod, or their game falls out of step. Players have run it on two machines since 2026-10-23;
+  it has not been tested that way here (`docs/history/MP_FEASIBILITY_20261021_THIRD_PERSON.md`).
 
 It needs **memreader Plus**, a separate Workshop mod that lets Lua scripts read and write the
 game's memory. That is how the mod reads the mouse and keys and sends a man an animation. Every
@@ -65,9 +72,9 @@ behind it, never the whole mod.
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 3,000 lines of Lua), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 573 tests, the two-machine simulation and its 41, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 658 tests, the two-machine simulation and its 47, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 376 probe scripts run against the live game, and 80 mutation sets (978 mutants) |
+| `Modding Files/source/lord_control/probes/` | 376 probe scripts run against the live game, and 92 mutation sets (1237 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs, the core plan and the multiplayer plan |
 | `docs/history/` | the handoffs written as each part was measured in game, the working ledger, and the multiplayer decision record |
 
@@ -89,15 +96,15 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 573 tests.
+  frame by frame and asserts on the commands the modules sent: 658 tests.
 - **Two machines, simulated.** `tools/third_person_lockstep.lua` runs two copies of the shipped
   modules side by side, each with its own globals, and hands every queued command to both two
   ticks late, as a multiplayer battle does. `third_person_lockstep_tests.lua` fails if the two
-  battles end up different: 41 tests.
+  battles end up different: 47 tests.
 - **Every rule is proven to be caught.** `probes/tp_mutate.py` plants one plausible mistake at a
   time in the shipped Lua, runs the suite, and restores the file byte for byte. It might be a
   guard dropped, a constant changed, or a branch inverted. A mutant the tests do not catch is a
-  finding, and so is an anchor that no longer matches the code. 978 mutants in 80 sets; 15 of
+  finding, and so is an anchor that no longer matches the code. 1237 mutants in 92 sets; 15 of
   the oldest sets still carry stale anchors from code that was rewritten since.
 - **Measured, not assumed.** Animation slot ids, clip lengths, the camera's floor and the
   projectile release point were each read from the running game through the probes, or from

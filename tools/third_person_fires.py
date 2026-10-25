@@ -46,6 +46,12 @@ RUNS = (484, 485)
 # sends it again at its length; a fixed 0.6 s cut every longer one mid-stride, the Great Unclean One's 1.9 s at a third
 CHARGES = (135, 102)
 BIN = "animations/database/battle/bin/"
+# ATTACK_1-10, the swings combat.lua plays, and the tag a played one hits with: a clip whose .anm.meta has no
+# SPLASH_ATTACK hits nothing when the script plays it (the author, 2026-10-25; Celestial Dragon Guard's four carry
+# IMPACT_POS alone - a player, 2026-10-24: "didnt manage to kill a single unit"). Read 2026-10-25: of 3,819 units with
+# attack clips, 2,676 have a splash on every one, 729 on some, 414 on none
+ATTACKS = tuple(range(454, 464))
+SPLASH = b"\x0d\x00SPLASH_ATTACK"
 CA_ANIM = ("anim2.pack", "anim.pack", "anim_3.pack")
 # CA's own packs in data/: everything but these prefixes is a mod
 CA_PREFIX = ("anim", "audio", "boot", "data", "db", "local_", "models", "movies", "shaders", "terrain", "text", "tile",
@@ -179,6 +185,26 @@ def blank_slots(files, man_animation):
     return out or None
 
 
+def dull_slots(files, man_animation):
+    """His bin's ATTACK_1-10 slots with a clip whose .anm.meta has no SPLASH_ATTACK (or no meta): played, it may hit
+    nothing. None when every slot has one, or the bin is not read here."""
+    b = files.get(BIN + man_animation + ".bin")
+    if not b:
+        return None
+    try:
+        _h, rows = RA.read_bin(b)
+    except (ValueError, struct.error):
+        return None
+    out = set()
+    for r in rows:
+        if r["slot"] in ATTACKS:
+            for _anim, meta, _snd in r["anims"]:
+                m = meta and files.get(meta)
+                if not m or SPLASH not in m:
+                    out.add(r["slot"])
+    return sorted(out) or None
+
+
 def lands(packs, table="land_units"):
     """land unit key -> row, a mod's row over CA's (or another table's key -> row)."""
     out = {}
@@ -209,17 +235,17 @@ def times_of(files, man_animation, slots=(FIRE, GRENADIER, RIDER_FIRE)):
     return None
 
 
-def build(*specs, raises=None, runs=None, charges=None, blanks=None):
+def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None):
     """land unit key -> FIRE_POS times, for every unit with a missile weapon whose fire clip carries any. specs: the
     slot lists to read, each in order of preference (default FIRE_LEVEL, else GRENADIER, else RIDER_FIRE); one dict per spec, or the
     one dict when given none or one. raises: a dict to fill with each such unit's raise_lengths. runs: one to fill with
     every land unit's longest charge attack, s. charges: one to fill with every land unit's (CHARGE, FLY_CHARGE) lengths,
-    s, the longest of each, 0 for none; blanks: one with its blank_slots. Both off the body combat.lua plays them on: his
-    mount's bin (mounts.animation) when he rides one, else his own."""
+    s, the longest of each, 0 for none; blanks: one with its blank_slots; dulls: one with its dull_slots. All three off
+    the body combat.lua plays them on: his mount's bin (mounts.animation) when he rides one, else his own."""
     specs = specs or ((FIRE, GRENADIER, RIDER_FIRE),)
     mods = mod_packs()
     files = Files(mods + [os.path.join(DATA, n) for n in CA_ANIM])
-    mounts = lands(mods, "mounts") if charges is not None or blanks is not None else {}
+    mounts = lands(mods, "mounts") if charges is not None or blanks is not None or dulls is not None else {}
     outs = [{} for _ in specs]
     for key, r in lands(mods).items():
         if runs is not None and r.get("man_animation"):
@@ -235,6 +261,10 @@ def build(*specs, raises=None, runs=None, charges=None, blanks=None):
             t = blank_slots(files, body)
             if t:
                 blanks[key] = t
+        if dulls is not None and body:
+            t = dull_slots(files, body)
+            if t:
+                dulls[key] = t
         if r.get("primary_missile_weapon") and r.get("man_animation"):
             for out, slots in zip(outs, specs):
                 t = times_of(files, r["man_animation"], slots)
@@ -268,6 +298,17 @@ def _selftest():
                                                                    ("animations/x/full.anim", None, None)]}])), RA.read_bin
     try:
         assert blank_slots(f, "b") == [489], "only a slot with nothing but empty clips: %s" % blank_slots(f, "b")
+    finally:
+        RA.read_bin = real
+    # ATTACK_1 has a splash on both its clips, ATTACK_2 on one of two, ATTACK_3 has no meta; a slot past ATTACK_10 is not read
+    f.at["animations/x/hit.anm.meta"], f.at["animations/x/dud.anm.meta"] = b"head" + SPLASH + b"tail", b"head" + b"IMPACT_POS"
+    hit, dud = ("animations/x/full.anim", "animations/x/hit.anm.meta", None), ("animations/x/full.anim", "animations/x/dud.anm.meta", None)
+    RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [hit, hit]}, {"slot": 455, "anims": [hit, dud]},
+                                    {"slot": 456, "anims": [("animations/x/full.anim", None, None)]}, {"slot": 489, "anims": [dud]}])
+    try:
+        assert dull_slots(f, "b") == [455, 456], "a slot with any clip short of a splash: %s" % dull_slots(f, "b")
+        RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [hit]}])
+        assert dull_slots(f, "b") is None, "every slot with a splash: none"
     finally:
         RA.read_bin = real
     print("selftest ok")

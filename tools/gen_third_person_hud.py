@@ -44,6 +44,10 @@ HUD = {
     # bar shows them in the tooltip only (special_ability_tooltip.twui.xml, RemainingUses). The lozenge in the icon's
     # top-right corner, inset by its rim
     "uses_plate": (26, 18), "uses_in": 2,
+    # a spell's winds (the author, 2026-10-24: "add mana cost of spells to UI"): CA's cost gem from its ability tooltip
+    # (special_ability_tooltip.twui.xml mana_parent: spell_cost_frame drawn 30, body_12 cream on it), in the icon's
+    # top-left corner, opposite the uses. Darkened by the tint: CA's cyan under cream text measures far under 4.5:1
+    "mana_plate": 26, "mana_tint": "#707070FF",
     "armed": 79,                       # CA's selected ability: spell_dial_spell_selected 79x79 at the icon's -10,-10
     # CA's overcast glow: spell_dial_spell_glow drawn 100px over a 64px button (hud_battle.twui.xml overcast_effect,
     # read 2026-10-20), the same 1.56 over our 59px icon
@@ -58,6 +62,10 @@ HUD = {
     # the page tab at the bar's left end (the author, 2026-10-20, mockup A: "(T) Spells"), the target label's plate and
     # font. Its width here is the layout's only: hud.lua sizes it to its text and the padding ("too long", 2026-10-20)
     "tab": 200,
+    # the way back out of command mode's Vanilla style (the author, 2026-10-23: "theres also no buttons or custom hud to
+    # be found for the unit and to switch back to 3rd person mode"): its words on a plate, the command key beside it
+    "back": 200,
+    "back_lit": "#FFF8D730",  # its hover: a wash of the text colour over the plate, as CA's text buttons lighten
     # the hidden mark over the portrait (the 2026-10-20 design, Part 4): CA's banner status icon on a plate, and the word;
     # wide enough for "Unspottable"
     "hidden": 140, "hidden_icon": 24,
@@ -72,7 +80,7 @@ HUD = {
     "actions": ("walk", "sprint", "attack", "fire", "jump", "fly", "cheer"), "stack": 8,
     "fonts": {"name": ("header_14", 14), "men": ("body_12", 12), "key": ("body_12", 12),
               "cool": ("header_14", 14), "ammo": ("header_20_bold", 20), "target": ("header_14", 14),
-              "tab": ("header_14", 14), "hidden": ("header_14", 14)},
+              "tab": ("header_14", 14), "hidden": ("header_14", 14), "back": ("header_14", 14)},
     "ring": ((0.0, 3.141593), (0.0, -3.141593)),  # per half (L1 right, L2 left), empty -> full, radians, measured 2026-10-14
 }
 # The bar over every other unit (players, 2026-10-19: "a health bar each unit and a ally or enemy highlight"), briefed
@@ -116,6 +124,7 @@ ART = {
     "armed": "ui/skins/default/spell_dial_spell_selected.png",
     "over": "ui/skins/default/spell_dial_spell_glow.png",
     "key": "ui/skins/default/number_frame_lozenge_18px.png",
+    "mana": "ui/skins/default/spell_cost_frame.png",
     "bar_back": "ui/skins/default/bar_back.png",
     "bar_frame": "ui/skins/default/bar_frame.png",
     "bar_fill": "ui/skins/default/ammo_bar.png",
@@ -234,6 +243,11 @@ def _parts():
         P.append((s + "usesplate", "bar", ux, uy, uw, uh, {"image": ART["key"]}))
         P.append((s + "uses", "bar", ux, uy, uw, uh, {"text": " ", "fontcat": f["key"][0], "size": f["key"][1],
                                                       "align": "Center"}))
+        mw = H["mana_plate"]
+        mx, my = x + io_ + H["uses_in"], io_ + H["uses_in"]
+        P.append((s + "manaplate", "bar", mx, my, mw, mw, {"image": ART["mana"], "colour_img": H["mana_tint"]}))
+        P.append((s + "mana", "bar", mx, my, mw, mw, {"text": " ", "fontcat": f["key"][0], "size": f["key"][1],
+                                                      "align": "Center"}))
         kx = x + (sl - kw_) // 2
         P.append((s + "keyplate", "bar", kx, H["key_y"], kw_, kh, {"image": ART["key"]}))
         P.append((s + "key", "bar", kx, H["key_y"], kw_, kh, {"text": " ", "fontcat": f["key"][0],
@@ -273,6 +287,20 @@ def _parts():
         P.append((b + "_keyplate", "toggle", kx, H["key_y"], kw_, kh, {"image": ART["key"]}))
         P.append((b + "_key", "toggle", kx, H["key_y"], kw_, kh, {"text": " ", "fontcat": f["key"][0],
                                                                  "size": f["key"][1], "align": "Center"}))
+    # the way back out of command mode: the plate takes the freed cursor's click (hud.lua), the key sits beside it
+    bw, th = H["back"], H["text_plate_h"]
+    ky = (th - kh) // 2
+    # a button (docs/CUSTOM_UI.md): CA's rectangular text button's click, and lit while the cursor is on it - the plate
+    # under CA's white bar art inset and tinted HUD["back_lit"]
+    plate = {"path": ART["plate"], "offset": (0, 0), "dw": 0, "dh": 0, "margin": 8, "tile": False, "dock": None}
+    lit = dict(plate, path=ART["bar"], offset=(4, 4), dw=-8, dh=-8, margin=0, colour=HUD["back_lit"])
+    P.append(("back_plate", "back", 0, 0, bw, th, {"image": ART["plate"], "imagemargin": 8, "interactive": True,
+                                                    "sound": "UI_GBL_TMP_Square_Large_Text_Button", "hover": [plate, lit]}))
+    P.append(("back", "back", pad, 0, bw - 2 * pad, th, {"text": " ", "fontcat": f["back"][0], "size": f["back"][1],
+                                                         "align": "Center"}))
+    P.append(("back_keyplate", "back", bw + H["gap"], ky, kw_, kh, {"image": ART["key"]}))
+    P.append(("back_key", "back", bw + H["gap"], ky, kw_, kh, {"text": " ", "fontcat": f["key"][0], "size": f["key"][1],
+                                                               "align": "Center"}))
     rw, rh = H["right"]
     md = H["mode"]
     P.append(("plate_right", "right", 0, 0, rw, rh, {"image": ART["plate"], "imagemargin": 8}))
@@ -301,6 +329,7 @@ def _lift():
 
 
 LIFTED = ("name", "men_icon", "men")
+CLICKABLE = {"back_plate"}  # the only part that takes the mouse: the way back out of command mode (hud.lua H.back)
 
 
 def _groups():
@@ -310,7 +339,8 @@ def _groups():
             "bar": (n * sl + (n - 1) * H["slot_gap"], H["key_y"] + H["key"][1]),
             "right": H["right"], "centre": (H["target"], H["text_plate_h"]),
             "actions": (len(H["actions"]) * (sl + H["slot_gap"]) - H["slot_gap"], H["key_y"] + H["key"][1]),
-            "toggle": (2 * sl + H["slot_gap"], H["key_y"] + H["key"][1]), "screen": (1, 1)}
+            "toggle": (2 * sl + H["slot_gap"], H["key_y"] + H["key"][1]), "screen": (1, 1),
+            "back": (H["back"] + H["gap"] + H["key"][0], H["text_plate_h"])}
 
 
 PINS = ("pin", "pin_morale", "pin_state", "pin_effects")
@@ -408,9 +438,9 @@ def build():
              "\tmargin = %d," % HUD["margin"],
              '\tprobe = "slot_1_frame", -- the part whose drawn size against its design size gives the UI scale',
              "\tslots = %d," % HUD["slots"],
-             "\tgroups = {left = %s, bar = %s, right = %s, centre = %s, actions = %s, toggle = %s, screen = %s}," % (
+             "\tgroups = {left = %s, bar = %s, right = %s, centre = %s, actions = %s, toggle = %s, screen = %s, back = %s}," % (
                  _lua(g["left"]), _lua(g["bar"]), _lua(g["right"]), _lua(g["centre"]), _lua(g["actions"]),
-                 _lua(g["toggle"]), _lua(g["screen"])),
+                 _lua(g["toggle"]), _lua(g["screen"]), _lua(g["back"])),
              '\tbar = {file = "ui/derpy_tp/bar_", lifts = %s, clear = %s}, -- the unit bars: file .. n for lift n, m' % (
                  _lua(BAR["lifts"]), _lua(BAR["clear"])),
              "\tactions = %s, -- in order; hud.lua packs the shown ones against the right edge" % _lua(HUD["actions"]),
@@ -458,8 +488,22 @@ def check(xml, lua):
     defs = re.findall(r'\n\t\t<[\w]+\n\t\t\tthis="([^"]+)"', comps)
     for gid in sorted(set(nodes) ^ set(defs)):
         bad.append("guid %s is in one of hierarchy/components only" % gid)
-    if 'interactive="true"' in xml:
-        bad.append("an interactive component: the HUD must never take the mouse")
+    # the parked cursor must never land on a part that takes it (the 2026-10-23 live run: two of CA's took every click).
+    # The one exception is the way back out of command mode, clicked with the freed cursor, never at the screen's centre
+    clickable = {c for c in re.findall(r'\n\t\t\tid="([\w]+)"', comps) if 'interactive="true"' in _comp(xml, c)}
+    if clickable != CLICKABLE:
+        bad.append("interactive components %s, not %s: the HUD must never take the mouse" % (
+            sorted(clickable), sorted(CLICKABLE)))
+    # and a part that takes the click sounds and lights as CA's buttons do (docs/CUSTOM_UI.md: every interactive component
+    # has a soundcategory, one CA's packs have; a hover state with no transition to it never lights)
+    sounds = EM._game_sound_categories()
+    for c in sorted(clickable):
+        block = _comp(xml, c)
+        snd = re.search(r'soundcategory="([^"]+)"', block)
+        if not snd or snd.group(1) not in sounds:
+            bad.append("%s takes the click with no sound from CA's ui packs" % c)
+        if 'name="hover"' not in block or "transition_m_target_state" not in block:
+            bad.append("%s takes the click with no hover state to light" % c)
     ids = set(re.findall(r'\n\t\t\tid="([\w]+)"', comps)) - {"root", "derpy_tp_hud"}
     placed = set(re.findall(r'\["([\w]+)"\] = \{"', lua))
     for pid in sorted(ids - placed):
@@ -601,6 +645,12 @@ def selftest():
          "guid"),
         ("an interactive component", xml.replace('name="standard"', 'name="standard"\n\t\t\t\t\tinteractive="true"', 1),
          lua, "interactive"),
+        # every state of it: standard and hover both carry the flag
+        ("the way back taking no click", xml.replace('\n\t\t\t\t\tinteractive="true"', ""), lua, "interactive"),
+        ("the way back silent", re.sub(r'\n\t\t\tsoundcategory="[^"]+"', "", xml, count=1), lua, "no sound"),
+        ("the way back on a sound CA lacks", re.sub(r'soundcategory="[^"]+"', 'soundcategory="UI_Made_Up"', xml, count=1),
+         lua, "no sound"),
+        ("the way back never lit", xml.replace('name="hover"', 'name="hovered"', 1), lua, "no hover"),
         ("a part the layout does not place", xml, lua.replace('["slot_7_key"]', '["slot_7_kez"]', 1), "not placed"),
         ("a layout that does not parse", xml, lua + "\n}", "luac"),
         ("a file without <root>", xml.replace("<root this=", "<frame this=", 1).replace("</root>", "</frame>", 1), lua,

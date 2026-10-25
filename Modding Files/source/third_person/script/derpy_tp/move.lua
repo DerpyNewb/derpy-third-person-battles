@@ -45,12 +45,23 @@ return function(E)
 	-- direction rather than smoothly"). rate: times S.turn_rate; an action's turn is ACTION_TURN, so a swing faces the
 	-- crosshair before its clip turns him itself (0.19-0.31 s after the send, combat.lua). F.dt is the frame's real time
 	-- (main.lua reads a stall over 0.25 s as one frame): the model clock steps in 100 ms ticks, which turned him at a
-	-- quarter to half the rate, in steps; a 0.05 s cap halved it under 20 fps (round 25)
+	-- quarter to half the rate, in steps; a 0.05 s cap halved it under 20 fps (round 25).
+	-- In multiplayer a heading is a queued command the engine runs two ticks later or more (platform.lua M.net_rules), so
+	-- the heading it has lags the one asked, and stepped from it every command asked for where he already was and one
+	-- frame's step (a player, 2026-10-24: "forced to move forwards only", turning "takes an eternity"; 24 deg in the
+	-- second single player turns 90). There a step goes from the one last asked for the same model, while one was asked
+	-- within ASKED_KEEP s; another model (his rider after his mount, the next unit played) starts from the engine's.
+	-- Single player writes it on the battle thread at once and reads it back
+	local ASKED_KEEP = 1
+	local asked -- {m, yaw, t = os.clock()}
 	function M.turn(m, want, rate)
+		local now = os.clock()
 		local face = P.heading(m) or want
+		if P.features.net and asked and P.same(asked.m, m) and now - asked.t <= ASKED_KEEP then face = asked.yaw end
 		local d = (want - face + math.pi) % (2 * math.pi) - math.pi
 		local step = E.S.turn_rate * (rate or 1) * (F.dt or 0)
 		if math.abs(d) <= step then face = want elseif d > 0 then face = face + step else face = face - step end
+		asked = {m = m, yaw = face, t = now}
 		return face
 	end
 	M.ACTION_TURN = 2

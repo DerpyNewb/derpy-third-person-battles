@@ -39,9 +39,18 @@ LOC = {
     "derpy_tp_multiplayer": "Third-Person Battles is off in replays. In multiplayer it needs an up-to-date memreader Plus and a supported game version on every machine; the script log has the details.",
     "derpy_tp_switched_off": "Third-Person Battles ran into three errors and is off until this battle ends. The script log has the details.",
     # %s: the names of the players who did not answer (E.say's second argument)
-    "derpy_tp_mp_needs_everyone": "Third-Person Battles: no answer from %s. In multiplayer everyone in the battle, watchers too, needs this mod and memreader Plus.",
+    # a HELLO of another version is not counted, so a player a Workshop update behind reads as missing (a player,
+    # 2026-10-24: "he already has everything installed")
+    "derpy_tp_mp_needs_everyone": "Third-Person Battles: no answer from %s. In multiplayer everyone in the battle, watchers too, needs this mod and memreader Plus, on the same update. Restarting Steam gets the latest.",
     "derpy_tp_mp_no_route": "Third-Person Battles: your game's own multiplayer check never came back, so it can't start here. Please report this on the mod's page.",
     "derpy_tp_mp_no_players": "Third-Person Battles can't see who is in this battle, so it stays off in multiplayer. The script log has the details.",
+    # command mode is the lord's (spec 3.12); no key named, every key can be moved in MCT
+    "derpy_tp_command_general_and_heroes": "Only your general and heroes can command the army. Turn on \"Any unit can command\" in this mod's settings to command from any unit.",
+    # command mode, Vanilla style: the number keys' page, said on entering and on the page key (%s: "11-20")
+    "derpy_tp_command_page": "Number keys: units %s",
+    # buffs.lua: the army's faction has no faction junction rows (stat_rows covers CA's factions only)
+    "derpy_tp_stats_faction": "Third-Person Battles: the unit stats in this mod's settings can't be used by this army. "
+                              "Factions added by other mods are not covered.",
 }
 
 
@@ -87,13 +96,19 @@ def selftest(only=None):
         r = subprocess.run([LUAC, "-p", full], capture_output=True, text=True)
         if r.returncode:
             bad.append("luac: %s" % (r.stderr.strip() or r.stdout.strip()))
-        if "\\" in open(full, encoding="utf-8").read():
+        text = open(full, encoding="utf-8").read()
+        if "\\" in text:
             bad.append("a backslash cannot cross the bridge loader: %s" % rel)
+        # the game's string.find matches plain text only: "^tab", "%d", "[b]" and a capture find nothing, where match and
+        # gsub take the pattern (measured 2026-10-23: the bar's keys stayed up in command mode, the harness green)
+        if re.search(r"[:.]find\s*\(", text):
+            bad.append("string.find matches no pattern in game, use string.match: %s" % rel)
     for _full, rel in pack_files():
         if rel != rel.lower():
             bad.append("uppercase in a pack path crashes the game since 6.1: %s" % rel)
     bad += check_data()
     bad += check_loc()
+    bad += check_stats()
     # the HUD panel and its layout table are generated together; a stale pair draws parts where the Lua does not look
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import gen_third_person_hud as HUDGEN
@@ -215,6 +230,15 @@ def check_data():
     got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
     if got != ["true", "true", "nil", "nil", "nil"]:
         bad.append("data.lua chariots: Seeker, Settra, doomwheel, Tiranoc, steam tank %s - run --gen" % got)
+    # the category on each unit's card (command.lua's groups, read off main_units 2026-10-23): the War Hydra is a monster
+    # though land_units files it as inf_melee; Bull Centaurs cavalry, the Iron Daemon a war machine, Stone Trolls
+    # monstrous infantry
+    probe = ('local d = dofile([[%s]]) local c = d.castes or {} print(c["wh2_main_def_mon_war_hydra_0"], '
+             'c["wh3_dlc23_chd_cav_bull_centaurs_axe"], c["wh3_dlc23_chd_veh_iron_daemon"], '
+             'c["wh2_dlc15_grn_mon_stone_trolls_0"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["monster", "melee_cavalry", "warmachine", "monstrous_infantry"]:
+        bad.append("data.lua castes: War Hydra, Bull Centaurs, Iron Daemon, Stone Trolls %s - run --gen" % got)
     # a spell's overcast and its cost (abilities.lua): Djaf's Cursed Blades 3 winds, overcast 5; an ability's skill upgrade
     # costs nothing and is no overcast (the Tomb King's rally)
     probe = ('local d = dofile([[%s]]) local o = d.overcasts or {} print(o["wh2_dlc09_spell_nehekhara_djafs_incantation_of_cursed_blades"], '
@@ -228,6 +252,13 @@ def check_data():
     got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
     if got != ["3", "1", "nil"]:
         bad.append("data.lua gravity overrides: Drakegun, Flamer, default crossbow %s - run --gen" % got)
+    # who an ability may land on (abilities.lua may_target): Grimgor's You're Next! lords and heroes only, Whiplash never
+    # them, the Fireball either
+    probe = ('local d = dofile([[%s]]) local t = d.targets or {} print(t["wh2_dlc15_lord_abilities_youre_next"], '
+             't["wh2_dlc14_lord_abilities_whiplash"], t["wh_main_spell_fire_fireball"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["com", "not_com", "nil"]:
+        bad.append("data.lua targets: You're Next!, Whiplash, Fireball %s - run --gen" % got)
     return bad
 
 def exe_stamp():
@@ -312,15 +343,41 @@ def gen():
     # ability's skill upgrade has the same suffix and costs nothing, so only one whose base spends winds
     overcasts = {k: float(usa[k + "_upgraded"]["mana_cost"]) for k, r in usa.items()
                  if not r["passive"] and float(r["mana_cost"]) > 0 and k + "_upgraded" in usa}
+    # the two invalid target flags a script can read (abilities.lua may_target): lords and heroes only, or never them (a
+    # player, 2026-10-23: Grimgor's You're Next! aimed at a regiment never landed and cooled down all the same). The
+    # installed mods' rows too
+    COM = {"unit_is_not_commander_class": "com", "unit_is_commander_class": "not_com"}
+    targets = {}
+    for p in mods + [DB_PACK]:
+        try:
+            for _p, _v, rs in load(p, "special_ability_to_invalid_target_flags_tables"):
+                for r in rs:
+                    if r["invalid_target"] in COM and r["special_ability"] in kinds:
+                        targets.setdefault(r["special_ability"], COM[r["invalid_target"]])
+        except Exception:  # a pack without the table, or a table version the schema does not know
+            pass
     # a chariot (main.lua): a war machine drawn by beasts (its engine has a draught attachment point) that shoots
     # nothing - the doomwheel drives itself, the steam tank and the Tiranoc chariot shoot (read 2026-10-20)
     be_eng = keyed("battlefield_engines")
     chariots = sorted(k for k, land in lu.items() if land["category"] == "war_machine" and not land["primary_missile_weapon"]
                       and (be_eng.get(land["engine"]) or {}).get("draught_attachment_point"))
+    # each unit's card category (command.lua's groups): main_units.caste by its land unit, what unit:type() returns.
+    # land_units.category, which CA's getters follow, files 218 of 271 monsters as inf_melee (read 2026-10-23). Lords
+    # and heroes are left out (unit_class "com" groups them). main_units' key column is "unit", so keyed() cannot read it;
+    # the installed mods' rows first, as keyed() takes them
+    castes = {}
+    for p in mods + [DB_PACK]:
+        try:
+            for _p, _v, rs in load(p, "main_units_tables"):
+                for r in rs:
+                    if r["caste"] not in ("lord", "hero"):
+                        castes.setdefault(r["land_unit"], r["caste"])
+        except Exception:  # a pack without the table, or a table version the schema does not know
+            pass
     TF = third_person_fires
-    raises, runs, charges, blanks = {}, {}, {}, {}
+    raises, runs, charges, blanks, dulls = {}, {}, {}, {}, {}
     fires, fires_low, fires_high = TF.build((TF.FIRE, TF.GRENADIER, TF.RIDER_FIRE), (TF.FIRE_LOW,), (TF.FIRE_HIGH,), raises=raises,
-                                            runs=runs, charges=charges, blanks=blanks)
+                                            runs=runs, charges=charges, blanks=blanks, dulls=dulls)
     lines = ["-- GENERATED by tools/build_third_person.py --gen from db.pack, exe build 0x%08x. Do not edit." % exe_stamp(),
              "-- shots: land unit key (what unit:type() returns) -> {projectile key, base_reload_time, projectiles per shot,",
              "--   the weapon's fire sound event if it has one}",
@@ -337,10 +394,15 @@ def gen():
              "-- charges: land unit key -> {CHARGE, FLY_CHARGE_AIR_TO_AIR}: the longest of each, s, 0 for none, off the body",
              "--   that plays it (his mount's, else his own; combat.lua sends the sprint's clip again at its end)",
              "-- blanks: land unit key -> the slots of that body whose every clip is an empty file (none to play)",
+             "-- dulls: land unit key -> the ATTACK_1-10 slots of that body with a clip whose .anm.meta has no SPLASH_ATTACK",
+             "--   (played by the script, it hits nothing; combat.lua swings the others)",
              "-- bodies: land unit key -> {radius, height} of each man in m, off battle_entities (a rider: his mount's height",
              "--   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)",
              "-- chariots: land unit keys of the war machines drawn by beasts that shoot nothing (main.lua plays one alone)",
+             "-- castes: land unit key -> main_units.caste, the category on its card, lords and heroes left out (command.lua)",
              "-- overcasts: spell key -> winds its <key>_upgraded overcast costs (abilities.lua)",
+             "-- targets: ability key -> com, it lands on lords and heroes only, or not_com, never on them (its invalid",
+             "--   target flags; abilities.lua)",
              "return {", "\tshots = {"]
     for k in sorted(shots):
         key, reload, n, bang = shots[k]
@@ -364,6 +426,9 @@ def gen():
     lines += ["\t},", "\tblanks = {"]
     for k in sorted(blanks):
         lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("%d" % s for s in blanks[k])))
+    lines += ["\t},", "\tdulls = {"]
+    for k in sorted(dulls):
+        lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("%d" % s for s in dulls[k])))
     lines += ["\t},", "\tspeeds = {"]
     for k in sorted(speeds):
         lines.append('\t\t["%s"] = %g,' % (k, speeds[k]))
@@ -376,15 +441,21 @@ def gen():
     lines += ["\t},", "\tchariots = {"]
     for k in chariots:
         lines.append('\t\t["%s"] = true,' % k)
+    lines += ["\t},", "\tcastes = {"]
+    for k in sorted(castes):
+        lines.append('\t\t["%s"] = "%s",' % (k, castes[k]))
     lines += ["\t},", "\tovercasts = {"]
     for k in sorted(overcasts):
         lines.append('\t\t["%s"] = %g,' % (k, overcasts[k]))
+    lines += ["\t},", "\ttargets = {"]
+    for k in sorted(targets):
+        lines.append('\t\t["%s"] = "%s",' % (k, targets[k]))
     lines += ["\t},", "}", ""]
     with open(DATA, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
     print("wrote %s: %d unit types, %d abilities, %d fire clips, %d raises, %d charge attacks, %d charges, %d with blank "
-          "slots, %d bodies" % (DATA, len(shots), len(kinds), len(fires), len(raises), len(runs), len(charges), len(blanks),
-                                len(bodies)))
+          "slots, %d with dull swings, %d bodies" % (DATA, len(shots), len(kinds), len(fires), len(raises), len(runs), len(charges),
+                                                     len(blanks), len(dulls), len(bodies)))
 
 
 def check_loc():
@@ -477,6 +548,161 @@ def bridge(keep=None):
     return names
 
 
+STATS_LUA = os.path.join(SRC, "script", "derpy_tp", "stats.lua")
+# Khorne's Relentless Rage: an army ability that buffs one friendly unit. Every row below is a copy of its row with only
+# the fields named changed (docs/CUSTOM_ABILITIES.md: wide rows are cloned, never authored)
+STAT_DONOR = "wh3_main_army_abilities_relentless_rage"
+# metres around the point buffs.lua aims at; the one friendly unit nearest it takes the phase. 1.5 missed a regiment's
+# centre and Morbidex; 10 took Morbidex over Orghotts 4.8 m off (measured 2026-10-24)
+STAT_RANGE = 10.0
+STAT_TOOLTIP = "From Third-Person Battles' settings: on the unit you play, while you play it."
+
+
+def stat_steps():
+    """[(ability key, label, [stat key], how, value, step, icon)] from stats.lua, run under lua.exe so nothing is parsed
+    twice."""
+    script = ("local T = dofile(arg[1]) for _, s in ipairs(T.order) do for _, v in ipairs(T.steps(s)) do "
+              "print(table.concat({T.ability(s, v), T.stats[s].label .. ' ' .. T.text(s, v), "
+              "table.concat(T.stats[s].keys, ','), T.stats[s].points and 'add' or 'mult', v, T.stats[s].icon}, '\\t')) "
+              "end end")
+    with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False) as f:
+        f.write(script)
+    try:
+        r = subprocess.run([LUA, f.name, STATS_LUA], capture_output=True, text=True, check=True)
+    finally:
+        os.remove(f.name)
+    out = []
+    for line in r.stdout.splitlines():
+        key, label, stats, how, v, icon = line.split("\t")
+        v = int(v)
+        out.append((key, label, stats.split(","), how, (1 + v / 100.0) if how == "mult" else float(v), v, icon))
+    return out
+
+
+def stat_rows():
+    """{table: (version, [row])} and the loc rows for the stat abilities, per stat and step: an army ability (hidden,
+    never used by the AI or autoresolve) that every faction's army owns, whose phase stays until the ability is used
+    again. buffs.lua aims it at the ground under the unit played (army:use_special_ability), so no unit row is touched
+    and a modded unit gets it too. Measured 2026-10-24 (memory wh3-script-cast-army-ability-on-one-unit):
+    default_army_special_abilities grants an active ability to nobody, the faction junction does; the player's army
+    only SELECTS a unit-aimed ability, a ground-aimed one it casts."""
+    sys.path.insert(0, os.path.join(ROOT, "tools"))
+    import zlib
+    from read_vanilla_db import load, DB_PACK
+
+    loaded = {}
+
+    def table(name):
+        if name not in loaded:
+            loaded[name] = load(DB_PACK, name)[0][1:]
+        return loaded[name]
+
+    def donor(name, field, key=STAT_DONOR):
+        ver, rows = table(name)
+        return ver, next(r for r in rows if r[field] == key)
+
+    tables, loc = {}, []
+
+    def add(name, ver, row):
+        tables.setdefault(name, (ver, []))[1].append(row)
+
+    fver, factions = table("factions_tables")
+    jver = table("army_special_abilities_for_faction_junctions_tables")[0]
+    for key, label, stats, how, value, step, icon in stat_steps():
+        uid = 1990000000 + zlib.crc32(key.encode()) % 9000000
+        ver, ua = donor("unit_abilities_tables", "key")
+        add("unit_abilities_tables", ver, dict(ua, key=key, icon_name=icon, requires_effect_enabling=False,
+                                                 is_hidden_in_ui=True, is_hidden_in_ui_for_enemy=True))
+        # aimed at the ground, the phase junction picks friends: a unit-aimed one the player's army only selects. Active a
+        # second and ready again at once, so the next cast is never refused for its timer
+        ver, usa = donor("unit_special_abilities_tables", "key")
+        add("unit_special_abilities_tables", ver, dict(
+            usa, key=key, unique_id=uid, active_time=1.0, recharge_time=0.0, initial_recharge=0.0, num_uses=-1,
+            target_ground=True, target_friends=False, target_enemies=False, effect_range=STAT_RANGE,
+            num_effected_friendly_units=1, num_effected_enemy_units=0, update_targets_every_frame=False,
+            targetting_aoe="wh_abilities_generic_buff_no_ring", passive_aoe="wh_abilities_generic_buff_no_ring",
+            ai_usage="", audio="", audio_switch_ui_override="", additional_melee_cp=0.0, autoresolver_usage="disabled"))
+        ver, asa = donor("army_special_abilities_tables", "army_special_ability")
+        add("army_special_abilities_tables", ver, dict(asa, army_special_ability=key, unit_special_ability=key,
+                                                          unique_id=uid + 1))
+        for f in factions:
+            add("army_special_abilities_for_faction_junctions_tables", jver,
+                {"army_special_ability": key, "faction": f["key"], "is_hidden_in_ui": True})
+        # shown in the unit's effect list under the ability's name and icon, which is also how buffs.lua reads it back
+        ver, ph = donor("special_ability_phases_tables", "id")
+        add("special_ability_phases_tables", ver, dict(
+            ph, id=key, duration=-1.0, effect_type="positive" if step > 0 else "negative", phase_display="",
+            phase_audio="", is_hidden_in_ui=False))
+        ver, j = donor("special_ability_to_special_ability_phase_junctions_tables", "special_ability")
+        add("special_ability_to_special_ability_phase_junctions_tables", ver, dict(j, special_ability=key, phase=key))
+        ver, se = donor("special_ability_phase_stat_effects_tables", "phase", "wh3_main_siege_momentum")
+        for stat in stats:
+            add("special_ability_phase_stat_effects_tables", ver, dict(se, phase=key, stat=stat, value=value, how=how))
+        loc.append(("unit_abilities_onscreen_name_" + key, label))
+        loc.append(("unit_abilities_tooltip_text_" + key, STAT_TOOLTIP))
+    return tables, loc
+
+
+def check_stats():
+    """The stat abilities against db.pack: each (stat, how) pair one CA uses, each icon one CA's abilities use (so the
+    file exists), no unique_id CA or another row of ours holds, and every faction junction row there."""
+    from read_vanilla_db import load, DB_PACK
+    bad = []
+    tables, _loc = stat_rows()
+
+    def rows(name):
+        return load(DB_PACK, name)[0][2]
+    pairs = {(r["stat"], r["how"]) for r in rows("special_ability_phase_stat_effects_tables")}
+    for r in tables["special_ability_phase_stat_effects_tables"][1]:
+        if (r["stat"], r["how"]) not in pairs:
+            bad.append("stats: %s %s on %s is no stat effect CA uses" % (r["how"], r["stat"], r["phase"]))
+    icons = {r["icon_name"] for r in rows("unit_abilities_tables")}
+    for r in tables["unit_abilities_tables"][1]:
+        if r["icon_name"] not in icons:
+            bad.append("stats: %s has icon %s, which no CA ability uses" % (r["key"], r["icon_name"]))
+    ours = [r["unique_id"] for t in ("unit_special_abilities_tables", "army_special_abilities_tables")
+            for r in tables[t][1]]
+    theirs = {r["unique_id"] for t in ("unit_special_abilities_tables", "army_special_abilities_tables") for r in rows(t)}
+    if len(set(ours)) != len(ours) or set(ours) & theirs:
+        bad.append("stats: a unique_id is used twice")
+    keys = [r["key"] for r in tables["unit_abilities_tables"][1]]
+    if len(tables["army_special_abilities_for_faction_junctions_tables"][1]) != len(keys) * len(rows("factions_tables")):
+        bad.append("stats: not every faction owns every stat ability")
+    return bad
+
+
+def tsv_cell(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, float):
+        return "%.4f" % v
+    return str(v)
+
+
+def write_stat_tsvs(td):
+    """One TSV per table plus the stat loc, in td: [(table path, tsv path)] for import_tsv."""
+    tables, loc = stat_rows()
+    out = []
+    for table, (ver, rows) in sorted(tables.items()):
+        path = "db/%s/%s" % (table, FRAG)
+        tsv = os.path.join(td, table + ".tsv")
+        with open(tsv, "w", encoding="utf-8", newline="") as f:
+            f.write("\t".join(rows[0]) + "\n#%s;%d;%s\n" % (table, ver, path))
+            for r in rows:
+                f.write("\t".join(tsv_cell(r[c]) for c in rows[0]) + "\n")
+        out.append((table, ver, path, tsv, len(rows)))
+    return out, loc
+
+
+def import_stat_tables(_call, key, td):
+    """Put the stat abilities' tables into the open pack `key`; returns their loc rows for the pack's one loc file."""
+    out, loc = write_stat_tsvs(td)
+    for table, ver, path, tsv, _n in out:
+        _call("new_packed_file", {"pack_key": key, "path": path, "new_file": json.dumps({"DB": [FRAG, table, ver]})})
+        _call("import_tsv", {"pack_key": key, "table_path": path, "tsv_path": tsv})
+    return loc
+
+
 def pack():
     """Selftest, then build the pack through RPFM (needs RPFM open) and read every file back."""
     import datetime
@@ -501,11 +727,12 @@ def pack():
     _call("add_packed_files", {"pack_key": key, "source_paths": [f for f, _ in files],
                                "destination_paths": json.dumps([{"File": rel} for _, rel in files])})
     with tempfile.TemporaryDirectory() as td:
+        loc = dict(LOC, **dict(import_stat_tables(_call, key, td)))
         tsv = os.path.join(td, "loc.tsv")
         with open(tsv, "w", encoding="utf-8", newline="") as f:
             f.write("key\ttext\ttooltip\n#Loc;1;text/db/%s.loc\n" % FRAG)
-            for k in sorted(LOC):
-                f.write("%s\t%s\tfalse\n" % (k, LOC[k]))
+            for k in sorted(loc):
+                f.write("%s\t%s\tfalse\n" % (k, loc[k]))
         loc_path = "text/db/%s.loc" % FRAG
         _call("new_packed_file", {"pack_key": key, "path": loc_path, "new_file": json.dumps({"Loc": FRAG})})
         _call("import_tsv", {"pack_key": key, "table_path": loc_path, "tsv_path": tsv})
@@ -515,11 +742,14 @@ def pack():
 
 
 def verify(_call):
-    """Re-open the SAVED pack: every Lua file byte-identical to the source, the loc with every row."""
+    """Re-open the SAVED pack: every Lua file byte-identical to the source, the loc with every row, each stat table
+    with every row."""
     key = _call("open_packfiles", {"paths": [PACK]})["StringContainerInfo"][0]
     bad = []
     files = pack_files()
     loc_path = "text/db/%s.loc" % FRAG
+    tables, stat_loc = stat_rows()
+    all_loc = dict(LOC, **dict(stat_loc))
     with tempfile.TemporaryDirectory() as td:
         _call("extract_packed_files", {"pack_key": key,
                                        "source_paths": json.dumps({"PackFile": [{"File": rel} for _, rel in files]}),
@@ -532,11 +762,23 @@ def verify(_call):
                                        "destination_path": td, "export_as_tsv": True})
         got = os.path.join(td, *loc_path.split("/")) + ".tsv"
         rows = open(got, encoding="utf-8").read().splitlines()[2:] if os.path.isfile(got) else []
-        if sorted(r.split("\t")[0] for r in rows) != sorted(LOC):
-            bad.append("the loc came back with %d rows, not %d" % (len(rows), len(LOC)))
+        if sorted(r.split("\t")[0] for r in rows) != sorted(all_loc):
+            bad.append("the loc came back with %d rows, not %d" % (len(rows), len(all_loc)))
+        for table, (_ver, want) in sorted(tables.items()):
+            path = "db/%s/%s" % (table, FRAG)
+            _call("extract_packed_files", {"pack_key": key, "source_paths": json.dumps({"PackFile": [{"File": path}]}),
+                                           "destination_path": td, "export_as_tsv": True})
+            got = os.path.join(td, *path.split("/")) + ".tsv"
+            lines = open(got, encoding="utf-8").read().splitlines() if os.path.isfile(got) else []
+            head = lines[0].split("\t") if lines else []
+            # the first column RPFM writes back, against each built row's own value for it, in order
+            back = [r.split("\t")[0] for r in lines[2:]]
+            if not head or back != [tsv_cell(r[head[0]]) for r in want]:
+                bad.append("%s came back with %d rows, not the %d built" % (path, len(back), len(want)))
     for b in bad:
         print("FINDING: %s" % b)
-    print("verified %d files and %d loc rows" % (len(files), len(LOC)) if not bad else "pack NOT verified")
+    print("verified %d files, %d loc rows and %d stat tables" % (len(files), len(all_loc), len(tables))
+          if not bad else "pack NOT verified")
     return 0 if not bad else 1
 
 

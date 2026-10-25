@@ -54,9 +54,12 @@ local SHOT_DELAY_MS, SHOT_H, SHOT_FWD = 300, 1.5, 1.5 -- anim to release; m up; 
 local SHOT_CLEAR = 1.1
 -- a thrown bomb's release (measured 2026-10-15 in anim2.pack: both blasting-charge throws carry FIRE_POS at 2.2 and 2.3 s)
 local THROW_MS = 2200
--- the charge run: CHARGE at mask 6 (measured 2026-10-15: he keeps his speed under it), sent again CHARGE_LEAD s before
--- its own end - a model tick, so the next starts as it ends (ponytail: a guess until measured in game)
-local CHARGE, CHARGE_LEAD, WALK_1 = 135, 0.1, 42
+-- the charge run: CHARGE at mask 6 (measured 2026-10-15: he keeps his speed under it), sent again on the model tick its
+-- clip ends. Model time moves in whole ticks and a send reaches him a fixed delay later, so the time between two starts
+-- is the time between two sends: sent a tick early, every 0.7 s stride lost its last 0.1 s, two of its 14 frames, and
+-- the float sum let one in four through whole (the author, 2026-10-24: "theres 1 frame glitching")
+local CHARGE, WALK_1 = 135, 42
+local TICK = 0.1 -- s: bm:time_elapsed_ms() moves in whole tenths
 local FLY_CHARGE = 102 -- FLY_CHARGE_AIR_TO_AIR
 -- the exe's body-mask enum (exe+3926238, read 2026-10-16): 0 NONE (the clip's own metadata), 1 TORSO_AND_ARMS,
 -- 2 SPINE_AND_CHILDREN, 3 NECK_AND_CHILDREN, 4 LEFT_ARM, 5 RIGHT_ARM, 6 FULL_BODY
@@ -88,10 +91,12 @@ return function(E)
 	end
 
 	-- the aiming dot: our own instance of the first-person layout with everything but its crosshair hidden
+	-- every frame; written only when it differs from what the component shows. Its own visibility, not a note of ours:
+	-- CA's first_person_ui hides itself half a second after it is made (measured 2026-10-24, third person off, no
+	-- cinematic call), and a note left the first crosshair of every battle hidden (the author, 2026-10-23: "crosshair
+	-- missing")
 	function C.crosshair(show)
 		show = show and true or false -- SetVisible(nil) corrupts the game's strings
-		if F.xhair == show then return end
-		F.xhair = show
 		local root = core:get_ui_root()
 		local ui = find_uicomponent(root, "derpy_tp_crosshair")
 		if not ui then
@@ -103,7 +108,7 @@ return function(E)
 			local w, h = x:Dimensions()
 			x:MoveTo(math.floor(sw / 2 - w / 2), math.floor(sh / 2 - h / 2))
 		end
-		ui:SetVisible(show)
+		if ui:Visible() ~= show then ui:SetVisible(show) end
 	end
 
 	-- the point under the screen centre: last frame's camera ray where it meets the ground; looking level or up, or past
@@ -183,15 +188,24 @@ return function(E)
 		return x, y, z, unit
 	end
 
+	-- e is ahead of him: inside cos of the camera's forward, AIM_COS unless given
+	local function ahead(e, cos)
+		local q, p = F.unit:position(), e:position()
+		local dx, dz = p:get_x() - q:get_x(), p:get_z() - q:get_z()
+		return (dx * math.sin(E.rig.yaw) + dz * math.cos(E.rig.yaw)) / math.max(math.sqrt(dx * dx + dz * dz), 0.01) > (cos or AIM_COS)
+	end
+
 	-- the enemy nearest the aim: inside AIM_COS of the camera's forward and reach (AIM_RANGE, a gun's its range), or
 	-- AIM_CLOSE any way; distance weighted by how far off the aim it is. The locked enemy first, while in reach.
-	-- ones: a unit of one beats any regiment (the lock-on's pick)
-	local function pick_target(reach, ones)
+	-- ones: a unit of one beats any regiment (the lock-on's pick). only_ahead: the sprint's charge (C.charge), never one
+	-- AIM_CLOSE behind him, the locked one neither (a player, 2026-10-23: Shift in a crowd locked the lord onto an enemy
+	-- and he "can't use Shift to run away"; read live the same day, turned to run, the charge took one behind him)
+	local function pick_target(reach, ones, only_ahead)
 		reach = reach or AIM_RANGE
 		local q = F.unit:position()
 		local qx, qz = q:get_x(), q:get_z()
 		local held = not ones and held_target()
-		if held then
+		if held and not (only_ahead and not ahead(held)) then
 			local p = held:position()
 			if (p:get_x() - qx) ^ 2 + (p:get_z() - qz) ^ 2 <= reach * reach then return held end
 		end
@@ -207,7 +221,7 @@ return function(E)
 					local dx, dz = p:get_x() - qx, p:get_z() - qz
 					local d = math.sqrt(dx * dx + dz * dz)
 					local c = (dx * fx + dz * fz) / math.max(d, 0.01)
-					if d < AIM_CLOSE or (c > AIM_COS and d < reach) then
+					if d < AIM_CLOSE and not only_ahead or (c > AIM_COS and d < reach) then
 						local score = d * (2 - c)
 						local tier = ones and e:initial_number_of_men() > 1 and 1 or 0
 						if not best_score or tier < best_tier or tier == best_tier and score < best_score then
@@ -317,6 +331,16 @@ return function(E)
 			elseif first and (P.has_slot(first, s) or mount and P.has_slot(mount, s)) then has[#has + 1] = s end
 		end
 		if #has == 0 then has = slots end -- a rider's fallback clip, or the attack order
+		-- a swing hits through its clip's SPLASH_ATTACK: one with none hits nothing when played here (the author,
+		-- 2026-10-25; a player, 2026-10-24: Celestial Guard "didnt manage to kill a single unit" - its four clips carry
+		-- IMPACT_POS alone). Those slots (data.lua dulls) are left out while one with a splash is left; a unit with none
+		-- keeps them all. ponytail: ground swings only, a flyer's FLY_ATTACK clips are not read
+		if attack and not air then
+			local dull, keep = {}, {}
+			for _, s in ipairs(E.D.dulls and E.D.dulls[F.utype] or {}) do dull[s] = true end
+			for _, s in ipairs(has) do if not dull[s] then keep[#keep + 1] = s end end
+			if #keep > 0 then has = keep end
+		end
 		-- the attack clips halved, in order, the left button's first (a player, 2026-10-19: "10 sets of combat animations
 		-- ... 2 sets cannot be triggered" - it was ATTACK_1-4 and 5-7 whatever he had). One clip: both buttons play it.
 		-- A unit that can shoot has its right button for the mode (C.mode), and the left has them all (the author,
@@ -587,11 +611,15 @@ return function(E)
 			-- camera through the shot; the author, 2026-10-15: "the projectile spawn is mismatched to the model")
 			local c, sn = math.cos(E.rig.yaw), math.sin(E.rig.yaw)
 			from = v(x + at[2] * c + at[4] * sn, y + at[3], z - at[2] * sn + at[4] * c)
-			-- a muzzle inside him (a raised gun's, over his head) moves out along the line to the aim until SHOT_CLEAR from
-			-- him: k solves |p + k d| = SHOT_CLEAR across the ground, p the muzzle from him, d the line
+			-- a muzzle inside him (a raised gun's, over his head) moves out along the line to the aim until clear of
+			-- him: k solves |p + k d| = clear across the ground, p the muzzle from him, d the line. Clear is SHOT_CLEAR, or
+			-- a body wider than a man's radius and 0.8 m (data.lua bodies; a player's report, 2026-10-23: gyrocopters,
+			-- about 1.5 m, shot themselves from 1.1 m out, and this was the fix that player tested)
+			local body = E.D.bodies and E.D.bodies[F.utype]
+			local clear = body and body[1] > 1 and body[1] + 0.8 or SHOT_CLEAR
 			local fx, fy, fz = from:get_x(), from:get_y(), from:get_z()
 			local px, pz, dx, dy, dz = fx - x, fz - z, ax - fx, ay - fy, az - fz
-			local a, b, c2 = dx * dx + dz * dz, px * dx + pz * dz, px * px + pz * pz - SHOT_CLEAR * SHOT_CLEAR
+			local a, b, c2 = dx * dx + dz * dz, px * dx + pz * dz, px * px + pz * pz - clear * clear
 			if c2 < 0 and a > 1e-4 then
 				local k = (-b + math.sqrt(b * b - a * c2)) / a
 				from = v(fx + dx * k, fy + dy * k, fz + dz * k)
@@ -758,7 +786,7 @@ return function(E)
 	function C.manual()
 		local u = F.unit
 		E.main.stop("manual fire")
-		u:select_in_ui()
+		E.select(u)
 		E.fp = {unit = u, seen = false, clicked = false, t = os.clock()}
 		bm:repeat_real_callback(watch, 100, "derpy_tp_fp")
 	end
@@ -888,14 +916,19 @@ return function(E)
 		if playing then F.charge_seen = true end
 		if F.lock then -- the charge attack, thrown on the run: neither clip over it
 		elseif on and (now >= (F.charge_at or 0) or F.charge_seen and not playing) then
+			-- a clip of known length seen over before its tick: the engine ends it ahead of the send, and the run shows
+			-- between (not seen in the harness; the first in a battle is logged)
+			if F.charge_known and now < F.charge_at then E.once("charge_short", "charge clip over before its tick: " .. F.utype) end
 			each(function(m) m = P.mount(m) or m if P.has_slot(m, clip) then P.play(m, clip, 6) end end)
 			local len = E.D.charges and E.D.charges[F.utype]
 			len = len and len[air and 2 or 1] or 0
-			F.charge_at, F.charge_seen = now + (len > CHARGE_LEAD and len - CHARGE_LEAD or LOCK_MAX), false
+			-- on the tick it ends, asked half a tick early: a float sum a hair over that tick would miss it
+			F.charge_at = now + (len > 0 and len - TICK / 2 or LOCK_MAX)
+			F.charge_seen, F.charge_known = false, len > 0
 		elseif not on and F.charging and not F.charge_order then
 			each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end)
 		end
-		if not on then F.charge_at, F.charge_seen = nil, nil end
+		if not on then F.charge_at, F.charge_seen, F.charge_known = nil, nil, nil end
 		F.charging = on
 	end
 
@@ -912,12 +945,16 @@ return function(E)
 	function C.can_sprint() return F.sprinting or F.stamina >= STAMINA_AGAIN end
 
 	-- The native order enables charge collisions. A single entity keeps direct steering and its ordinary swings
-	-- disarmed; the order must not hand W control over to sustained melee.
+	-- disarmed; the order must not hand W control over to sustained melee. It lets go of an enemy he has turned his back
+	-- on, past 90 degrees: at the pick's 45 an enemy 4 m off in a crowd crossed it each step, and the order went to the
+	-- next and back (read live 2026-10-23: three orders in 0.6 s)
 	function C.charge(now)
 		local co = F.charge_order
-		if co and (not F.sprinting or not co.target:is_valid_target() or co.target:is_routing()) then F.charge_order, co = nil, nil end
+		if co and (not F.sprinting or not co.target:is_valid_target() or co.target:is_routing() or not ahead(co.target, 0)) then
+			F.charge_order, co = nil, nil
+		end
 		if co or F.model or not F.sprinting then return end
-		local target = pick_target(CHARGE_REACH)
+		local target = pick_target(CHARGE_REACH, false, true)
 		if not target then return end
 		F.charge_order = {target = target, at = now}
 		send(function()

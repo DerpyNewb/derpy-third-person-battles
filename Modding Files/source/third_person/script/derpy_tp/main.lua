@@ -4,15 +4,20 @@
 -- (bm:time_elapsed_ms) for everything that acts in the battle, so cooldowns, reloads and order gaps follow
 -- game speed and stop with the pause.
 local MAX_ERRORS, ZOOM_LARGE, ZOOM_NOTCH = 3, 2, 0.15
--- no documented call says "paused", and model time moves in 100-200 ms ticks, so a pause is model time
--- standing still this long in real time. ponytail: the first half second of a pause still acts; a UI
--- pause signal would close that gap if one is ever found.
+-- a pause is read off the battle's speed first (battle:current_battle_speed: 0 is stopped). No documented call says
+-- "paused" otherwise, and model time moves in 100-200 ms ticks, so a pause is also model time standing still this long
+-- in real time, stretched by a speed under 1: at a quarter, a 200 ms tick takes 0.8 s and is slow motion, not a pause;
+-- above 1 it stays the half second, or a heavy battle's 200 ms between ticks at 3x reads as one (final review)
+-- (command mode, spec 3.11). ponytail: the first half second of a pause the speed does not show still acts; a UI pause
+-- signal would close that gap if one is ever found.
 local PAUSE_AFTER = 0.5
 -- a sprint's speed against his run, the charge's too (the author, 2026-10-16: "if no charge animation, add a 20% boost
 -- to speed", then "20% boost even with charge animation"; 2026-10-17: "add 50% speed boost when charging/sprinting")
 local SPRINT_SPEED = 1.5
 -- s the lock-on key may be held and still be its click: longer is the free mouse's hold when they share a key (keys.lua)
 local LOCK_CLICK = 0.3
+local MID_STILL = 8 -- px the mouse may move inside a middle click before it is a drag (command mode's Vanilla style)
+local FLAGS = "derpy_tp_unit_flags" -- CA's registry name for the player's 3D flags while third person has them down
 
 return function(E)
 	local F, P = E.F, E.P
@@ -29,9 +34,24 @@ return function(E)
 		local ok, s = pcall(common.get_context_value, "CcoBattleUnit", tostring(u:unique_ui_id()), "IsSelected")
 		return ok and s == true
 	end
+	E.selected = selected -- command.lua: follow me lets go of a unit selected with the freed mouse
+	-- selects u alone. select_in_ui is a queued command (BCQ_SELECT_UNIT_FROM_SCRIPT, read off the exe on 2026-10-24) whose
+	-- handler runs on every machine: in multiplayer the other players' selection took his unit. There his card is clicked
+	-- instead, as the player selects, which stays on this machine. ponytail: single player keeps select_in_ui, which lands
+	-- two ticks late and not while paused; the card click for both once it is measured live
+	function E.select(u)
+		if not P.features.net then u:select_in_ui() return end
+		local card = find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id()))
+		if card then bm:clear_selection() card:SimulateLClick() end
+	end
+	-- this machine's army. CA's get_player_army() is the alliance's first (lib_battle_manager.lua), the partner's when two
+	-- players share a side and this machine's is the second (a player's report, 2026-10-23: F2 played his partner's
+	-- Neferata and the battle desynced); item(local_army()) is CA's own route (battle.html, local_army)
+	function E.army() return bm:get_player_alliance():armies():item(bm:local_army()) end
+
 	-- the one selected unit, else the general
 	local function pick_unit()
-		local units, one, general = bm:get_player_army():units(), bm:num_units_selected() == 1, nil
+		local units, one, general = E.army():units(), bm:num_units_selected() == 1, nil
 		for i = 1, units:count() do
 			local u = units:item(i)
 			if one and selected(u) then return u end
@@ -123,10 +143,19 @@ return function(E)
 	-- selection markers, flags and panels with it (the author's choice, 2026-10-14); the pack draws its own.
 	local function cursor(show)
 		show = show and true or false
+		-- CA's interface is on with the freed mouse, and for all of command mode's Vanilla style, whose clicks are CA's:
+		-- the cinematic UI takes no world order (measured 2026-10-23). The interface hidden (S.keys.hide_ui) keeps it off
+		-- Entering or leaving the mode and hiding the interface reset F.cursor_shown, so the switch follows them too
 		if F.cursor_shown == show then return end
 		F.cursor_shown = show
-		-- the interface hidden (S.keys.hide_ui), the freed mouse brings the cursor back and CA's interface stays off
-		if show and not F.ui_off then bm:enable_cinematic_ui(false, true, false) else bm:enable_cinematic_ui(true, show, false) end
+		-- none in multiplayer: the call is queued as well as applied (BCQ_ENABLE_CINEMATIC_UI, read off the exe on
+		-- 2026-10-24), and its handler hid every machine's interface and cursor (a player, 2026-10-24: "the other ... cannot
+		-- do anything anymore"). There the HUD goes the pack's way (hud below) and the cursor each frame (P.hide_cursor).
+		-- ponytail: CA's selection markers stay, and its cursor between two frames
+		if not P.features.net then
+			if (show or E.command.vanilla()) and not F.ui_off then bm:enable_cinematic_ui(false, true, false)
+			else bm:enable_cinematic_ui(true, show, false) end
+		end
 		-- the flags over every unit: the switch brings them back, so they are set again as the guide key has them (banners
 		-- below). enable_unit_ids would write it into the replay
 		bm.battle:set_banners_enabled(F.banners == true)
@@ -149,7 +178,7 @@ return function(E)
 	-- the crosshair and the cursor from F.ui_off
 	local function hide_ui(off)
 		F.ui_off = off
-		E.hud.show(not off)
+		E.hud.show(not off) -- in command mode's Vanilla style too, standing on CA's HUD (hud.lua H.place)
 		F.cursor_shown = nil -- cursor() applies CA's interface again, hidden or not
 	end
 
@@ -243,9 +272,22 @@ return function(E)
 		-- on the lock-on's key, only a press past its click frees the mouse: freed at once, every click showed the cursor
 		-- and CA's interface faded in and out (the author, 2026-10-21: "the cursor keep popping off")
 		local click = S.keys.lock == S.keys.look_free and F.lock_key and now - F.lock_key <= LOCK_CLICK
-		if P.held(S.keys.look_free) and not click then F.dragging = false return end
+		-- command mode's Vanilla style: a click frees the cursor and the next takes it back (the author, 2026-10-23: "make
+		-- middle button press during this mode have a movable cursor"); the lock-on is off in the mode. A click is a press
+		-- let go inside LOCK_CLICK with the mouse still: a drag turns the view, the cursor free or not, and switches nothing
+		-- (the author, 2026-10-23: "middle mouse dragging should not also activate toggle for freeview and fixed on character")
+		if E.command.vanilla() then
+			local held = P.held(S.keys.look_free)
+			if held and not F.mid then F.mid = {at = now, moved = 0}
+			elseif not held and F.mid then
+				if now - F.mid.at <= LOCK_CLICK and F.mid.moved <= MID_STILL then F.free_cursor = not F.free_cursor end
+				F.mid = nil
+			end
+			if F.free_cursor and not held then F.dragging = false return end
+		elseif P.held(S.keys.look_free) and not click then F.dragging = false return end
 		if not F.dragging then P.look_begin() F.dragging = true return end
 		local dx, dy = P.look_delta()
+		if F.mid then F.mid.moved = F.mid.moved + math.abs(dx) + math.abs(dy) end
 		if dx ~= 0 or dy ~= 0 then E.rig.look(dx, dy) end
 	end
 
@@ -257,11 +299,13 @@ return function(E)
 		if zin ~= zout or notches ~= 0 then
 			local step = (zout - zin) * S.zoom_rate * dt - notches * ZOOM_NOTCH
 			local closest = E.rig.zoom_by(step)
-			E.zoom_by_type[F.utype] = E.rig.zoom
+			if F.command then return end -- command mode's own view (rig.lua): no first person, nothing kept for his type
+			E.zoom_by_type[F.utype] = E.rig.want_zoom
 			-- zoomed in all the way, or to where the ground would bring the eye in to his head, first person; zoomed out to
 			-- where it fits behind him, third (the author, 2026-10-17: "the first person mode should work if the player
-			-- scrolled to the lowest"; the ground did that from zoom 0.9 on a slope, probes/zz_tp_zoomsweep.lua)
-			local fits = E.rig.fits(E.rig.zoom)
+			-- scrolled to the lowest"; the ground did that from zoom 0.9 on a slope, probes/zz_tp_zoomsweep.lua). Judged
+			-- where the zoom is going, not where its ease has got to
+			local fits = E.rig.fits(E.rig.want_zoom)
 			if step < 0 and (closest or not fits) then E.first_person = true
 			elseif step > 0 and fits then E.first_person = false end
 		end
@@ -271,13 +315,21 @@ return function(E)
 	local function tick(now, dt, gnow, paused)
 		local S, unit = E.S, F.unit
 		F.dt = dt -- real time: the model clock steps in 100 ms ticks (move.lua's turn)
-		hud(false)
+		hud(E.command.vanilla()) -- CA's whole HUD in command mode's Vanilla style (the author, 2026-10-23: "yes the whole")
 		if unit:number_of_men_alive() == 0 or unit:is_routing() then M.stop("unit lost") return end
 		local single = not F.model and (unit:number_of_men_alive() == 1 or F.crew) and P.models(unit)[1]
 		if single and P.model_hp(single) <= 0 then M.stop("unit lost") return end
 		F.single = F.single_steer and single or nil
-		-- orders are off, selection is not: a click on another unit or on the ground would take the portrait
-		if bm:num_units_selected() ~= 1 or not selected(unit) then bm:clear_selection() unit:select_in_ui() end
+		-- orders are off, selection is not: a click on another unit or on the ground would take the portrait. The mouse freed
+		-- in command mode gives CA's own orders to the rest of his army (spec 3.10), never to his unit: CA documents no call
+		-- that deselects one unit, so a selection holding his is cleared whole. In the Vanilla style CA's orders are on for
+		-- the whole mode and the selection is the player's, his unit in it or not (vanilla spec 4.2, 4.5)
+		local vanilla = E.command.vanilla()
+		local free = F.command ~= nil and (vanilla or not F.dragging)
+		if free ~= (F.free_orders or false) then F.free_orders = free bm:disable_orders(not free) end
+		if vanilla then -- nothing forced
+		elseif free then if selected(unit) then bm:clear_selection() end
+		elseif bm:num_units_selected() ~= 1 or not selected(unit) then bm:clear_selection() E.select(unit) end
 		if F.model and (unit:number_of_men_alive() < 2 or not P.alive(unit, F.model)) then
 			-- he died, or he is the last man: the next front-centre man, or the whole unit; a crewman's mate on the same
 			-- chariot first, so the camera stays on the chariot played (F.body: read while he lived, not off a dead man)
@@ -305,34 +357,45 @@ return function(E)
 		end
 		-- first person (the author, 2026-10-17: "first person camera"): out of the man he plays, or a unit of one; a regiment
 		-- played whole has no head to look out of. The rig takes his height
-		local head = E.first_person and (F.model or single) or nil
+		local head = E.first_person and not F.command and (F.model or single) or nil -- command mode's view is behind him
 		local body = head and E.D.bodies and E.D.bodies[F.utype]
 		local height = head and (body and body[2] or 1.8)
 		local x, y, z
 		if head or F.model then x, y, z = P.model_pos(head or F.model)
 		else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end
 		local kf, kr = 0, 0
-		if P.focused() then
-			-- the lock-on: a click, on its release (combat.lua C.target); read before the look, which it holds off
+		local focused = P.focused()
+		if focused then
+			-- the lock-on: a click, on its release (combat.lua C.target); read before the look, which it holds off. None in
+			-- command mode: it would take every order there (command.lua)
 			local lk = P.held(S.keys.lock)
 			if lk and not F.lock_key then F.lock_key = now
 			elseif not lk and F.lock_key then
-				if now - F.lock_key <= LOCK_CLICK then E.combat.target() end
+				if now - F.lock_key <= LOCK_CLICK and not F.command then E.combat.target() end
 				F.lock_key = nil
 			end
 			look(now)
 			if P.pressed(S.keys.hide_ui) then hide_ui(not F.ui_off) end -- paused too: a still to take a picture of
-			if P.pressed(S.keys.minimap) then F.map = E.hud.map(not F.map) end
+			if P.pressed(S.keys.minimap) and not vanilla then F.map = E.hud.map(not F.map) end -- CA's radar shows there
 			if P.pressed(S.keys.view) then E.first_person = not E.first_person end -- kept for the battle
 			-- the markers under enemies and allies (the author, 2026-10-19: "show the ally/enemy guide while holding/ toggle
 			-- Alt, configurable using mct"): while held, or a press switches them; paused too
 			if S.guide_hold then F.guide = P.held(S.keys.guide) elseif P.pressed(S.keys.guide) then F.guide = not F.guide end
-			banners(F.guide and S.guide_banners and not F.ui_off) -- the interface hidden, no banners either
+			-- the interface hidden, no banners either. The 3D flag over his own unit, the one under the crosshair, is the
+			-- player's ui_unit_flags, down for all of third person (M.start)
+			banners(not F.ui_off and F.guide and S.guide_banners)
+			-- command mode (command.lua): paused too, so orders can be given with the battle stopped
+			-- the way back's click (hud.lua H.back) is taken here, inside the frame's guard, not in CA's unguarded listener
+			if P.pressed(S.keys.command) or F.back_click and F.command then E.command.toggle(gnow) end
+			F.back_click = nil
 			cursor(not F.dragging)
 			if F.dragging then P.hide_cursor() end -- every frame: the game's middle-button release shows it (platform.lua)
 			kf = (P.held(S.keys.forward) and 1 or 0) - (P.held(S.keys.back) and 1 or 0)
 			kr = (P.held(S.keys.right) and 1 or 0) - (P.held(S.keys.left) and 1 or 0)
-			if not paused then
+			if F.command then
+				-- the clicks and number keys are command mode's: he neither fights nor casts, and he walks on
+				if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) end
+			elseif not paused then
 				-- toggled, or held (the author, 2026-10-15: "make shift be a long press or a toggable in the mct"; 2026-10-16:
 				-- "make z as the toggable walk"): he runs unless it has him walk
 				if S.walk_hold then F.walking = P.held(S.keys.walk) elseif P.pressed(S.keys.walk) then F.walking = not F.walking end
@@ -368,12 +431,15 @@ return function(E)
 				end
 				if P.pressed(S.keys.fly) and F.dragging then fly_press(gnow) end
 			end
+			-- in command mode the wheel and keys zoom its own view (rig.lua; the author, 2026-10-24: "cannot zoom out or in
+			-- in command mode")
 			zoom(dt)
 		else
 			F.dragging = false
 			cursor(true)
 			if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) end
 		end
+		E.command.update(now, gnow, focused and F.command ~= nil, kf ~= 0 or kr ~= 0)
 		E.abilities.update(now) -- real time: the label and arrow follow the camera, which turns while paused
 		if not paused then
 			-- the engine's own orders on him go (the author, 2026-10-16: "battalion actions also affect the unit which
@@ -436,10 +502,11 @@ return function(E)
 			end
 		end
 		E.combat.track(dt)
-		E.combat.crosshair((F.ranged or F.armed ~= nil) and F.dragging and not F.ui_off)
+		-- command mode too: the crosshair is where its orders go (command.lua), in melee mode as well
+		E.combat.crosshair((F.ranged or F.armed ~= nil or F.command ~= nil) and F.dragging and not F.ui_off)
 		E.hud.update(gnow)
 		-- melee mode centres on him; an ability armed looks ahead, where its crosshair aims (combat.lua C.aim_point)
-		local ex, ey, ez, lx, ly, lz = E.rig.update(now, dt, x, y, z, F.ranged, unit:is_in_melee(),
+		local ex, ey, ez, lx, ly, lz = E.rig.update(now, dt, x, y, z, F.ranged and not F.command, unit:is_in_melee(),
 			cam:position():get_y(), height, not F.ranged and not F.armed)
 		cam:move_to(v(ex, ey, ez), v(lx, ly, lz), 0, false, -1, false)
 		F.frames = F.frames + 1
@@ -452,13 +519,13 @@ return function(E)
 	-- came a frame after the unit, and taken over before it the HUD had no context (portrait and slots off for good)
 	local SWAP_WAIT = 10
 	function M.follow()
-		local army, before = bm:get_player_army(), {}
+		local army, before = E.army(), {}
 		for i = 1, army:units():count() do before[army:units():item(i):unique_ui_id()] = true end
 		swap = {before = before, till = bm:time_elapsed_ms() / 1000 + SWAP_WAIT}
 	end
 	local function follow_swap(gnow)
 		if gnow > swap.till then swap = nil return end
-		local army = bm:get_player_army()
+		local army = E.army()
 		for i = 1, army:units():count() do
 			local u = army:units():item(i)
 			if not swap.before[u:unique_ui_id()] and u:number_of_men_alive() > 0
@@ -492,8 +559,8 @@ return function(E)
 	-- and restarting nothing, and the kept press still starts it on completion. A spectator plays no army: CA does not say
 	-- what local_army() names on one, and a player's would be driven from the spectator's client. Nor does a partner
 	-- watching with units given to them (P.net_me.watching, CA's IsPassiveParticipant): those units are another player's
-	-- army. Both are refused here, not at the build, since their machines still say HELLO and put the gate in at the
-	-- players' tick (Ruling 30)
+	-- army. Both are refused here, not at the build, since their machines still run the handshake and put the gate in at
+	-- the players' tick (Rulings 30 and 34)
 	function M.start(unit)
 		if E.disabled or F.on or P.features.net and not P.net_ready then return end
 		if P.features.net then
@@ -509,7 +576,7 @@ return function(E)
 		end
 		-- the key, or the new form: either way nothing more is waited for, and a kept press is spent
 		swap, F.asked = nil, nil
-		E.S = E.settings(get_mct and get_mct(), E.K) -- loaded once by the entry: no file is read here
+		E.S = E.settings(get_mct and get_mct(), E.K, E.T) -- loaded once by the entry: no file is read here
 		local S = E.S
 		for _, c in ipairs(S.conflicts) do
 			E.once("conflict_" .. c.action, "key " .. c.key .. " for " .. c.action .. " is already used by " .. c.taken_by
@@ -621,14 +688,29 @@ return function(E)
 			sc = S.names.guide == "Alt" and E.K.game_alt[name]
 			if sc then bm:disable_shortcut(sc, true) F.shortcuts[#F.shortcuts + 1] = sc end
 		end
+		-- CA's 3D flags over every unit, the player's ui_unit_flags (set_banners_enabled is the unit IDs, not these): they stood
+		-- under the crosshair whenever CA's interface was up, the mouse freed or command mode's Vanilla style (the author,
+		-- 2026-10-23: "THE EMPIRE GENERAL AND THE CONTROLLED UNIT STILL HAS THE FLAG, BLOCKING THE CURSOR, DISABLE IT"). The
+		-- player's value waits in CA's registry, which outlives the game, for a battle quit with third person on (below)
+		local flags = core:get_integer_preference("ui_unit_flags")
+		if type(flags) == "number" then
+			F.flags_was = flags
+			core:svr_save_registry_string(FLAGS, tostring(flags))
+			core:set_integer_preference("ui_unit_flags", 0)
+		end
 		bm.battle:enable_tooltips(false) -- the unit hover panel (SpecialTooltip) follows the parked cursor
 		bm.battle:suppress_unit_voices(true) -- each start and stop of his walk is a state the game voices, as in CA's cutscenes
-		cam:enable_functionality("CAMERA_ALL_FUNCTIONS", false)
-		cam:change_height_range(0, 100) -- as CA's cutscenes: the default floor lifts him out of shot with the terrain
+		-- past the queue (CA's docs: "bypass command queue"): queued, it locked every machine's camera in multiplayer (the
+		-- Workshop report of 2026-10-24), and it lands at once, paused too
+		cam:enable_functionality("CAMERA_ALL_FUNCTIONS", false, true)
+		-- as CA's cutscenes: the default floor lifts him out of shot with the terrain. Not in multiplayer, where the call has
+		-- no way past the queue (BCQ_CAMERA_HEIGHT_RANGE, read off the exe on 2026-10-24) and clamped every machine's camera.
+		-- ponytail: there the default floor stands, so the eye can sit higher close in; a local write if players see it
+		if not P.features.net then cam:change_height_range(0, 100) end
 		-- and the floor counts the terrain alone: a roof or a gatehouse lifted the eye 18-24 m (platform.lua P.terrain_floor)
 		F.floored = P.terrain_floor(true)
 		if not F.floored then E.once("floor", "the camera rises over buildings: no terrain floor on build " .. tostring(P.build)) end
-		unit:select_in_ui()
+		E.select(unit)
 		hud(false)
 		E.hud.show(true)
 		E.log("on: " .. F.utype .. (F.model and ", one man" or "") .. (F.solo and ", shooting alone" or ""))
@@ -657,6 +739,7 @@ return function(E)
 		try(function() E.move.halt() end)
 		if F.firing then try(function() E.combat.stop_fire() end) end
 		try(function() E.abilities.cancel() end)
+		try(function() E.command.stop() end) -- the battle's speed back, before the cursor and the orders
 		try(function() E.combat.crosshair(false) end)
 		try(hud, true)
 		F.map = false
@@ -672,14 +755,17 @@ return function(E)
 		F.shortcuts = nil
 		F.ui_off, F.cursor_shown = false, nil -- hidden at the stop: CA's interface comes back all the same
 		try(cursor, true)
-		F.dragging = false
+		F.dragging, F.free_orders = false, nil
 		try(function() bm:disable_orders(false) end)
 		try(function() bm.battle:enable_tooltips(true) end)
 		F.banners = nil
 		try(function() bm.battle:set_banners_enabled(true) end)
+		local flags = F.flags_was
+		F.flags_was = nil
+		if flags then try(function() core:set_integer_preference("ui_unit_flags", flags) core:svr_save_registry_string(FLAGS, "") end) end
 		try(function() bm.battle:suppress_unit_voices(false) end)
-		try(function() cam:enable_functionality("CAMERA_ALL_FUNCTIONS", true) end)
-		try(function() cam:change_height_range(-1, -1) end)
+		try(function() cam:enable_functionality("CAMERA_ALL_FUNCTIONS", true, true) end)
+		if not P.features.net then try(function() cam:change_height_range(-1, -1) end) end
 		if F.floored then F.floored = nil try(function() P.terrain_floor(false) end) end
 		try(function() P.net_reset() end) -- multiplayer: the next session's first hold stops him anew
 		E.log("off: " .. tostring(why))
@@ -706,7 +792,9 @@ return function(E)
 			if dt <= 0 or dt > 0.25 then dt = 0.016 end
 			local gnow = bm:time_elapsed_ms() / 1000
 			if gnow ~= F.gt then F.gt, F.gt_real = gnow, now end
-			local paused = now - F.gt_real > PAUSE_AFTER
+			local ok_s, speed = pcall(function() return bm.battle:current_battle_speed() end)
+			if not ok_s or type(speed) ~= "number" then speed = 1 end
+			local paused = speed <= 0 or now - F.gt_real > PAUSE_AFTER / math.min(speed, 1)
 			if P.focused() and P.pressed(E.S.keys.toggle) then
 				if E.fp then E.combat.manual_exit()
 				elseif F.on then M.stop("key")
@@ -718,10 +806,18 @@ return function(E)
 			elseif swap then
 				follow_swap(gnow)
 			end
+			-- on or off: a unit let go has its steps taken back here (buffs.lua)
+			E.buffs.tick(gnow)
 		end, debug.traceback)
 		if not ok then E.fail(err) end
 	end
 
+	-- the player's 3D flags, left down by a battle quit with third person on: the game writes its preferences at exit
+	-- (write_preferences_at_exit), so they come back as the next battle loads
+	pcall(function()
+		local left = tonumber(core:svr_load_registry_string(FLAGS))
+		if left then core:set_integer_preference("ui_unit_flags", left) core:svr_save_registry_string(FLAGS, "") end
+	end)
 	bm:register_phase_change_callback("Complete", function() pcall(M.stop, "battle over") E.disabled = true end)
 	bm:repeat_real_callback(frame, 1, "derpy_tp")
 	return M

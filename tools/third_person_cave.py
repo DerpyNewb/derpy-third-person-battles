@@ -73,8 +73,8 @@ MAGIC = 0xD7
 OPS = {"GUARD_ON": 1, "GUARD_OFF": 2, "DISARM": 3, "ARM": 4, "HELLO": 5}
 # HELLO's 16 bits: the protocol version (15-8) and the sender's player slot (7-0), one bit of MB hello. A HELLO of another
 # version, or a slot past the mask, sets nothing. The version is platform.lua's HELLO_VERSION too: agreement() ties them.
-# 2 since 2026-10-22: version 1's slot was an army's place
-HELLO_VERSION, HELLO_SLOTS = 2, 32
+# 2 since 2026-10-22: version 1's slot was an army's place; 3 since 2026-10-24: version 2 waits for a watcher
+HELLO_VERSION, HELLO_SLOTS = 3, 32
 # the record's battle object and the map lookup the MOVE/HALT handlers use (exe+2eaf094 reads a tag-0x23 model id, then
 # resolves it in battle+0x80 through exe+17aece4(map, &id) -> &value, value the model). The carrier carries no 0x23 field,
 # so the cave resolves its own 16-bit id the same way: battle = [record+0x30], map = battle+0x80, lookup by &id.

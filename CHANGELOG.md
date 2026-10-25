@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-10-25
+
+- Multiplayer: a player who is only watching the battle is no longer waited for. A watcher's machine cannot send
+  anything into the battle, so the start waited for an answer that could never come. A watcher still needs the mod;
+  one without it is not caught.
+- Multiplayer: with two players on one side, F2 no longer takes the other player's general. The mod read the side's
+  first army, not this machine's.
+- Multiplayer: walking and turning no longer stick going forward. A turn is a queued command there, and each step was
+  taken from a heading the battle had not caught up with yet.
+- Multiplayer: every player needs this version (handshake version 3).
+- Large ranged units like gyrocopters no longer shoot themselves: the shot leaves clear of the body.
+- Wind spells go the way you are looking; the cast's direction was never passed.
+- Melee: a swing skips the attack animations that cannot deal damage (no splash attack in their animation data) when
+  the unit has others. A unit with none is unchanged.
+- None of these was tested in game before the upload: the harness, the two-machine simulation and the mutants only.
+
+## 2026-10-24
+
+- Unit stats in the MCT: buff or debuff the unit you play (melee attack, melee defence, weapon strength, charge,
+  armour, missile strength, speed, leadership), all off by default.
+- Spells show their winds cost on the ability bar, and the overcast cost while overcast is armed.
+- Multiplayer: your third person should no longer freeze the other player's camera, UI and selection.
+- Multiplayer: a clearer message when the other player seems to be missing the mod.
+- Command mode: the crosshair no longer goes missing, and the mouse wheel and +/- zoom.
+- Smoother zoom.
+- Health and stamina bars come back after leaving command mode.
+- The attack button says Left / Right for units that cannot shoot.
+- The charge animation loops without its one-frame glitch.
+
+## 2026-10-23
+
+- Command mode: Q while playing your general or a hero orders the rest of the army, with the battle slowed (speed in
+  the MCT).
+- Vanilla style (the default): normal clicks and drags at the crosshair and the full HUD. The number row picks unit
+  cards, E the next ten; a middle click frees the cursor, Space pauses, a Shift tap toggles slow motion.
+- Bannerlord style (MCT): 1-6 pick groups, left click moves, right click attacks, F1 follow, F3 charge, F4 hold.
+- An MCT switch allows command mode on any unit, and 3D flags are hidden in it.
+- Lord and hero only abilities, like Grimgor's, no longer target regiments.
+- The Shift sprint no longer locks onto an enemy behind you.
+- Multiplayer: "can't see who is in this battle" on every battle is fixed, and AI slots in lobby battles no longer block
+  the start.
+
 ## 2026-10-22, second update
 
 - Unit bars show morale under health.

@@ -1,4 +1,4 @@
--- The keys the MCT page offers, their Windows virtual-key codes, and the 30 actions with their
+-- The keys the MCT page offers, their Windows virtual-key codes, and the actions with their
 -- defaults and labels. The MCT page and the battle script both loadfile this, so they cannot
 -- disagree. A name can stand for two keys: "+" is the main-row plus and the numpad plus.
 local K = {names = {}, vk = {}}
@@ -20,16 +20,23 @@ add("+", {0xBB, 0x6B}) add("-", {0xBD, 0x6D})
 
 K.order = {"toggle", "forward", "back", "left", "right", "walk", "sprint", "look_free", "lock", "attack", "mode", "jump", "fly", "zoom_in",
 	"zoom_out", "cheer", "hide_ui", "minimap", "view", "guide", "page", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
-	"ability_10"}
+	"ability_10", "command", "cmd_follow", "cmd_charge", "cmd_hold", "cmd_unit_1", "cmd_unit_2", "cmd_unit_3", "cmd_unit_4",
+	"cmd_unit_5", "cmd_unit_6", "cmd_unit_7", "cmd_unit_8", "cmd_unit_9", "cmd_unit_10", "cmd_page", "cmd_pause", "cmd_speed"}
 
 K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D", walk = "Z", sprint = "Shift",
 	look_free = "Middle mouse", lock = "Middle mouse", attack = "Left mouse", mode = "Right mouse", jump = "E", fly = "Space", zoom_in = "+", zoom_out = "-",
 	cheer = "O", hide_ui = "P", minimap = "M", view = "V", guide = "Alt", page = "T",
 	ability_1 = "1", ability_2 = "2", ability_3 = "3", ability_4 = "4", ability_5 = "5", ability_6 = "6",
-	ability_7 = "7", ability_8 = "8", ability_9 = "9", ability_10 = "0"}
+	ability_7 = "7", ability_8 = "8", ability_9 = "9", ability_10 = "0",
+	command = "Q", cmd_follow = "F1", cmd_charge = "F3", cmd_hold = "F4", cmd_unit_10 = "0", cmd_page = "E",
+	cmd_pause = "Space", cmd_speed = "Shift"}
+-- the number row picks the units, one card each (the author, 2026-10-23: "USE THE NUM ROW FOR SELECTING UNITS"; it was
+-- the numpad)
+for n = 1, 9 do K.defaults["cmd_unit_" .. n] = tostring(n) end
 
 K.labels = {toggle = "Third person on and off", forward = "Walk forward", back = "Walk back", left = "Walk left",
-	right = "Walk right", walk = "Walk (press to switch, or hold: see Combat)", look_free = "Free the mouse while held",
+	right = "Walk right", walk = "Walk (press to switch, or hold: see Combat)",
+	look_free = "Free the mouse while held; in command mode, Vanilla style, a click frees or takes it back",
 	lock = "Lock on to the enemy ahead, lords and heroes first (click; click again to let go)",
 	attack = "Attack and fire", mode = "Melee or ranged; artillery aiming",
 	sprint = "Sprint and charge (hold while moving; click to attack)", jump = "Jump attack",
@@ -40,17 +47,34 @@ K.labels = {toggle = "Third person on and off", forward = "Walk forward", back =
 	page = "Next page of the ability bar (abilities, spells)",
 	ability_1 = "Ability 1", ability_2 = "Ability 2", ability_3 = "Ability 3", ability_4 = "Ability 4",
 	ability_5 = "Ability 5", ability_6 = "Ability 6", ability_7 = "Ability 7", ability_8 = "Ability 8",
-	ability_9 = "Ability 9", ability_10 = "Ability 10"}
+	ability_9 = "Ability 9", ability_10 = "Ability 10",
+	command = "Command mode: order your army (press; see Command mode)",
+	cmd_follow = "Command mode: follow me (Bannerlord style)", cmd_charge = "Command mode: charge (Bannerlord style)",
+	cmd_hold = "Command mode: hold (Bannerlord style)",
+	cmd_unit_10 = "Command mode: select unit 10 (unit 20 after the page key; Vanilla style)",
+	cmd_page = "Command mode: units 1-10, 11-20 (Vanilla style)", cmd_pause = "Command mode: pause",
+	cmd_speed = "Command mode: slow or normal speed (tap; Vanilla style)"}
+for n = 1, 9 do K.labels["cmd_unit_" .. n] = "Command mode: select unit " .. n .. " (Vanilla style)" end
+-- in command mode's Bannerlord style the number row picks a group (command.lua C.NAMES), 0 everyone
+for n, group in pairs({"infantry", "ranged", "cavalry", "monsters", "artillery", "heroes", [10] = "everyone"}) do
+	K.labels["ability_" .. n] = K.labels["ability_" .. n] .. " (command mode, Bannerlord style: " .. group .. ")"
+end
 
 -- an action that may sit on another's key: the lock-on is a click (main.lua), the free mouse a hold, so the middle
--- button carries both (a player, 2026-10-21, asked for the lock-on; the author: "maybe middle mouse button click")
-K.shares = {lock = "look_free"}
+-- button carries both (a player, 2026-10-21, asked for the lock-on; the author: "maybe middle mouse button click").
+-- Command mode's Vanilla keys are live only in the mode, where the jump, the fly, the sprint and the abilities are off
+-- (main.lua)
+K.shares = {lock = "look_free", cmd_page = "jump", cmd_pause = "fly", cmd_speed = "sprint"}
+for n = 1, 10 do K.shares["cmd_unit_" .. n] = "ability_" .. n end
 
 -- the game's shortcut on each key it binds without a modifier, of the keys above (default_keys, read 2026-10-15): while
 -- third person is on, the one on a key an action has is off (P paused the game as it hid the interface). M and Shift
 -- the game binds only with a modifier. T cycles the reinforcement spawn zone (default_keys.xml, read 2026-10-20)
 K.game = {P = "toggle_pause", O = "visibility_toggle_radar", K = "toggle_ui", Space = "show_allied_units_proxies",
 	Z = "cam_down", T = "cycle_next_spawn_zone"}
+-- and its control groups on the bare 0-9 (CA's keymap, read 2026-10-23): the number row casts his skills, and picks the
+-- units in command mode
+for n = 0, 9 do K.game[tostring(n)] = "usegroup" .. n end
 -- the game's shortcut on each key it binds with Alt (default_keys, read 2026-10-19): off on an action's key while third
 -- person is on and Alt is the guide key, held with those keys
 K.game_alt = {X = "toggle_sfx", M = "toggle_music", K = "toggle_ui_with_borders", ["0"] = "button_group_management_6",

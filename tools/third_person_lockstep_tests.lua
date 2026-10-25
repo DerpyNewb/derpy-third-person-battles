@@ -36,6 +36,35 @@ T.ls_machines_share_nothing = function()
 	w:on("B", function() check(not H.E.F.on, "B never saw A's key") end)
 end
 
+-- the Workshop report of 2026-10-24: "when me or my friend uses third person and the other doesn't I cannot do anything
+-- anymore and am just watching his unit in third person". The camera lock, the cinematic UI, the camera's height range
+-- and select_in_ui are queued commands that land on every machine (tools/third_person_lockstep.lua CAM_QUEUED): A's
+-- session, start to stop and command mode between, leaves none of them on B
+T.ls_one_players_third_person_leaves_the_others_camera_and_ui_alone = function()
+	local w = L.new({})
+	local from -- the oracle moves the machine's mark on every tick
+	w:on("B", function() from = #H.calls end)
+	w:tap("A", "F2")
+	w:on("A", function() H.down("W") end)
+	w:run(1.0)
+	w:on("A", function() H.up("W") end)
+	w:tap("A", "Q")
+	w:run(0.5)
+	w:tap("A", "Q")
+	w:tap("A", "F2")
+	w:run(0.5)
+	w:on("A", function() check(not H.E.F.on, "A stopped") end)
+	local took = {}
+	w:on("B", function()
+		for i = from + 1, #H.calls do
+			local k = H.calls[i][1]
+			if k == "cinematic_ui" or k == "select_in_ui" or k:find("^camera_") then took[#took + 1] = k end
+		end
+	end)
+	check(#took == 0, "B's camera and UI took A's: " .. table.concat(took, ", "))
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
 T.ls_two_machines_stay_in_step_while_A_plays = function()
 	local w = L.new({})
 	w:tap("A", "F2")
@@ -484,6 +513,33 @@ T.ls_a_standing_man_gets_one_halt_and_turns_on_change = function()
 	check(k.halt == 1, "and still one halt, got " .. tostring(k.halt))
 end
 
+-- a player's report, 2026-10-24: in multiplayer "WASD don't function correctly; you're forced to move forwards
+-- only", and turning "takes an eternity". A turn is a queued command that runs two ticks after it is sent (longer on a
+-- real network), and each step was taken from the heading the engine has, which had not caught up: every command asked
+-- for where he already was and one frame's step. He walks along that facing, so every key walked him forward
+local function turns_through(delay) -- delay: ticks from a send to the engine running it (measured on one machine: 2)
+	local w = L.new({delay_ticks = delay})
+	w:tap("A", "F2")
+	w:run(1.0)
+	local function heading() local y w:on("A", function() y = H.E.P.heading(H.E.F.single or H.E.F.model) end) return y end
+	local function off(a, b) return math.deg(math.abs(((a - b) + math.pi) % (2 * math.pi) - math.pi)) end
+	local yaw0 = heading()
+	w:on("A", function() H.down("D") end)
+	w:run(1.0)
+	local d = off(heading(), yaw0)
+	w:on("A", function() H.up("D") end)
+	check(d > 80, "D for 1 s turned him right, as in single player, " .. delay .. " ticks late: " .. d .. " deg")
+	w:on("A", function() H.down("S") end)
+	w:run(1.5)
+	d = off(heading(), yaw0)
+	w:on("A", function() H.up("S") end)
+	check(d > 170, "S for 1.5 s turned him round to walk back, " .. delay .. " ticks late: " .. d .. " deg")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+T.ls_he_turns_at_his_rate_through_the_queue_delay = function()
+	for _, delay in ipairs({2, 6}) do turns_through(delay) end
+end
+
 -- what the rules kept of a session goes with it: the next session's first hold stops him anew
 T.ls_each_session_stops_him_anew = function()
 	local w = L.new({})
@@ -694,8 +750,8 @@ T.ls_a_second_press_while_waiting_sends_nothing = function()
 end
 
 -- a spectating client with the pack (CA: battle:is_spectator()) never starts third person, by a press before the
--- handshake or after it, and forges nothing but its HELLO: its machine runs the battle, so it answers the players' and
--- the gate waits for it (Ruling 30), going in on every machine at one tick (Ruling 27)
+-- handshake or after it, and forges nothing: the exe drops its every push, so the gate does not wait for it (Ruling 34)
+-- and goes in on every machine at the players' tick (Ruling 27), its own too
 T.ls_a_spectator_never_starts = function()
 	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 2, pairs = "reverse"},
 		{name = "S", fps = 50, army = 1, spectator = true}}})
@@ -713,7 +769,7 @@ T.ls_a_spectator_never_starts = function()
 	w:tap("S", "F2")
 	w:run(0.5)
 	check(not on(w, "S"), "nor does a press after it start S")
-	check(#w:sent("S") == 1 and hellos(w, "S") == 1, "S forged its HELLO and nothing else: " .. #w:sent("S"))
+	check(#w:sent("S") == 0, "S forged nothing: " .. #w:sent("S"))
 	local gb = w:gates("B")
 	check(#gb == 1 and gb[1].tick == ga[1].tick, "B's at that tick too: " .. gate_text(gb))
 	check(logged(w, "S", "plays no army") == 1, "said once in S's log: " .. logged(w, "S", "plays no army"))
@@ -823,15 +879,71 @@ T.ls_a_list_naming_only_this_machine_never_starts = function()
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
--- the report of 2026-10-22, a campaign battle against the AI: A plays the one human army, B (the partner, with the mod)
--- watches. Counting armies, it never started on either machine; counting players, A's press is answered by B's machine,
--- A starts, and B, watching, does not
+-- the report of 2026-10-23: two players, both with the mod, refused with "it names 1 player" in every battle, campaign and
+-- lobby alike, where CA's own team list shows both from the same list. CA never reads a network player's IsOnline; the
+-- build that dropped an entry reading offline dropped the other player. Every entry counts, and the log says which read
+-- offline
+T.ls_a_player_reading_offline_still_counts = function()
+	local w = L.new({hello = false, online = "self"})
+	w:tap("A", "F2")
+	w:run(1.0)
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 1, "A's HELLO, and B's answer: " .. hellos(w, "A") .. " " .. hellos(w, "B"))
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the gate in on both at one tick: " .. gate_text(ga) .. " " .. gate_text(gb))
+	check(on(w, "A") and said(w, "A", "derpy_tp_mp_no_players") == 0, "A starts, and nobody is told the list is why")
+	check(logged(w, "A", "this machine 0, watching none, offline 1") == 1 and logged(w, "B", "this machine 1, watching none, offline 0") == 1,
+		"each log names the other offline")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- the third report of 2026-10-23, both machines' logs of one co-op siege: one human army, the partner supporting it (CA's
+-- IsPassiveParticipant), the host refused with "it names 1 player" and the partner's machine silent. With the partner
+-- reading offline on the host's list, the partner is listed, watching and not waited for, and the host starts
+T.ls_a_supporting_partner_reading_offline_is_listed = function()
+	local w = L.new({hello = false, online = "self",
+		machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, pairs = "reverse", passive = true}}})
+	w:tap("A", "F2")
+	w:run(1.0)
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 0, "A's HELLO, and B, watching, silent: " .. hellos(w, "A") .. " " .. hellos(w, "B"))
+	check(on(w, "A") and not on(w, "B"), "A plays, B supports")
+	check(logged(w, "A", "this machine 0, watching 1, offline 1, waits for 0") == 1, "A's log names B watching and offline")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- a lobby battle with an AI slot: the AI is an entry in CA's list (measured 2026-10-23, a multiplayer battle hosted
+-- alone, where the build counting every entry waited for "CPU 1" and named it). The AI is left out, the two machines
+-- answer each other, and A starts
+T.ls_a_lobby_battle_with_an_ai_slot_starts = function()
+	local w = L.new({hello = false, online = "self", ai = 1})
+	w:tap("A", "F2")
+	w:run(1.0)
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 1, "A's HELLO, and B's answer: " .. hellos(w, "A") .. " " .. hellos(w, "B"))
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the gate in on both at one tick: " .. gate_text(ga) .. " " .. gate_text(gb))
+	check(on(w, "A") and said(w, "A", NEEDS) == 0, "A starts, and nobody is named")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- one human against the AI in a multiplayer battle (the 2026-10-23 live check): one machine runs it, and a list of one
+-- is refused as before, safe, with the AI slot it left out in the log
+T.ls_one_human_against_the_ai_is_refused_and_says_why = function()
+	local w = L.new({hello = false, online = "self", ai = 1, machines = {{name = "A", fps = 60, army = 1}}})
+	w:tap("A", "F2")
+	w:run(6.0)
+	check(not on(w, "A") and #w:gates("A") == 0, "A never starts, the gate never in")
+	check(said(w, "A", "derpy_tp_mp_no_players") == 1, "A is told the list is why")
+	check(logged(w, "A", "it names 1 player") == 1 and logged(w, "A", "AI slots left out: 1") == 1, "the log says why, and the AI left out")
+end
+
+-- the reports of 2026-10-22 and 2026-10-24, a campaign battle against the AI: A plays the one human army, B (the partner,
+-- with the mod) watches. Counting armies, it never started on either machine; waiting for B's HELLO, which the exe
+-- drops on a spectator's machine, A was told B had no mod. A's own HELLO completes it, A starts, and B does not
 T.ls_a_battle_against_the_ai_starts_with_the_partner_watching = function()
 	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, pairs = "reverse", spectator = true}}})
 	w:tap("A", "F2")
 	w:tap("B", "F2")
 	w:run(1.0)
-	check(hellos(w, "A") == 1 and hellos(w, "B") == 1, "A's HELLO, and B's answer: " .. hellos(w, "A") .. " " .. hellos(w, "B"))
+	check(hellos(w, "A") == 1 and hellos(w, "B") == 0, "A's HELLO, and B silent: " .. hellos(w, "A") .. " " .. hellos(w, "B"))
 	local ga, gb = w:gates("A"), w:gates("B")
 	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the gate in on both at one tick: " .. gate_text(ga) .. " " .. gate_text(gb))
 	check(on(w, "A") and not on(w, "B"), "A plays, B watches")
@@ -843,12 +955,14 @@ T.ls_a_battle_against_the_ai_starts_with_the_partner_watching = function()
 end
 
 -- the partner joins on A's side with units A gave them (CA's IsPassiveParticipant): one army, two machines. Their
--- machine says HELLO and the handshake completes; A starts, the partner's F2 starts nothing
-T.ls_a_partner_given_units_counts_and_does_not_start = function()
+-- machine is not waited for and says nothing; A starts, the gate in on both at one tick, the partner's F2 starts nothing
+T.ls_a_partner_given_units_is_not_waited_for = function()
 	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, pairs = "reverse", passive = true}}})
 	w:tap("A", "F2")
 	w:run(1.0)
-	check(on(w, "A") and hellos(w, "B") == 1, "B's machine answered, and A starts")
+	check(on(w, "A") and hellos(w, "B") == 0, "A starts, and B's machine sent nothing")
+	local ga, gb = w:gates("A"), w:gates("B")
+	check(#ga == 1 and #gb == 1 and ga[1].tick == gb[1].tick, "the gate in on both at one tick: " .. gate_text(ga) .. " " .. gate_text(gb))
 	w:tap("B", "F2")
 	w:run(0.5)
 	check(not on(w, "B"), "B's press starts nothing")
@@ -856,16 +970,14 @@ T.ls_a_partner_given_units_counts_and_does_not_start = function()
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
--- a watcher without the mod: their machine runs the battle and would not run A's commands, so nobody starts, and A's
--- player is told who did not answer
-T.ls_a_watcher_without_the_mod_holds_everyone_back = function()
+-- a watcher without the mod is the cost of Ruling 34: a watcher cannot answer, so nobody can tell. A starts and nobody is
+-- told; B's machine runs the battle with no gate, which desyncs it from the first melee of the man played
+T.ls_a_watcher_without_the_mod_is_not_caught = function()
 	local w = L.new({hello = false, machines = {{name = "A", fps = 60, army = 1}, {name = "B", fps = 40, army = 1, spectator = true, mod = false}}})
-	loc_names(w, "A")
 	w:tap("A", "F2")
 	w:run(6.0)
-	check(not on(w, "A") and #w:gates("A") == 0, "A never starts, the gate never in")
-	check(line(w, "A") == "no answer from Player B.", "the watcher named: " .. tostring(line(w, "A")))
-	check(w:diverged() == nil, tostring(w:diverged()))
+	check(on(w, "A") and #w:gates("A") == 1 and #w:gates("B") == 0, "A starts, its gate in, B's never: " .. gate_text(w:gates("A")))
+	check(said(w, "A", NEEDS) == 0, "and nobody is told")
 end
 
 -- the network loses every HELLO (the forged command never runs on any machine): each player is told their own check

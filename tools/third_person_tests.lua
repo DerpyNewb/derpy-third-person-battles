@@ -253,7 +253,7 @@ end
 local function a_rig(S)
 	H.fresh()
 	local settings = assert(loadfile("/script/derpy_tp/settings"))()
-	local E = {S = S or settings(nil, H.K)}
+	local E = {S = S or settings(nil, H.K), F = {}} -- F as the real E has it: the rig reads F.command (command mode)
 	return assert(loadfile("/script/derpy_tp/rig"))()(E), E
 end
 
@@ -322,9 +322,9 @@ T.rig_zoom_is_clamped = function()
 	local R = a_rig()
 	R.start(0, 0, 0, 0, 0, 1, false)
 	R.zoom_by(100)
-	check(near(R.zoom, 6), "zoom stops at 6")
+	check(near(R.want_zoom, 6), "zoom stops at 6")
 	R.zoom_by(-100)
-	check(near(R.zoom, 0.6), "zoom stops at 0.6")
+	check(near(R.want_zoom, 0.6), "zoom stops at 0.6")
 end
 
 local function general_on() H.fresh() H.tap("F2") end
@@ -905,6 +905,20 @@ T.zooming_in_all_the_way_goes_first_person = function()
 	check(H.E.first_person, "the zoom key in all the way does it too")
 end
 
+-- the author, 2026-10-24: "make the zooming more smooth". A notch was a 16% jump in one frame; it eases there now
+T.a_wheel_notch_eases_the_zoom_in = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local m = H.E.F.model
+	H.step(1)
+	local from = m.z - H.eye.z
+	H.wheel_notches = -1 H.step(1 / 60)
+	local first = m.z - H.eye.z
+	H.step(1)
+	local to = m.z - H.eye.z
+	check(to > from * 1.1, "a notch out: further back, " .. from .. " to " .. to)
+	check(first - from < (to - from) / 2, "its first frame under half the way: " .. from .. ", " .. first .. ", " .. to)
+end
+
 -- measured 2026-10-17 (probes/zz_tp_zoomsweep.lua): with the ground 0.4-0.7 m up behind a Hessmarine, the eye came in
 -- along its boom to 0.2-0.3 m behind his head at every zoom under 0.9, so "the lowest" is where that happens
 T.zooming_in_once_the_ground_brings_the_eye_in_goes_first_person = function()
@@ -1069,6 +1083,31 @@ T.both_buttons_together_reach_every_attack_clip_he_has = function()
 	local got = {}
 	for k = 1, 4 do past_swing_gap() H.tap(k % 2 == 1 and "Left mouse" or "Right mouse") got[k] = H.last("play")[3] end
 	check(table.concat(got, " ") == "454 456 455 457", "left and right in turn: " .. table.concat(got, " "))
+end
+
+-- a player, 2026-10-24: Celestial Guard "didnt manage to kill a single unit"; the author, 2026-10-25: a clip with no
+-- SPLASH_ATTACK in its .anm.meta hits nothing when played here (the Dragon Guard's four carry IMPACT_POS alone). Those
+-- slots (data.lua dulls) are left out while one with a splash is left, and the halves are made of the rest; a unit with
+-- none keeps them all, as before
+T.a_swing_skips_the_clips_with_no_splash = function()
+	local function played(dulls)
+		playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [455] = true, [456] = true, [457] = true}})
+		H.E.D.dulls = {wh_test_melee = dulls}
+		local seen = {}
+		for k = 1, 8 do
+			past_swing_gap()
+			H.tap(k % 2 == 1 and "Left mouse" or "Right mouse")
+			seen[H.last("play")[3]] = true
+		end
+		local out = {}
+		for s in pairs(seen) do out[#out + 1] = s end
+		table.sort(out)
+		return table.concat(out, " ")
+	end
+	local got = played({455, 457})
+	check(got == "454 456", "only the clips with a splash, one a button: " .. got)
+	got = played({454, 455, 456, 457})
+	check(got == "454 455 456 457", "none has one: all four, as before: " .. got)
 end
 
 -- the author, 2026-10-19: "ranged units can only use the left button so attacks 1-10 should be on the left button if its
@@ -1370,6 +1409,18 @@ T.crosshair_shows_in_ranged_mode_only = function()
 	H.tap("Right mouse")
 	H.tap("F2")
 	check(not x:Visible(), "F2 off: hidden")
+end
+
+-- the author, 2026-10-23: "crosshair missing". CA's first_person_ui hides itself half a second after it is made (measured
+-- 2026-10-24, third person off and no cinematic call): the first crosshair of every battle went, while the pack's own note
+-- said it was up, until a melee switch or the freed mouse put it down and up again
+T.a_crosshair_ca_hides_after_it_is_made_comes_back = function()
+	playing({type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10})
+	local x = find_uicomponent(H.root, "derpy_tp_crosshair")
+	check(x and x:Visible(), "ranged and aiming: the crosshair shows")
+	x:SetVisible(false) -- CA's layout, 0.5 s after CreateComponent
+	H.step(1 / 60)
+	check(x:Visible(), "the next frame: up again")
 end
 
 local XBOW = "wh3_main_cth_inf_jade_warrior_crossbowmen_1"
@@ -1795,6 +1846,20 @@ T.ability_ground_lands_on_the_crosshair = function()
 	check(c[4].z > 30 and c[4].z < 40 and near(c[4].x, 0, 0.01), "where the view meets the ground, ~37 m ahead: " .. c[4].z)
 end
 
+-- players' reports, 2026-10-23 and 24: wind spells "always go one direction". The ground cast's orientation (CA's
+-- perform_special_ability_ground: "orientation in degrees", default 0) was never passed, so every wind went at bearing 0.
+-- It goes the way he looks, a bearing in degrees as CA's own orders take unit:bearing()
+T.a_ground_cast_goes_the_way_he_looks = function()
+	H.fresh({units = {{general = true, abilities = {BARRAGE}}}})
+	H.tap("F2") H.step(0.1)
+	H.E.rig.look(150, 0) H.step(0.5) -- a view off bearing 0, so the default cannot pass for it
+	H.tap("1") H.step(1)
+	H.tap("Left mouse") H.step(1 / 60)
+	local c, want = H.last("uc:perform_special_ability_ground"), math.deg(H.E.rig.yaw) % 360
+	check(want > 5 and want < 355, "the view is off bearing 0: " .. want)
+	check(c and c[5] and near(c[5], want, 0.5), "cast along his view, " .. want .. " deg: " .. tostring(c and c[5]))
+end
+
 T.ability_enemy_goes_to_the_unit_on_the_ray = function()
 	H.fresh({units = {{general = true, abilities = {FIREBALL}}}, enemies = {{x = 30, z = 50}, {x = 0, z = 50}}})
 	H.tap("F2")
@@ -1804,6 +1869,34 @@ T.ability_enemy_goes_to_the_unit_on_the_ray = function()
 	check(c and c[3] == FIREBALL and c[4] == H.enemies[2], "the enemy straight ahead, not the one 30 m aside")
 end
 
+-- a player, 2026-10-23: Grimgor's You're Next!, for lords and heroes only (its invalid target flag
+-- unit_is_not_commander_class), aimed at a regiment of infantry, never landed and cooled down all the same. The aim
+-- takes the lord or hero nearest the crosshair, past the regiment in front; with none, nothing goes off
+local YOURE_NEXT, WHIPLASH = "wh2_dlc15_lord_abilities_youre_next", "wh2_dlc14_lord_abilities_whiplash"
+T.an_ability_for_lords_and_heroes_aims_past_the_regiment = function()
+	H.fresh({units = {{general = true, abilities = {YOURE_NEXT}}},
+		enemies = {{x = 0, z = 40, men = 20}, {x = 3, z = 50, class = "com"}}})
+	H.tap("F2") H.step(0.1)
+	cast_key("1")
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == YOURE_NEXT and c[4] == H.enemies[2], "the enemy lord behind the regiment, not the regiment ahead")
+	H.fresh({units = {{general = true, abilities = {YOURE_NEXT}}}, enemies = {{x = 0, z = 40, men = 20}}})
+	H.tap("F2") H.step(0.1)
+	cast_key("1")
+	check(H.count("uc:perform_special_ability") == 0, "a regiment alone: nothing cast, so nothing cooling down")
+end
+-- and the other way: Whiplash never lands on a lord or hero (unit_is_commander_class), so it is never cast on him when
+-- no regiment of his is on the crosshair
+T.an_ability_never_for_lords_and_heroes_is_never_cast_on_him = function()
+	H.fresh({units = {{general = true, abilities = {WHIPLASH}}, {x = 2, z = 40, class = "com"}, {x = 30, z = 40, men = 20}}})
+	H.tap("F2") H.step(0.1)
+	cast_key("1")
+	check(H.count("uc:perform_special_ability") == 0, "only a hero of his on the crosshair: nothing cast, not on himself")
+	H.E.rig.want_yaw = math.atan2(30, 40) H.step(1)
+	cast_key("1")
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == WHIPLASH and c[4] == H.units[3], "his regiment on the crosshair: on it")
+end
 -- melee mode centres the camera on him (the author, 2026-10-17: "center when melee"); an ability armed, it looks ahead
 -- again, where its crosshair aims (combat.lua C.aim_point marches the camera's ray)
 T.melee_mode_centres_the_camera_on_him_but_not_aiming_an_ability = function()
@@ -3041,6 +3134,8 @@ T.platform_net_a_refused_carrier_cave_leaves_single_player_standing = function()
 	check(N.pushed(n, 0x406c798) == 0, "steer is single player's: no MOVE pushed")
 end
 
+-- CA's count of the humans in the battle, beside the player list (H.cco answers it)
+local HUMANS = "GetHumanNetworkPlayersParticipatingInAllianceList.Size"
 -- CA's player list for the handshake (platform.lua M.players, the harness's player_list): n players, client ids in slot
 -- order, this machine player me (default 1, slot 0); watching[i]: player i spectates
 local function hello_players(n, me, watching)
@@ -3082,7 +3177,7 @@ T.platform_net_puts_the_gate_in_once_every_player_said_hello = function()
 	local r = N.record()
 	local d = N.M.uncarrier(r.at[2], r.at[0])
 	check(r.g == 0x406cda4 and r.ver == 1 and r.tag == 0x0a and r.size == 4, "a RELOAD_TIME carrier, as the others")
-	check(d and d.op == "HELLO" and d.id == 0 and r.at[0] == 0x0200, "for this machine's player, slot 0, version 2")
+	check(d and d.op == "HELLO" and d.id == 0 and r.at[0] == 0x0300, "for this machine's player, slot 0, version 3")
 	heard(N, 1) -- its own landed
 	H.step(0.3)
 	check(N.gate() == 0x5c and not N.P.net_play, "one player of two heard: still out")
@@ -3119,27 +3214,52 @@ T.platform_net_answers_another_players_hello_once_its_table_is_built = function(
 	check(N.P.net_play and N.pushed(n, 0x406cda4) == 0, "complete, and nothing more sent")
 end
 
--- a spectating client runs the battle like every machine, so it answers a player's HELLO for its own slot and the gate
--- waits for it (Ruling 30: it sent nothing while armies were counted, so a battle a partner watched never started). That it
--- never starts third person is main.lua's (multiplayer_a_partner_given_units_never_starts, ls_a_spectator_never_starts).
+-- a watching client cannot push (the exe drops every queued push from a machine whose battle +0x3b0, what is_spectator()
+-- returns, is set), so it says nothing and the gate does not wait for it (Ruling 34: waiting for its HELLO, a battle a
+-- partner watched never started, the report of 2026-10-24). Its machine still puts the gate in at the players' tick. That
+-- it never starts third person is main.lua's (multiplayer_a_partner_given_units_never_starts, ls_a_spectator_never_starts).
 -- A machine that cannot say whether this is a replay sends nothing, and says so once
-T.platform_net_a_spectator_answers_and_its_bit_is_waited_for = function()
+T.platform_net_a_watcher_says_nothing_and_is_not_waited_for = function()
 	local N = net_platform()
 	H.spectator = true
 	hello_players(3, 3, {[3] = true}) -- this machine is the third by client id, slot 2
 	H.phase.Deployed()
 	heard(N, 1) -- player 0's HELLO
 	local n = #N.calls
-	H.step(0.15)
-	check(N.pushed(n, 0x406cda4) == 1, "the spectator answers: " .. N.pushed(n, 0x406cda4))
-	local d = N.M.uncarrier(N.record().at[2], N.record().at[0])
-	check(d and d.op == "HELLO" and d.id == 2, "for its own slot, 2: " .. tostring(d and d.id))
-	heard(N, 1 + 2)
 	H.step(0.3)
-	check(N.gate() == 0x5c and not N.P.net_play, "the two players heard, the spectator not: still out")
-	heard(N, 7)
+	check(N.pushed(n, 0x406cda4) == 0, "the watcher sends nothing: " .. N.pushed(n, 0x406cda4))
+	check(N.gate() == 0x5c and not N.P.net_play, "one player of two heard: still out")
+	H.step(5.0)
+	check(N.P.net_late and N.P.net_why == "missing", "late, a player missing, not its own HELLO: " .. tostring(N.P.net_why))
+	heard(N, 1 + 2)
 	H.step(0.15)
-	check(N.gate() == 0x52 and N.P.net_play, "the spectator's too: in")
+	check(N.gate() == 0x52 and N.P.net_play, "both players heard, the watcher not: in")
+	check(N.pushed(n, 0x406cda4) == 0, "and still nothing sent")
+	local w = 0
+	for _, t in ipairs(N.told) do if t:find("this machine 2, watching 2, offline none, waits for 0,1", 1, true) then w = w + 1 end end
+	check(w == 1, "the log says who it waits for: " .. table.concat(N.told, "; "))
+	-- the report's shape (2026-10-24): this machine plays, the other watches. Its own HELLO is enough, and a watcher
+	-- never named; a list where everyone watches has nobody to play and is refused
+	local A = net_platform()
+	hello_players(2, 1, {[2] = true})
+	H.phase.Deployed()
+	A.P.net_asked = true
+	n = #A.calls
+	H.step(0.15)
+	check(A.pushed(n, 0x406cda4) == 1, "this machine says HELLO: " .. A.pushed(n, 0x406cda4))
+	heard(A, 1)
+	H.step(0.15)
+	check(A.gate() == 0x52 and A.P.net_play, "its own landed: in, the watcher not waited for")
+	local E = net_platform()
+	hello_players(2, 1, {true, true})
+	H.phase.Deployed()
+	E.P.net_asked = true
+	n = #E.calls
+	H.step(5.3)
+	check(E.pushed(n, 0x406cda4) == 0 and not E.P.net_play and E.P.net_why == "players", "everyone watching: nothing sent, refused")
+	w = 0
+	for _, t in ipairs(E.told) do if t:find("cannot be used: everyone in it is watching", 1, true) then w = w + 1 end end
+	check(w == 1, "and says why: " .. table.concat(E.told, "; "))
 	local C = net_platform()
 	hello_players(2)
 	bm.is_replay = function() error("test: is_replay threw") end
@@ -3153,18 +3273,28 @@ T.platform_net_a_spectator_answers_and_its_bit_is_waited_for = function()
 	check(k == 1, "said once: " .. table.concat(C.told, "; "))
 end
 
--- the reader: CA's list as CA's battle UI reads it, an entry per player online, CA's fields mapped, the list's order kept
--- (the handshake sorts it); one whose size or an id does not read, or that throws, is no list, and says why
+-- the reader: CA's list as CA's battle UI reads it, an entry per player, one reading offline too (CA's own team list
+-- never reads IsOnline, and the build that dropped those refused every battle, the report of 2026-10-23), CA's fields
+-- mapped, the list's order kept (the handshake sorts it), and CA's count of the humans in the battle, for the log; one
+-- whose size or an id does not read, or that throws, is no list, and says why
 T.platform_net_reads_the_player_list = function()
 	local N = net_platform()
 	H.players = {{id = "b", name = "Bo"}, {id = "a", name = "Al", me = true}, {id = "c", name = "Cy", passive = true},
 		{id = "d", name = "Di", online = false}, {id = "e", name = "", spectating = true}}
+	H.cco[HUMANS] = 3
 	local t, why = N.M.players()
-	check(t and #t == 4 and not why, "four online, Di left out: " .. tostring(t and #t) .. " " .. tostring(why))
+	check(t and #t == 5 and not why, "all five, Di offline too: " .. tostring(t and #t) .. " " .. tostring(why))
 	local got = {}
-	for _, p in ipairs(t) do got[#got + 1] = p.id .. ":" .. p.name .. ":" .. tostring(p.me) .. ":" .. tostring(p.watching) end
-	check(table.concat(got, " ") == "b:Bo:false:false a:Al:true:false c:Cy:false:true e::false:true",
-		"ids, names, the local player, spectator and partner with units: " .. table.concat(got, " "))
+	for _, p in ipairs(t) do
+		got[#got + 1] = p.id .. ":" .. p.name .. ":" .. tostring(p.me) .. ":" .. tostring(p.watching) .. ":" .. tostring(p.online)
+	end
+	check(table.concat(got, " ") == "b:Bo:false:false:true a:Al:true:false:true c:Cy:false:true:true d:Di:false:false:false e::false:true:true",
+		"ids, names, the local player, spectator and partner with units, offline: " .. table.concat(got, " "))
+	check(t.humans == 3, "CA's count of the humans in the battle: " .. tostring(t.humans))
+	H.cco[HUMANS] = function() error("test: the count threw") end
+	t, why = N.M.players()
+	check(t and #t == 5 and t.humans == nil, "a count that throws spoils nothing: " .. tostring(t and #t) .. " " .. tostring(why))
+	check(t.ai == 0, "no AI slot in it: " .. tostring(t.ai))
 	H.players = nil
 	t, why = N.M.players()
 	check(t == nil and why == "its size read nil", "no list: " .. tostring(why))
@@ -3327,6 +3457,41 @@ T.platform_net_an_unusable_player_list_never_puts_the_gate_in = function()
 		local k = 0
 		for _, t in ipairs(N.told) do if t == "hello_players: multiplayer waits: the player list cannot be used: " .. c[2] then k = k + 1 end end
 		check(k == 1, c[2] .. ": said once: " .. table.concat(N.told, "; "))
+	end
+end
+
+-- a lobby's AI slots are in CA's list, as entries like any player's (measured 2026-10-23 in a multiplayer battle hosted
+-- alone against the AI: "CPU 1", id "0", its army's IsHuman false, every entry offline). An AI slot is no machine and
+-- says no HELLO, so the build that counted it waited for it and named it: an entry whose army reads not human is left
+-- out, and counted for the log. One with no army, a spectator or a partner with units given to them, stays
+T.platform_net_leaves_the_ai_slots_out = function()
+	local N = net_platform()
+	H.players = {{id = "b", name = "Bo", me = true}, {id = "0", name = "CPU 1", ai = true, online = false},
+		{id = "0", name = "CPU 2", ai = true, online = false}, {id = "c", name = "Cy", spectating = true}, {id = "d", passive = true}}
+	local t, why = N.M.players()
+	check(t and #t == 3 and not why, "the three humans: " .. tostring(t and #t) .. " " .. tostring(why))
+	check(t[1].id == "b" and t[2].id == "c" and t[3].id == "d", "the AI slots gone, the order kept")
+	check(t.ai == 2, "two AI slots counted: " .. tostring(t.ai))
+end
+
+-- a list it cannot use is logged as CA listed it, by slot and without names (players post the log), with CA's count of
+-- the humans in the battle and the AI slots left out beside it: the report of 2026-10-22 logged only "it names 1
+-- player", which could not tell a list of one from one whose other entries the reader had left out
+T.platform_net_an_unusable_list_logs_what_ca_listed = function()
+	local cases = {
+		{{{id = "a", me = true}}, 2, "slot 0 this machine; CA counts 2 humans in the battle; AI slots left out: 0"},
+		{{{id = "b", spectating = true, online = false}, {id = "a", passive = true}, {id = "0", ai = true}}, nil,
+			"slot 0 watching, slot 1 watching offline; CA counts nil humans in the battle; AI slots left out: 1"},
+	}
+	for _, c in ipairs(cases) do
+		local N = net_platform()
+		H.players, H.cco[HUMANS] = c[1], c[2]
+		H.phase.Deployed()
+		N.P.net_asked = true
+		H.step(5.5)
+		local k = 0
+		for _, t in ipairs(N.told) do if t == "hello_players_raw: multiplayer: CA's list: " .. c[3] then k = k + 1 end end
+		check(k == 1, c[3] .. ": logged once: " .. table.concat(N.told, "; "))
 	end
 end
 
@@ -4441,6 +4606,20 @@ T.the_target_label_names_what_the_crosshair_is_on = function()
 	H.tap("1") H.step(0.3)
 	check(not hud_part("target"):Visible(), "disarmed: no label")
 end
+-- the label and its arrow name what the ability may land on (a player, 2026-10-23: You're Next! aimed at a regiment):
+-- the lord behind the regiment; with the regiment alone, that there is no lord or hero; Whiplash with no regiment of
+-- his ahead is not "On himself", as he is a lord
+T.the_target_label_names_only_a_unit_the_ability_may_land_on = function()
+	armed_on({abilities = {YOURE_NEXT}, enemies = {{x = 0, z = 40, men = 20}, {x = 3, z = 50, class = "com"}}})
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed.unit == H.enemies[2], "the lord behind the regiment marked")
+	armed_on({abilities = {YOURE_NEXT}, enemies = {{x = 0, z = 40, men = 20}}})
+	H.tap("1") H.step(0.3)
+	check(hud_part("target").text == "No lord or hero in sight", "the regiment alone: " .. tostring(hud_part("target").text))
+	armed_on({abilities = {WHIPLASH}})
+	H.tap("1") H.step(0.3)
+	check(hud_part("target").text == "No ally in sight", "Whiplash, none of his ahead: " .. tostring(hud_part("target").text))
+end
 
 -- the author, 2026-10-14: "marking works, but no unit highlight ... a custom arrow on the unit is sufficient". CA's
 -- outline and pings are hidden by the cinematic UI, so the arrow is ours: the unit projected by CA's
@@ -5212,6 +5391,34 @@ T.a_lord_charges_too_and_the_charge_ends_on_release = function()
 	H.up("W")
 end
 
+-- a player, 2026-10-23: holding Shift in a crowd locked the lord onto one enemy, and Shift no longer ran him away. Read
+-- live the same day: turned to run from a melee, the sprint's charge order took an enemy behind him (any enemy inside 8 m
+-- counted, any way). The charge takes only an enemy ahead, the locked one too, and lets go of one he turns from
+T.the_sprints_charge_takes_only_an_enemy_ahead_and_lets_go_behind = function()
+	H.fresh({enemies = {{x = 0, z = -3}}})
+	H.tap("F2") H.step(0.1)
+	H.down("W") H.down("Shift") H.step(1)
+	check(H.count("uc:attack_unit") == 0, "an enemy 3 m behind him: no charge order on it")
+	H.up("Shift") H.up("W")
+	H.fresh({enemies = {{x = 0, z = 20}}})
+	H.tap("F2") H.step(0.1)
+	H.down("W") H.down("Shift") H.step(1)
+	check(H.count("uc:attack_unit") == 1 and H.E.F.charge_order, "one 20 m ahead: charged")
+	-- live, 4 m off in a crowd, it let go at the pick's 45 degrees and took the next: three orders in 0.6 s
+	set_view(math.rad(60)) H.step(0.5)
+	check(H.E.F.charge_order and H.count("uc:attack_unit") == 1, "60 degrees off it: kept, no new order")
+	set_view(math.pi) H.step(0.5)
+	check(not H.E.F.charge_order and H.count("uc:attack_unit") == 1, "turned from it: let go, and not taken again")
+	H.up("Shift") H.up("W")
+	H.fresh({enemies = {{x = 0, z = 20}}})
+	H.tap("F2") H.step(0.1)
+	H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.target == H.enemies[1], "locked on")
+	-- a few frames: the lock-on's pan turns the view back to him after
+	set_view(math.pi) H.down("W") H.down("Shift") H.step(0.05)
+	check(H.E.F.sprinting and not H.E.F.charge_order, "locked on to an enemy behind him, sprinting: no charge on it")
+	H.up("Shift") H.up("W")
+end
 -- the author, 2026-10-18: "looping charging animation is not good and looks like its not looping but being cut off mid
 -- animation". CHARGE does not loop (Harald's 0.8 s, measured 2026-10-18) and was sent again every 0.6 s whatever its
 -- length: the Great Unclean One's 1.9 s cut at a third. It goes again at its own length (data.lua charges)
@@ -5228,6 +5435,41 @@ T.the_charge_clip_plays_its_whole_cycle_before_it_goes_again = function()
 	check(sends_of(CHARGE, id) == 1, "1.75 s into a 1.9 s cycle: not sent again: " .. sends_of(CHARGE, id))
 	H.step(0.2)
 	check(sends_of(CHARGE, id) == 2, "at its end: again, " .. sends_of(CHARGE, id))
+	H.up("Shift") H.up("W")
+end
+
+-- the author, 2026-10-24: "charge animations of characters are stil not looping properly, theres 1 frame glitching".
+-- Model time moves in whole ticks and a send reaches him a fixed delay later, so the time between two starts is the
+-- time between two sends: sent a tick before the end, each 0.7 s stride lost its last 0.1 s, two of its 14 frames
+T.the_charge_goes_again_a_whole_clip_after_it_last_went = function()
+	H.fresh({tick_ms = 100, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, clip_ms = {[135] = 700}}}})
+	H.E.D.charges = {wh_test_melee = {0.7, 0}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	local id = H.E.F.model.id
+	H.down("W") H.step(0.3)
+	H.down("Shift")
+	local at = {}
+	for _ = 1, 240 do -- 4 s at 60 frames a second
+		H.step(1 / 60)
+		if sends_of(CHARGE, id) > #at then at[#at + 1] = H.model_ms() end
+	end
+	H.up("Shift") H.up("W")
+	local gaps = {}
+	for i = 2, #at do gaps[#gaps + 1] = at[i] - at[i - 1] end
+	check(#gaps >= 4, "sent " .. #at .. " times in 4 s")
+	for _, g in ipairs(gaps) do check(g == 700, "a whole clip between two starts, ms: " .. table.concat(gaps, ", ")) end
+end
+-- a second sprint after the first ended starts its charge at once, as the first did
+T.a_second_sprint_charges_again = function()
+	H.fresh({tick_ms = 100, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, clip_ms = {[135] = 700}}}})
+	H.E.D.charges = {wh_test_melee = {0.7, 0}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	local id = H.E.F.model.id
+	H.down("W") H.step(0.3)
+	H.down("Shift") H.step(0.3) H.up("Shift") H.step(0.3)
+	local n = sends_of(CHARGE, id)
+	H.down("Shift") H.step(0.2)
+	check(sends_of(CHARGE, id) == n + 1 and H.E.F.on, "the second sprint charges: " .. sends_of(CHARGE, id) .. " after " .. n)
 	H.up("Shift") H.up("W")
 end
 
@@ -5478,6 +5720,14 @@ T.the_action_bar_shows_what_the_unit_can_do = function()
 		and hud_part("act_jump_key").text == "E", "each with its key")
 	crossbowmen()
 	check(hud_part("act_fire_frame"):Visible(), "a shooter has fire")
+end
+-- the author, 2026-10-24: "attack button still says left mouse despite being a melee character, no right button
+-- mention". A unit that cannot shoot swings on both buttons (combat.lua swing); a shooter's right button is its mode
+T.the_attack_button_names_both_buttons_for_a_unit_that_cannot_shoot = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	check(hud_part("act_attack_key").text == "Left / Right", "melee: both: " .. tostring(hud_part("act_attack_key").text))
+	crossbowmen()
+	check(hud_part("act_attack_key").text == "Left mouse", "a shooter: the left: " .. tostring(hud_part("act_attack_key").text))
 end
 
 -- a man who cannot shoot alone has no fire button: he has no ranged mode
@@ -6039,9 +6289,12 @@ T.the_games_shortcuts_on_its_keys_are_off_while_on = function()
 	check(s.toggle_pause == true and s.visibility_toggle_radar == true, "pause and radar off")
 	check(s.toggle_ui == nil, "K is none of its keys: CA's interface toggle is left alone")
 	check(s.cam_down == true, "Z walks: the camera's down key off")
+	-- the number row casts his skills, and picks the units in command mode: CA's own groups on it are off (CA's keymap,
+	-- read 2026-10-23: usegroup0-9 on the bare 0-9)
+	check(s.usegroup1 == true and s.usegroup9 == true and s.usegroup0 == true, "CA's group keys off")
 	H.tap("F2")
 	s = shortcuts()
-	check(s.toggle_pause == false and s.visibility_toggle_radar == false, "back at the end")
+	check(s.toggle_pause == false and s.visibility_toggle_radar == false and s.usegroup1 == false, "back at the end")
 	H.fresh({mct = {key_hide_ui = "K"}})
 	H.tap("F2")
 	s = shortcuts()
@@ -6281,6 +6534,22 @@ T.a_muzzle_inside_him_moves_out_along_the_shot = function()
 	local nb = math.sqrt(bx * bx + by * by + bz * bz)
 	check(math.sqrt(cx * cx + cy * cy + cz * cz) / nb < 0.01, "on the shot's line")
 	check((f.x - mx) * bx + (f.z - mz) * bz > 0, "toward the aim, not back through him")
+end
+
+-- a player's report, 2026-10-23: large ranged units shoot themselves; a gyrocopter's body is about 1.5 m across its
+-- radius, so 1.1 m out is still inside it. A body wider than a man's (data.lua bodies) is cleared by its radius and
+-- 0.8 m, the fix that player tested; a man keeps his 1.1 m
+T.a_big_bodys_muzzle_clears_his_radius = function()
+	playing({type = EMPX, men = 21, x = 40, range = 160, ammo = 100})
+	H.E.D.bodies = {[EMPX] = {1.5, 4}}
+	set_view(nil, -0.25) H.step(0.1)
+	local m = H.E.F.model
+	H.tap("Left mouse") H.step(4.5)
+	local l = H.all("launch")
+	local x, _, z = H.E.P.model_pos(m)
+	local f = l[1] and l[1][3]
+	local h = f and math.sqrt((f.x - x) ^ 2 + (f.z - z) ^ 2)
+	check(h and math.abs(h - 2.3) < 1e-3, "2.3 m from him, his 1.5 m radius and 0.8: " .. tostring(h))
 end
 
 -- the author, 2026-10-16: "twitching when aiming high", "aiming high still not fixed". Measured (log): a first high shot
@@ -7692,6 +7961,29 @@ local function caster_on(o)
 end
 local function slot_press(k) H.tap(k) H.step(1 / 60) end
 
+-- the author, 2026-10-24: "add mana cost of spells to UI". CA shows a spell's winds in its tooltip only
+-- (special_ability_tooltip.twui.xml mana_parent, on spell_cost_frame); each spell's slot carries them, the overcast's
+-- while it is armed overcast
+T.a_spell_slot_shows_its_winds_cost = function()
+	caster_on({spells = {"s1", "s2"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20, s2 = 7, s2_upgraded = 14}})
+	H.step(0.3)
+	check(hud_part("slot_1_mana"):Visible() and hud_part("slot_1_manaplate"):Visible() and hud_part("slot_1_mana").text == "10",
+		"s1 costs 10: " .. tostring(hud_part("slot_1_mana").text))
+	check(hud_part("slot_2_mana").text == "7", "s2 costs 7: " .. tostring(hud_part("slot_2_mana").text))
+	slot_press("1") slot_press("1")
+	check(hud_part("slot_1_mana").text == "20", "armed overcast: its 20: " .. tostring(hud_part("slot_1_mana").text))
+	check(hud_part("slot_2_mana").text == "7", "the other spell's own, not its overcast's: " .. tostring(hud_part("slot_2_mana").text))
+	slot_press("1")
+	check(hud_part("slot_1_mana").text == "10", "cancelled: 10 again: " .. tostring(hud_part("slot_1_mana").text))
+end
+
+T.an_ability_that_costs_no_winds_shows_no_cost = function()
+	hud_on({abilities = {"a1"}})
+	H.cco["BattleAbilityList.At(0).ManaUsed"] = 0
+	H.step(0.3)
+	check(not hud_part("slot_1_mana"):Visible() and not hud_part("slot_1_manaplate"):Visible(), "no winds: no cost")
+end
+
 T.a_spell_pressed_twice_overcasts = function()
 	caster_on({spells = {"s1"}, winds = 60, cost = {s1 = 10, s1_upgraded = 20}})
 	slot_press("1") slot_press("1")
@@ -8409,13 +8701,15 @@ T.the_carrier_word_layout_is_the_caves = function()
 	is(0xD733, 4265, "DISARM", 4265, {shots = true, charge = true})
 	is(0xD732, 7, "DISARM", 7, {charge = true})
 	is(0xD740, 0, "ARM", 0)
-	is(0xD750, 0x0209, "HELLO", 9) -- the protocol version 2 above the player slot (Rulings 25 and 30)
-	is(0xD750, 0x021F, "HELLO", 31)
+	is(0xD750, 0x0309, "HELLO", 9) -- the protocol version 3 above the player slot (Rulings 25, 30 and 34)
+	is(0xD750, 0x031F, "HELLO", 31)
 	for hi = 0, 0xFFFF do -- fed arbitrary floats' bits: never an error, a table only under the magic
 		local d = M.uncarrier(hi, 0xFFFF) -- as a HELLO, version 255 and slot 255: no HELLO of ours
 		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X", hi))
-		d = M.uncarrier(hi, 0x0203) -- as a HELLO, version 2 and slot 3
-		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X, lo 0x0203", hi))
+		d = M.uncarrier(hi, 0x0303) -- as a HELLO, version 3 and slot 3
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD75F), string.format("hi %X, lo 0x0303", hi))
+		d = M.uncarrier(hi, 0x0203) -- as a HELLO, version 2: the build that waited for watchers
+		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X, lo 0x0203", hi))
 		d = M.uncarrier(hi, 0x0103) -- as a HELLO, version 1: the army-slot build's, not this one's
 		check((d ~= nil) == (hi >= 0xD710 and hi <= 0xD74F), string.format("hi %X, lo 0x0103", hi))
 	end
@@ -8433,8 +8727,8 @@ end
 T.a_hello_past_the_mask_or_of_another_version_is_nothing = function()
 	local M = H.platform_module()
 	check(pcall(M.carrier, "HELLO", 31) and not pcall(M.carrier, "HELLO", 32), "slot 31 is the last that fits")
-	check(M.HELLO_VERSION == 2, "the second protocol version, player slots: " .. tostring(M.HELLO_VERSION))
-	for _, lo in ipairs({0x0003, 0x0103, 0xFF03, 0x0220, 0x02FF}) do
+	check(M.HELLO_VERSION == 3, "the third protocol version, watchers not waited for: " .. tostring(M.HELLO_VERSION))
+	for _, lo in ipairs({0x0003, 0x0103, 0x0203, 0xFF03, 0x0320, 0x03FF}) do
 		check(M.uncarrier(0xD750, lo) == nil, string.format("lo %04X is no HELLO", lo))
 	end
 end
@@ -8529,6 +8823,1163 @@ T.an_armed_abilitys_target_is_marked_one_of_his_own_too = function()
 	check(marks()[H.enemies[1]._id] == true, "armed on an enemy, the guide off: marked")
 	H.tap("Left mouse") H.step(0.1)
 	check(H.last("uc:perform_special_ability") and marks()[H.enemies[1]._id] == false, "cast: unmarked")
+end
+
+-- command mode (docs/superpowers/specs/2026-10-22-third-person-command-mode-design.md) ------------------------------
+-- spec 3.11: at a quarter speed a 200 ms tick takes 0.8 s of real time; that is slow motion, not a pause
+T.slow_motion_is_no_pause = function()
+	local function steers(speed)
+		H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, tick_ms = 200})
+		H.select(H.units[2])
+		H.tap("F2")
+		bm:modify_battle_speed(speed)
+		H.down("W") H.step(1)
+		local n = H.count("steer")
+		H.step(3)
+		return H.count("steer") - n
+	end
+	local full, slow = steers(1), steers(0.25)
+	check(slow >= full * 0.95, "a quarter speed steers as often as full speed: " .. slow .. " of " .. full)
+end
+T.speed_zero_is_a_pause_at_once = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.select(H.units[2])
+	H.tap("F2")
+	H.down("W") H.step(0.5)
+	bm:modify_battle_speed(0)
+	H.step(1 / 60)
+	local n = H.count("steer")
+	H.step(0.3)
+	check(H.count("steer") == n, "speed 0: no steering within the half second the old wait took")
+end
+
+-- the army: 1 the general he plays, 2 infantry, 3 archers, 4 cavalry; one enemy ahead. The 2026-10-22 tests run in the
+-- Bannerlord style, now the second choice of "Command style"; vanilla_battle is the default style
+local function command_battle(mct)
+	mct = mct or {}
+	if mct.command_style == nil then mct.command_style = "bannerlord" end
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 10, x = 20},
+		{type = "wh_test_archers", men = 10, x = 40, range = 150, ammo = 20},
+		{type = "wh_test_horse", men = 6, x = 60, cavalry = true}},
+		enemies = {{men = 10, x = 0, z = 80}}, mct = mct})
+	H.tap("F2") H.step(0.3)
+end
+local function vanilla_battle(mct) mct = mct or {} mct.command_style = "vanilla" command_battle(mct) end
+T.the_command_key_slows_the_battle_and_gives_its_speed_back = function()
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.command and H.last("speed")[2] == 0.25, "Q: command mode, at a quarter speed")
+	H.tap("Q") H.step(0.1)
+	check(not H.E.F.command and H.last("speed")[2] == 1, "Q again: off, at the speed it had")
+	bm:modify_battle_speed(2)
+	H.tap("Q") H.step(0.1) H.tap("Q") H.step(0.1)
+	check(H.last("speed")[2] == 2, "the player's own speed given back, not 1")
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.command and H.count("speed") == 0, "Normal: the speed untouched")
+	command_battle({command_speed = "paused"})
+	H.tap("Q") H.step(0.1)
+	check(H.last("speed")[2] == 0, "Paused: the battle stops")
+	H.tap("Q") H.step(0.1)
+	check(not H.E.F.command and H.last("speed")[2] == 1, "and Q still leaves it, paused")
+	-- spec 3.3 (revised 2026-10-23): a speed picked in the mode (the freed mouse shows CA's controls) is the player's
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	bm:modify_battle_speed(3)
+	local n = H.count("speed")
+	H.tap("Q") H.step(0.1)
+	check(H.count("speed") == n, "leaving keeps a speed picked meanwhile")
+	-- and a battle already stopped stays stopped, both ways
+	command_battle()
+	bm:modify_battle_speed(0)
+	n = H.count("speed")
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.command, "Q works at speed 0")
+	H.tap("Q") H.step(0.1)
+	check(H.count("speed") == n, "speed 0 at Q: left at 0 on entering and on leaving")
+end
+-- spec 3.4 (revised 2026-10-23): a lock-on would take every order (C.aim_point answers the locked enemy) and turn the
+-- view to him (C.track); the wheel's notches would all land as one zoom on leaving (P.wheel answers since its last call)
+T.command_mode_lets_go_of_the_lock_on_and_drops_the_wheel = function()
+	command_battle()
+	H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.target == H.enemies[1], "outside the mode a middle click locks on to the enemy 80 m ahead")
+	local zoom = H.E.rig.zoom
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.target == nil, "Q: the lock-on let go")
+	H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.target == nil, "in the mode a middle click locks nothing")
+	H.wheel_notches = 3 H.step(0.1)
+	H.tap("Q") H.step(0.5)
+	check(H.E.rig.zoom == zoom, "the wheel turned in the mode zooms its own view, not his on leaving: " .. H.E.rig.zoom)
+end
+-- the author, 2026-10-24: "cannot zoom out or in in command mode". The command view stood at its MCT distance whatever
+-- the zoom, and the wheel there was dropped. It moves the command view in and out now, his own zoom left as it was
+T.the_wheel_zooms_command_modes_view = function()
+	command_battle()
+	local u = H.E.F.unit
+	local function back() local p = u:position() return math.sqrt((H.eye.x - p:get_x()) ^ 2 + (H.eye.z - p:get_z()) ^ 2) end
+	H.tap("Q") H.step(1.5)
+	local d = back()
+	H.wheel_notches = -3 H.step(1)
+	check(back() > d * 1.3, "three notches out: further back, " .. d .. " to " .. back())
+	H.down("+") H.step(1) H.up("+") H.step(1)
+	check(back() < d, "the zoom key in: closer than it started, " .. back())
+end
+-- it is the command view that zooms: in first person, zoomed out in the mode, he comes out of it in first person still
+T.zooming_in_command_mode_leaves_his_own_view_as_it_was = function()
+	command_battle()
+	H.wheel_notches = 20 H.step(0.5)
+	check(H.E.first_person, "zoomed all the way in: first person")
+	H.tap("Q") H.step(1)
+	H.wheel_notches = -3 H.step(0.5)
+	H.tap("Q") H.step(0.5)
+	check(H.E.first_person, "out of the mode: first person still")
+end
+T.third_person_off_ends_command_mode_and_gives_the_speed_back = function()
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.command and H.last("speed")[2] == 1, "F2: no command mode, the speed back")
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	H.phase.Complete()
+	check(H.last("speed")[2] == 1, "the battle over: the speed back")
+end
+-- measured 2026-10-23 (the author's own Q presses): current_battle_speed reads the speed of the model's last tick, 0.65 s
+-- behind the call at a quarter. A Q 0.4 s after leaving read the mode's 0.25 as the speed to give back, and every leave
+-- after gave back 0.25 (the author: "goping back to third person mode doesnt make the game speed normal")
+T.a_quick_q_after_leaving_still_gives_back_full_speed = function()
+	vanilla_battle()
+	H.speed_lag = 0.7
+	H.tap("Q") H.step(1)
+	H.tap("Q") H.step(0.3) -- out: 1 asked, a quarter still read
+	H.tap("Q") H.step(1)
+	H.tap("Q") H.step(1)
+	check(H.last("speed")[2] == 1 and bm.battle:current_battle_speed() == 1,
+		"out again: full speed, not the quarter still read when it came back in: " .. H.last("speed")[2])
+end
+-- the author, 2026-10-23: "space bar doesnt even unpause the game fully". A second Space inside the lag read the quarter
+-- still showing and paused again
+T.space_again_inside_the_lag_unpauses = function()
+	vanilla_battle()
+	H.speed_lag = 0.7
+	H.tap("Q") H.step(1)
+	H.tap("Space") H.step(0.2)
+	H.tap("Space") H.step(1)
+	check(H.last("speed")[2] == 0.25 and bm.battle:current_battle_speed() == 0.25,
+		"Space, Space: running at the quarter it paused, not paused twice: " .. H.last("speed")[2])
+end
+-- the author, 2026-10-23: "THE EMPIRE GENERAL AND THE CONTROLLED UNIT STILL HAS THE FLAG, BLOCKING THE CURSOR, DISABLE IT".
+-- They are CA's 3D flags, the player's ui_unit_flags (measured that day: set_banners_enabled and enable_unit_ids left them
+-- up, the preference at 0 took every one down at once): none while third person is on, the player's own value back at its
+-- end. The game writes its preferences at exit (write_preferences_at_exit): CA's registry, which outlives the game, keeps
+-- the player's value for a battle quit with third person on, and the next battle to load puts it back
+T.third_person_takes_the_3d_flags_down_and_gives_them_back = function()
+	vanilla_battle()
+	check(H.prefs.ui_unit_flags == 0, "third person on: no 3D flags")
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.command and H.prefs.ui_unit_flags == 0, "command mode's Vanilla style, CA's interface up: still none")
+	H.tap("Q") H.step(0.1)
+	H.tap("F2") H.step(0.1)
+	check(H.prefs.ui_unit_flags == 2, "third person off: the player's own value back")
+	vanilla_battle()
+	H.phase.Complete()
+	check(H.prefs.ui_unit_flags == 2, "the battle over: back")
+	H.fresh({unit_flags = 0, keep_svr = true, mct = {command_style = "vanilla"}})
+	check(H.prefs.ui_unit_flags == 0, "turned off in the options after a battle that ended: off as the next loads")
+	H.tap("F2") H.step(0.3) H.tap("F2") H.step(0.1)
+	check(H.prefs.ui_unit_flags == 0, "and after a session there")
+	vanilla_battle()
+	H.fresh({unit_flags = 0, keep_svr = true, mct = {command_style = "vanilla"}})
+	check(H.prefs.ui_unit_flags == 2, "the battle before quit with third person on: the player's 2 back as this one loads")
+	H.tap("F2") H.step(0.3) H.tap("F2") H.step(0.1)
+	check(H.prefs.ui_unit_flags == 2, "and after a session here")
+end
+T.in_multiplayer_command_mode_never_touches_the_speed = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		H.phase.Deployed()
+		everyone_said_hello()
+		H.tap("F2") H.tap("Q") H.step(0.1)
+		check(H.E.F.command and H.count("speed") == 0, "multiplayer: command mode at the battle's speed")
+		H.tap("Space") H.tap("Shift") H.step(0.1)
+		check(H.count("speed") == 0, "multiplayer: Space and Shift touch no speed")
+	end)
+end
+T.an_armed_ability_is_put_down_by_command_mode = function()
+	H.fresh({units = {{general = true, abilities = {FIREBALL}}}, enemies = {{x = 0, z = 50}}})
+	H.tap("F2") H.step(0.1)
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed, "armed")
+	H.tap("Q") H.step(0.1)
+	check(not H.E.F.armed and H.E.F.command, "Q: put down, command mode on")
+end
+-- spec 3.12 (revised 2026-10-23, the author: "add command mode for only heroes and general, configurable by mct if the
+-- player wants all units to command")
+T.the_general_and_heroes_command_and_a_setting_lets_any_unit = function()
+	local function plays(n, mct)
+		H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 10, x = 20}, {x = 40, class = "com"}},
+			enemies = {{men = 10, x = 0, z = 80}}, mct = mct})
+		H.select(H.units[n]) H.tap("F2") H.step(0.3)
+		check(H.E.F.unit == H.units[n], "unit " .. n .. " played")
+		H.tap("Q") H.step(0.1)
+		return H.E.F.command ~= nil
+	end
+	check(plays(1), "his general commands")
+	check(plays(3), "his hero commands")
+	check(not plays(2) and H.count("speed") == 0, "his infantry: no command mode, the speed untouched")
+	check(H.last("subtitle") and H.last("subtitle")[2] == "derpy_tp_command_general_and_heroes", "and told why")
+	check(plays(2, {command_any_unit = true}), "the setting on: his infantry commands too")
+end
+T.command_mode_settings_defaults = function()
+	local S = settings_with(nil)
+	check(S.command_speed == 0.25 and S.command_distance == 20 and S.command_any_unit == false,
+		"a quarter speed, 20 m, the general and heroes only")
+	check(S.keys.command and S.keys.cmd_follow and S.keys.cmd_charge and S.keys.cmd_hold, "four keys bound")
+end
+
+-- the author, 2026-10-23, live: "why cant i move the camera up to this point". The view stopped at the mode's highest look
+-- and the mouse wound on past it, 0.24 rad read live, all of which had to come back before a pull down moved the view
+T.the_command_views_top_has_no_dead_mouse_past_it = function()
+	command_battle()
+	H.tap("Q") H.step(2)
+	local R = H.E.rig
+	R.look(0, -100000) H.step(1)
+	local top = H.look.y
+	R.look(0, 5) H.step(1)
+	check(H.look.y < top - 0.1, "up as far as it goes, then a little down: the view drops at once, " .. top - H.look.y)
+	H.tap("Q") H.step(0.1)
+	R.look(0, -100000)
+	check(near(R.want_pitch, -0.25), "out of the mode: third person's own top again, " .. R.want_pitch)
+end
+-- spec 3.4: the eye 20 m from his feet at 0.45 rad up behind him, whatever the zoom; the mouse tilts the view about the
+-- eye; then back, his own pitch given back
+T.the_command_view_eases_back_and_up_and_returns = function()
+	local function eye() local u = H.units[1] return math.sqrt((H.eye.x - u._x) ^ 2 + (H.eye.z - u._z) ^ 2), H.eye.y end
+	command_battle()
+	H.step(2)
+	local d0, y0 = eye()
+	local pitch = H.E.rig.want_pitch
+	check(not crosshair_up(), "his general fights in melee: no crosshair")
+	H.tap("Q") H.step(2)
+	local d1, y1 = eye()
+	check(math.abs(d1 - 20 * math.cos(0.45)) < 0.5 and math.abs(y1 - 20 * math.sin(0.45)) < 0.5,
+		"20 m out at 0.45 rad: " .. d1 .. ", " .. y1)
+	check(H.E.rig.want_pitch == 0.2 and pitch ~= 0.2, "entering: the view tilted to the ground ahead, from " .. pitch)
+	check(crosshair_up(), "command mode: the crosshair, the order point, in melee too")
+	local ly = H.look.y
+	H.E.rig.want_pitch = 0.4 H.step(1)
+	local d2, y2 = eye()
+	check(math.abs(d2 - d1) < 0.01 and math.abs(y2 - y1) < 0.01 and H.look.y < ly, "tilted: the eye stays, the view drops")
+	H.E.rig.want_pitch = -0.5 H.step(1)
+	check(H.look.y < H.eye.y, "tilted up: the view stays on the ground, never the sky")
+	H.tap("Q") H.step(2)
+	local d3, y3 = eye()
+	check(math.abs(d3 - d0) < 0.5 and math.abs(y3 - y0) < 0.5 and H.E.rig.want_pitch == pitch,
+		"back where it was, his pitch given back: " .. d3 .. " against " .. d0)
+	check(not crosshair_up(), "and the crosshair gone with the mode")
+	command_battle({command_distance = 0})
+	H.step(2)
+	d0 = eye()
+	H.tap("Q") H.step(2)
+	check(math.abs(eye() - d0) < 0.1, "0 m: the view stays")
+	command_battle()
+	H.E.first_person = true H.step(1)
+	H.tap("Q") H.step(2)
+	check(eye() > 15, "first person gives way to the command view")
+	H.tap("Q") H.step(2)
+	check(eye() < 1, "and comes back")
+end
+
+local function picked()
+	local on = {}
+	for id, b in pairs(marks()) do if b then on[#on + 1] = id end end
+	table.sort(on)
+	return table.concat(on, ",")
+end
+local function ids(...) local t = {} for i, u in ipairs({...}) do t[i] = u._id end table.sort(t) return table.concat(t, ",") end
+-- spec 3.5 and 3.6: each unit in the first group that fits from 6 down, never the unit he plays
+-- a player's report, 2026-10-23: two humans on one side against two AI, and his F2 played his partner's Neferata, whose
+-- first step desynced the battle. CA's get_player_army() is the alliance's FIRST army (lib_battle_manager.lua), the
+-- partner's when this machine's is the second; this machine's is item(local_army())
+T.f2_and_command_mode_take_this_machines_army_not_the_alliances_first = function()
+	H.fresh({units = {{general = true, x = 10}, {men = 10, x = 20}}, allies = {{general = true, x = -30}, {men = 10, x = -40}},
+		enemies = {{men = 10, z = 80}}, local_army = 2, mct = {command_style = "bannerlord"}})
+	H.tap("F2") H.step(0.3)
+	check(H.E.F.on and H.E.F.unit == H.units[1], "F2: his own general, not his partner's")
+	H.tap("Q") H.step(0.1) H.tap("0") H.step(0.1)
+	check(picked() == ids(H.units[2]), "0 picks his own army, not his partner's: " .. picked())
+end
+T.number_keys_pick_bannerlord_groups_never_the_played_unit = function()
+	H.fresh({units = {{general = true, abilities = {FIREBALL}}, {men = 10, x = 20}, {men = 10, x = 40, range = 150, ammo = 20},
+		{men = 6, x = 60, cavalry = true}, {men = 1, x = 80, beast = true}, {men = 3, x = 100, arty = true},
+		{x = 120, class = "com"}, {men = 6, x = 140, chariot = true, range = 100, ammo = 10}, {men = 1, x = 160, war_machine = true}},
+		allies = {{men = 10, x = -30}}, enemies = {{men = 10, z = 80}}, mct = {command_style = "bannerlord"}})
+	H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	check(find_uicomponent(H.root, "derpy_tp_hud"):Visible() and not find_uicomponent(H.root, "derpy_tp_hud", "back_plate"):Visible(),
+		"the Bannerlord style keeps the pack's panel, its own plate and no way back")
+	local u = H.units
+	local want = {["1"] = ids(u[2]), ["2"] = ids(u[3]), ["3"] = ids(u[4], u[8]), ["4"] = ids(u[5], u[9]), ["5"] = ids(u[6]),
+		["6"] = ids(u[7]), ["0"] = ids(u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9])}
+	for _, k in ipairs({"1", "2", "3", "4", "5", "6", "0", "1"}) do
+		H.tap(k) H.step(0.1)
+		check(picked() == want[k], k .. ": " .. picked() .. ", wanted " .. want[k])
+	end
+	check(hud_part("target").text == "Infantry: 1", "the plate names the pick: " .. tostring(hud_part("target").text))
+	check(not H.E.F.armed, "in the mode 1 picks; it arms nothing")
+	H.tap("Q") H.step(0.1)
+	check(picked() == "", "leaving: no chevrons")
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed and not H.E.F.command, "outside the mode 1 arms his ability again")
+end
+T.an_empty_group_says_so = function()
+	command_battle()
+	H.tap("Q") H.tap("5") H.step(0.1)
+	check(hud_part("target").text == "Artillery: none" and picked() == "", "no artillery: said, nothing picked")
+end
+-- spec 3.5 (revised 2026-10-23): the card's category decides, where the getters say otherwise. Each unit here answers
+-- the getters as plain infantry, so only the caste can put it anywhere else; the last has no caste and is a horse
+T.a_units_card_category_decides_its_group = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_hydra", men = 1, x = 20},
+		{type = "wh_test_bulls", men = 6, x = 40}, {type = "wh_test_trolls", men = 6, x = 60},
+		{type = "wh_test_leadbelchers", men = 6, x = 80, range = 80, ammo = 10},
+		{type = "wh_test_modded_horse", men = 6, x = 100, cavalry = true}}, mct = {command_style = "bannerlord"}})
+	H.E.D.castes = {wh_test_hydra = "monster", wh_test_bulls = "melee_cavalry", wh_test_trolls = "monstrous_infantry",
+		wh_test_leadbelchers = "monstrous_infantry"}
+	H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	local u = H.units
+	local want = {["1"] = ids(u[4]), ["2"] = ids(u[5]), ["3"] = ids(u[3], u[6]), ["4"] = ids(u[2])}
+	for _, k in ipairs({"1", "2", "3", "4"}) do
+		H.tap(k) H.step(0.1)
+		check(picked() == want[k], k .. ": " .. picked() .. ", wanted " .. want[k])
+	end
+end
+
+local function orders(name, u) local n = 0 for _, c in ipairs(H.all("uc:" .. name)) do if c[2] == u._id then n = n + 1 end end return n end
+T.a_click_moves_the_pick_to_the_banner_under_the_crosshair = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("1") H.step(1) -- the view settled at CMD_START: ground about 45 m from the eye
+	H.tap("Left mouse") H.step(0.1)
+	local g = H.last("uc:goto_location")
+	check(g and g[2] == H.units[2]._id and g[3].z > 5 and g[4] == false, "infantry walk to a point ahead of him")
+	check(orders("goto_location", H.units[1]) == 0 and orders("goto_location", H.units[3]) == 0, "nobody else")
+	check(orders("release_control", H.units[2]) >= 1, "given back to the player")
+	local p = H.last("ping")
+	check(p and p[5] == 2 and math.abs(p[2] - g[3].x) < 0.01 and math.abs(p[4] - g[3].z) < 0.01, "CA's move ping there")
+	H.step(2.5)
+	check(H.count("unping") == 1, "gone after two seconds")
+	H.down("Shift") H.tap("Left mouse") H.up("Shift") H.step(0.6)
+	check(H.last("uc:goto_location")[4] == true, "the sprint key held: at the run")
+	H.tap("F2") H.step(0.1)
+	check(H.count("unping") == H.count("ping"), "third person ended: CA's pings off the field")
+end
+T.right_click_attacks_the_enemy_on_the_crosshair_and_f3_charges = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("0") H.step(1)
+	-- the crosshair on the enemy's middle, 80 m ahead: the view's pitch from the eye down to (0, 0.9, 80)
+	H.E.rig.want_pitch = math.atan((H.eye.y - 0.9) / (80 - H.eye.z)) H.step(0.5)
+	H.tap("Right mouse") H.step(0.1)
+	local a = H.last("uc:attack_unit")
+	check(a and a[3] == H.enemies[1] and a[5] == true, "attack the enemy on the crosshair, at the charge")
+	check(orders("attack_unit", H.units[1]) == 0, "never the unit he plays")
+	H.step(0.6)
+	H.tap("F3") H.step(0.1)
+	check(orders("attack_unit", H.units[4]) == 2, "F3: each one charges its nearest enemy")
+	H.enemies[1]._hidden = true H.step(0.6)
+	H.tap("F3") H.step(0.1)
+	check(orders("attack_unit", H.units[4]) == 2, "an enemy the engine will not target: charged by nobody")
+end
+T.f4_holds_and_shooters_keep_firing = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("0") H.step(0.1)
+	H.tap("F4") H.step(0.1)
+	check(orders("halt", H.units[2]) == 1 and orders("halt", H.units[3]) == 1, "halted")
+	check(H.units[3]._faw == true and orders("fire_at_will", H.units[2]) == 0, "the archers fire at will again, not the infantry")
+end
+T.f1_follow_me_repeats_until_another_order = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("1") H.step(0.1)
+	H.tap("F1") H.step(0.1)
+	check(orders("goto_location", H.units[2]) == 1, "follow: sent")
+	check(H.last("uc:goto_location")[3].z < -5, "to a point behind him")
+	H.step(3.2)
+	check(orders("goto_location", H.units[2]) == 2, "sent again after three seconds")
+	H.tap("F4") H.step(4)
+	check(orders("goto_location", H.units[2]) == 2, "hold ends it")
+	H.tap("F1") H.step(0.1)
+	local n = orders("goto_location", H.units[2])
+	H.tap("F2") H.step(0.1) H.tap("F2") H.step(4)
+	check(orders("goto_location", H.units[2]) == n, "third person ended ends it: not back with the next")
+end
+T.an_order_inside_the_gap_waits_and_the_latest_wins = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("1") H.step(0.1)
+	H.tap("Left mouse") H.step(0.1)
+	H.tap("F3") H.tap("F4") H.step(0.1)
+	check(H.count("dropped_order") == 0 and orders("halt", H.units[2]) == 0, "held back, nothing dropped")
+	H.step(0.5)
+	check(orders("halt", H.units[2]) == 1 and orders("attack_unit", H.units[2]) == 0, "the hold sent, the charge passed over")
+end
+T.a_routing_unit_gets_no_order = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("0") H.step(0.1)
+	H.units[3]._routing = true
+	H.tap("Left mouse") H.step(0.1)
+	check(orders("goto_location", H.units[3]) == 0 and orders("goto_location", H.units[2]) == 1, "the routing one left out")
+end
+T.orders_are_given_paused = function()
+	command_battle({command_speed = "paused"})
+	H.tap("Q") H.tap("1") H.step(0.1)
+	H.tap("Left mouse") H.step(0.1)
+	check(orders("goto_location", H.units[2]) == 1, "paused: the order is given, it runs when the battle does")
+end
+
+-- spec 3.10: Garessta's "switch to tactical view and give a command" without leaving third person
+T.the_freed_mouse_in_command_mode_gives_cas_orders_never_to_his_unit = function()
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	H.down("Middle mouse") H.step(0.6)
+	check(H.last("disable_orders")[2] == false, "freed in command mode: CA's orders on")
+	H.select(H.units[3]) H.step(0.1)
+	check(bm:num_units_selected() == 1 and H.sel[H.units[3]], "a card clicked stays selected")
+	H.sel[H.units[1]] = true H.step(0.1) -- a shift-click adds his card
+	check(not H.sel[H.units[1]], "his own unit taken out of the selection")
+	H.tap("1") H.step(0.1)
+	check(hud_part("target").text == "Infantry: 1", "freed: the number keys still pick")
+	local n = H.count("uc:goto_location")
+	H.tap("Left mouse") H.step(0.1)
+	check(H.count("uc:goto_location") == n, "freed: a left click is CA's, no command-mode move on top")
+	H.up("Middle mouse") H.step(0.1)
+	check(H.last("disable_orders")[2] == true and H.sel[H.units[1]] and bm:num_units_selected() == 1,
+		"grabbed again: orders off, his unit selected alone")
+	H.tap("Q") H.step(0.1)
+	H.down("Middle mouse") H.step(0.6)
+	check(H.last("disable_orders")[2] == true, "freed outside command mode: orders stay off")
+end
+
+-- final review, 2026-10-23: a unit selected with the freed mouse is the player's to order with CA's (spec 3.7: another
+-- order ends follow me; 3.10: the freed mouse gives CA's orders), so follow me stops sending it back
+T.follow_me_lets_go_of_a_unit_selected_with_the_freed_mouse = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("1") H.step(0.1)
+	H.tap("F1") H.step(0.1)
+	check(orders("goto_location", H.units[2]) == 1, "following")
+	H.down("Middle mouse") H.step(0.6)
+	H.select(H.units[2]) H.step(4)
+	check(orders("goto_location", H.units[2]) == 1, "selected with the freed mouse: follow me lets go of it")
+	H.up("Middle mouse") H.step(4)
+	check(orders("goto_location", H.units[2]) == 1, "and does not take it back on the grab")
+end
+-- final review: one order is one controller (spec 3.7), so a pick part of which is inside the gap waits whole
+T.an_order_waits_whole_when_part_of_the_pick_is_inside_the_gap = function()
+	command_battle({command_speed = "normal"})
+	H.tap("Q") H.tap("1") H.step(0.1)
+	H.tap("Left mouse") H.step(0.1)
+	H.tap("0") H.tap("Left mouse") H.step(0.05)
+	check(orders("goto_location", H.units[3]) == 0 and orders("goto_location", H.units[4]) == 0,
+		"the archers and cavalry wait out the infantry's gap")
+	H.step(0.5)
+	local at = {}
+	for i, c in ipairs(H.calls) do if c[1] == "uc:goto_location" then at[c[2]] = i end end
+	local a, b, c = at[H.units[2]._id], at[H.units[3]._id], at[H.units[4]._id]
+	check(orders("goto_location", H.units[3]) == 1 and math.max(a, b, c) - math.min(a, b, c) == 2,
+		"then one controller over all three")
+	-- a newer order to a unit takes it out of the order waiting
+	H.step(1)
+	H.tap("1") H.tap("Left mouse") H.step(0.05)
+	H.tap("0") H.tap("Left mouse") H.step(0.05)
+	H.tap("2") H.tap("F4") H.step(0.05)
+	local n = orders("goto_location", H.units[3])
+	H.step(0.6)
+	check(orders("halt", H.units[3]) == 1 and orders("goto_location", H.units[3]) == n and H.count("dropped_order") == 0,
+		"the archers' hold stands: the waiting move let go of them")
+	check(orders("goto_location", H.units[4]) == 2, "the cavalry's part of it still sent")
+end
+-- final review: above normal speed the wait stays the half second it was; at 3x a heavy battle's 200 ms between ticks
+-- read as a pause and steering stuttered
+T.fast_motion_keeps_the_half_second_wait = function()
+	local function steers(speed, tick)
+		H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, tick_ms = tick})
+		H.select(H.units[2])
+		H.tap("F2")
+		bm:modify_battle_speed(speed)
+		H.down("W") H.step(1)
+		local n = H.count("steer")
+		H.step(3)
+		return H.count("steer") - n
+	end
+	local full, fast = steers(1, 200), steers(3, 600)
+	check(fast >= full * 0.95, "3x with 200 ms between ticks steers as often as 1x: " .. fast .. " of " .. full)
+end
+
+-- command mode, Vanilla style (docs/superpowers/specs/2026-10-23-third-person-command-mode-vanilla-design.md, section 7):
+-- the style, and the thirteen keys that share the number row, E, Space and Shift with the abilities, the jump, the fly and
+-- the sprint. The number row picks the units (the author, 2026-10-23: "USE THE NUM ROW FOR SELECTING UNITS"; it was the
+-- numpad)
+T.vanilla_command_style_and_keys = function()
+	local S = settings_with(nil)
+	check(S.command_style == "vanilla", "Vanilla by default")
+	for n = 1, 9 do check(S.names["cmd_unit_" .. n] == tostring(n), "unit " .. n .. " on " .. n) end
+	check(S.names.cmd_unit_10 == "0" and S.names.cmd_page == "E" and S.names.cmd_pause == "Space"
+		and S.names.cmd_speed == "Shift", "unit 10 on 0, the page on E, the pause on Space, the speed on Shift")
+	check(S.names.ability_1 == "1" and S.names.ability_10 == "0" and S.names.jump == "E" and S.names.fly == "Space"
+		and S.names.sprint == "Shift" and #S.conflicts == 0, "shared with the abilities, the jump, the fly and the sprint: no conflict")
+	check(settings_with({command_style = "bannerlord"}).command_style == "bannerlord", "Bannerlord when picked")
+	check(settings_with({command_style = "nonsense"}).command_style == "vanilla", "an unknown value: Vanilla")
+	S = settings_with({key_cmd_page = "1"})
+	check(S.names.cmd_unit_1 == "1" and S.names.cmd_page == "E" and #S.conflicts == 1,
+		"two command keys on one key: a conflict, the later back to its default, E, shared with the jump")
+	S = settings_with({key_cmd_pause = "E"})
+	check(S.names.cmd_pause == "Space" and S.names.cmd_page == "E",
+		"the pause on the page key's E: back to its own Space, still shared with the fly")
+end
+
+-- spec 4.1, 4.2, 4.7: CA's orders and selection at the crosshair, the pack sending nothing of its own. Unit 1 moved off
+-- the number row in MCT, so 1 is the abilities' key alone: the Bannerlord groups' read of it would pick
+T.vanilla_command_mode_hands_the_clicks_to_ca = function()
+	vanilla_battle({key_cmd_unit_1 = "Numpad 1"})
+	H.tap("Q") H.step(0.1)
+	check(H.E.command.vanilla() and H.E.F.dragging, "Vanilla style, the mouse still turning the view")
+	check(H.last("disable_orders")[2] == false and H.last("cinematic_ui")[2] == false, "CA's orders on, its interface not cinematic")
+	check(bm:num_units_selected() == 0, "entering: nothing selected")
+	H.select(H.units[3]) H.sel[H.units[1]] = true H.step(0.2)
+	check(H.sel[H.units[1]] and H.sel[H.units[3]], "a selection holding his unit is left alone")
+	local before = H.count("uc:goto_location") + H.count("uc:attack_unit") + H.count("uc:halt")
+	H.tap("1") H.tap("Left mouse") H.tap("Right mouse") H.tap("F1") H.tap("F3") H.tap("F4") H.step(0.6)
+	check(H.count("uc:goto_location") + H.count("uc:attack_unit") + H.count("uc:halt") == before and H.count("ping") == 0
+		and picked() == "", "no group, no order, no ping from the pack")
+	H.tap("Q") H.step(0.1)
+	check(H.last("disable_orders")[2] == true and H.last("cinematic_ui")[2] == true and bm:num_units_selected() == 1
+		and H.sel[H.units[1]], "leaving: orders off, cinematic, his unit selected alone")
+end
+-- spec 4.1 (the author: "yes the whole"), 4.8, 4.9
+-- the author, 2026-10-23, live: "theres also no buttons or custom hud to be found for the unit and to switch back to 3rd
+-- person mode", then picked the pack's panel with CA's HUD: the panel stands on CA's bottom band, the corner buttons
+-- under its radar, and a way back above the bar. Later that day, the bar over the middle of the band: "move back the
+-- skills to the character portrait", and picked his skills on CA's portrait, left edges lined up
+T.vanilla_command_mode_shows_cas_hud_and_the_packs_panel_on_top = function()
+	vanilla_battle()
+	local holder, r = radar()
+	holder.x, holder.y, holder.w, holder.h = 1602, 0, 318, 244
+	local port = H.comp("porthole_parent", find_uicomponent(H.root, "hud_battle"))
+	port.x, port.y, port.w, port.h = 10, 822, 248, 258 -- the band's highest part (measured 2026-10-23)
+	local cards, panel = find_uicomponent(H.root, "hud_battle", "cards_panel"), find_uicomponent(H.root, "derpy_tp_hud")
+	local function part(id) return find_uicomponent(panel, id) end
+	local function box(id) local c = part(id) local x, y = c:Position() local w, h = c:Dimensions() return x, y, w, h end
+	local function lowest()
+		local b = 0
+		for _, id in ipairs({"portrait", "plate_left_short", "slot_1_frame", "plate_right", "act_walk_frame"}) do
+			local _, y, _, h = box(id) b = math.max(b, y + h)
+		end
+		return b
+	end
+	local floor = lowest()
+	H.tap("M") H.step(0.1)
+	check(not cards:Visible() and panel:Visible() and r.parent == panel, "third person: CA's cards hidden, the minimap in the panel")
+	check(not part("back_plate"):Visible(), "no way back outside the mode")
+	H.tap("Q") H.step(0.1)
+	check(cards:Visible() and panel:Visible() and r.parent == holder and H.last("banners")[2] == false,
+		"command mode: CA's cards and radar with the pack's panel; no flags: his own stands under the crosshair and takes the clicks")
+	check(lowest() <= 822 - 24, "the panel stands on CA's band, a margin over the porthole's top: " .. lowest())
+	local _, ty = box("hide_frame")
+	check(ty >= 244, "the corner buttons under CA's radar: " .. ty)
+	local bx, by = box("back_plate")
+	local sx, sy = box("slot_1_frame")
+	check(part("back_plate"):Visible() and part("back").text == "Back to third person" and part("back_key").text == "Q",
+		"the way back, its key")
+	check(sx == 10, "his skills on CA's portrait, from its left edge: " .. sx)
+	check(by + 32 <= sy and bx == 10, "the way back above them, the same edge: " .. bx .. ", " .. by)
+	H.tap("M") H.step(0.1)
+	check(r.parent == holder, "M does nothing in the mode")
+	H.tap("P") H.step(0.1)
+	check(H.last("cinematic_ui")[2] == true and not panel:Visible(), "the interface hidden: cinematic (CA then takes no clicks)")
+	H.tap("P") H.step(0.1)
+	check(H.last("cinematic_ui")[2] == false and panel:Visible() and part("back_plate"):Visible(), "shown again, the way back too")
+	H.tap("Q") H.step(0.1)
+	check(not cards:Visible() and panel:Visible() and r.parent == panel and lowest() == floor and not part("back_plate"):Visible(),
+		"leaving: the panel back on the screen's floor, the minimap in it, no way back")
+end
+-- the author, 2026-10-23, a shot of CA's banner over the unit he plays, under the crosshair, its unit panel open off the
+-- parked cursor: "remove this". CA shows a banner again every tenth of a second; what is in it, it leaves hidden (measured
+-- 2026-10-23)
+T.command_mode_hides_his_own_banner_under_the_crosshair = function()
+	vanilla_battle()
+	local holder = H.comp("unit_id_holder", H.root)
+	local function banner(u) local b = H.comp(tostring(u._id), holder) return b, H.comp("modular_parent", b) end
+	local own, inside = banner(H.units[1])
+	local other, theirs = banner(H.units[2])
+	H.tap("Q") H.step(0.1)
+	check(not inside:Visible(), "command mode: nothing of his own banner drawn")
+	check(own:Visible() and other:Visible() and theirs:Visible(), "the banners themselves as CA has them")
+	H.tap("Q") H.step(0.1)
+	check(inside:Visible(), "leaving: his banner back")
+	H.tap("Q") H.step(0.1) H.tap("F2") H.step(0.1)
+	check(inside:Visible(), "third person off in the mode: back too")
+end
+T.the_way_back_takes_the_freed_cursors_click = function()
+	vanilla_battle()
+	H.tap("Q") H.step(0.1)
+	H.tap("Middle mouse") H.step(0.1)
+	H.trigger("ComponentLClickUp", {string = "back_plate"}) H.step(0.1)
+	check(not H.E.F.command and H.E.F.on, "clicked: third person, out of command mode")
+	H.trigger("ComponentLClickUp", {string = "back_plate"}) H.step(0.1)
+	check(not H.E.F.command, "outside the mode a click on it enters nothing")
+	H.trigger("ComponentLClickUp", {string = "slot_1_frame"}) H.tap("Q") H.step(0.1)
+	H.trigger("ComponentLClickUp", {string = "slot_1_frame"}) H.step(0.1)
+	check(H.E.F.command, "a click on any other part leaves the mode alone")
+	-- the click is taken on the next tick (main.lua): an F2 in between ends third person first, and the click is no
+	-- order for the next session
+	H.trigger("ComponentLClickUp", {string = "back_plate"}) H.tap("F2") H.step(0.1)
+	H.tap("F2") H.step(0.3)
+	check(H.E.F.on and not H.E.F.command, "a click met by F2 in the same frame: the next session starts outside the mode")
+end
+
+-- spec 4.4: a click switches, the selection kept, no hold in this style
+T.a_middle_click_frees_the_cursor_and_the_next_takes_it_back = function()
+	vanilla_battle()
+	H.tap("Q") H.step(0.1)
+	H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.free_cursor and not H.E.F.dragging and H.last("cinematic_ui")[2] == false, "one click: the cursor free")
+	local yaw = H.E.rig.want_yaw
+	H.mouse = {393, 0} H.step(0.1)
+	check(H.E.rig.want_yaw == yaw, "free: the mouse turns nothing")
+	H.select(H.units[2]) H.sel[H.units[3]] = true
+	H.mouse = {0, 0} H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.dragging and H.sel[H.units[2]] and H.sel[H.units[3]] and H.last("disable_orders")[2] == false,
+		"the next click: the view turns again, the selection and CA's orders kept")
+	H.down("Middle mouse") H.step(1) H.up("Middle mouse") H.step(0.1)
+	check(not H.E.F.free_cursor, "a hold is no click: still on the crosshair")
+	H.tap("Middle mouse") H.step(0.1)
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.dragging and not H.E.F.free_cursor, "leaving the mode leaves the free cursor")
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.dragging, "and entering starts on the crosshair")
+end
+-- Review Focus 4: third person ending inside the mode with the cursor free
+T.f2_in_vanilla_command_mode_leaves_vanillas_own_controls = function()
+	vanilla_battle()
+	H.tap("Q") H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.free_cursor and not H.E.F.dragging, "the cursor freed")
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.command and H.last("disable_orders")[2] == false and H.last("cinematic_ui")[2] == false
+		and H.last("speed")[2] == 1, "F2: CA's orders, interface and speed")
+	check(find_uicomponent(H.root, "hud_battle", "cards_panel"):Visible(), "CA's cards up")
+	H.tap("F2") H.step(0.3)
+	check(H.E.F.dragging and not H.E.F.free_cursor, "the next session on the mouse-look")
+end
+
+local function sel() local t = {} for u in pairs(H.sel) do t[#t + 1] = u._id end table.sort(t) return table.concat(t, ",") end
+-- spec 4.3: in the cards' order, his own skipped, E pages through tens and wraps. On the number row (the author,
+-- 2026-10-23: "USE THE NUM ROW FOR SELECTING UNITS"), which in the mode casts none of his skills
+T.the_number_row_selects_the_cards_in_order_and_e_steps_the_pages = function()
+	local units = {{general = true, abilities = {FIREBALL}}}
+	for i = 1, 22 do units[#units + 1] = {type = "wh_test_melee", men = 5, x = 10 * i} end
+	H.fresh({units = units, allies = {{men = 10, x = -30}}, enemies = {{men = 10, z = 80}}})
+	H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	check(H.last("subtitle")[2] == "derpy_tp_command_page", "entering: the page said")
+	local u, cp = H.units, find_uicomponent(H.root, "hud_battle", "cards_panel")
+	table.insert(cp.kids, 2, table.remove(cp.kids, 6)) -- unit 6's card second, after his own
+	local function key(k) H.tap(k) H.step(0.1) return sel() end
+	check(key("1") == tostring(u[6]._id), "1: the first card after his, in the panel's order")
+	check(not H.E.F.armed, "and not his first skill")
+	check(key("2") == tostring(u[2]._id), "2 replaces it")
+	check(key("0") == tostring(u[11]._id), "0: the tenth")
+	H.down("Ctrl")
+	check(key("3") == tostring(u[3]._id), "Ctrl+3 replaces too: no call adds")
+	H.up("Ctrl")
+	local says = H.count("subtitle")
+	key("E")
+	check(H.count("subtitle") == says + 1 and key("1") == tostring(u[12]._id), "E: said, 1 the eleventh")
+	key("E")
+	check(key("2") == tostring(u[23]._id), "the third page: the twenty-second card")
+	check(key("3") == tostring(u[23]._id), "past the last card: nothing changes")
+	key("E")
+	check(key("1") == tostring(u[6]._id), "E wraps to the first ten")
+	key("E") key("Q") key("Q")
+	check(key("1") == tostring(u[6]._id), "entering again: the first ten")
+	key("Q")
+	check(not H.E.F.command and key("1") and H.E.F.armed, "out of the mode: 1 is his first skill again")
+end
+-- Review Focus 2: CA keeps a dead unit's card, so its number stays its own
+T.a_dead_units_number_selects_nothing_and_the_numbers_hold = function()
+	vanilla_battle()
+	H.tap("Q") H.step(0.1)
+	for _, m in ipairs(H.units[3]._models) do m.alive = false end
+	H.tap("1") H.step(0.1) H.tap("2") H.step(0.1)
+	check(sel() == tostring(H.units[2]._id), "2 is the dead archers' card: the infantry stay selected")
+	H.tap("3") H.step(0.1)
+	check(sel() == tostring(H.units[4]._id), "3 is still the cavalry")
+	local said = H.count("subtitle")
+	H.tap("E") H.step(0.1)
+	check(H.count("subtitle") == said, "ten cards or fewer: the page key does nothing")
+end
+
+-- spec 4.6, 6: Space pauses in both styles, single player
+T.space_pauses_and_unpauses_in_command_mode_in_both_styles = function()
+	for _, style in ipairs({"vanilla", "bannerlord"}) do
+		command_battle({command_style = style})
+		H.tap("Q") H.step(0.1)
+		H.tap("Space") H.step(0.1)
+		check(H.last("speed")[2] == 0, style .. ": Space pauses")
+		H.tap("Space") H.step(0.1)
+		check(H.last("speed")[2] == 0.25, style .. ": again, the speed before the pause")
+		H.tap("Space") H.tap("Q") H.step(0.1)
+		check(H.last("speed")[2] == 1, style .. ": leaving paused gives back the speed from before Q")
+	end
+	vanilla_battle()
+	local n = H.count("speed")
+	H.tap("Space") H.step(0.1)
+	check(H.count("speed") == n, "outside the mode Space is the fly key")
+	vanilla_battle()
+	H.tap("Q") H.step(0.1) bm:modify_battle_speed(3) H.tap("Space") H.step(0.1) H.tap("Space") H.step(0.1)
+	check(H.last("speed")[2] == 3, "a speed picked on CA's controls comes back after the pause")
+	H.tap("Q") H.step(0.1)
+	check(H.last("speed")[2] == 3, "and is kept on leaving: it is the player's")
+	vanilla_battle()
+	bm:modify_battle_speed(0) H.tap("Q") H.step(0.1) H.tap("Space") H.step(0.1)
+	check(H.last("speed")[2] == 0.25, "entered paused: Space runs it at the command speed")
+	H.tap("Q") H.step(0.1)
+	check(H.last("speed")[2] == 0, "and leaving pauses it again, as it was at Q")
+end
+-- spec 4.6: a tap of Shift, Vanilla style only
+T.a_shift_tap_switches_between_slow_and_normal = function()
+	vanilla_battle()
+	bm:modify_battle_speed(2)
+	H.tap("Q") H.step(0.1)
+	H.tap("Shift") H.step(0.1)
+	check(H.last("speed")[2] == 1, "a tap: normal, 1x, not the 2x from before Q")
+	H.tap("Shift") H.step(0.1)
+	check(H.last("speed")[2] == 0.25, "another: slow")
+	local n = H.count("speed")
+	H.down("Shift") H.step(0.5) H.up("Shift") H.step(0.1)
+	H.down("Shift") H.tap("1") H.up("Shift") H.step(0.1)
+	H.down("Shift") H.tap("Left mouse") H.up("Shift") H.step(0.1)
+	-- the final review, 2026-10-23: spec 4.6 makes a tap Shift "with no other key or mouse button pressed"; Shift+W is
+	-- third person's sprint, and the habit switched the speed
+	H.down("Shift") H.tap("W") H.up("Shift") H.step(0.1)
+	check(H.count("speed") == n, "held 0.5 s, Shift+1 (CA's unit ability), Shift+click and Shift+W: no switch")
+	H.tap("Shift") H.tap("Q") H.step(0.1)
+	check(H.last("speed")[2] == 2, "leaving at Shift's normal: the 2x from before Q")
+	H.tap("Q") H.tap("Space") H.step(0.1)
+	n = H.count("speed")
+	H.tap("Shift") H.step(0.1)
+	check(H.count("speed") == n, "paused: Shift leaves the pause to Space")
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	n = H.count("speed")
+	H.tap("Shift") H.step(0.1)
+	check(H.count("speed") == n, "Bannerlord style: Shift is the run, no speed")
+end
+
+-- spec 4.5, the author: "stay put". Halts are counted from a mark: third person's start halts a unit played whole
+-- already (main.lua, the defend line)
+T.his_unit_stays_put_when_a_ca_order_takes_it_in = function()
+	vanilla_battle({command_speed = "normal"})
+	H.tap("Q") H.step(0.1)
+	local h = orders("halt", H.units[1])
+	H.select(H.units[2]) H.sel[H.units[1]] = true
+	H.ca_order(0, 60) H.step(0.2)
+	check(H.units[2]._prior_walk and orders("halt", H.units[1]) == h, "the infantry go; his halt waits out the gap")
+	H.step(0.9)
+	check(orders("halt", H.units[1]) == h + 1 and not H.units[1]._prior_walk and H.count("dropped_order") == 0,
+		"then he is halted, not dropped")
+	H.ca_order(0, 60) H.step(0.2)
+	check(orders("halt", H.units[1]) == h + 1, "CA's order again: the half second starts over")
+	H.units[1]._halt_lags = true H.step(0.6) -- in game a halt lands on the engine's next tick: he moves a moment more
+	check(orders("halt", H.units[1]) == h + 2, "halted again")
+	H.step(0.2)
+	check(orders("halt", H.units[1]) == h + 2, "one halt, not one a frame until it lands")
+	H.units[1]._halt_lags = nil -- still on CA's march when W goes down
+	H.down("W") H.step(1)
+	check(orders("halt", H.units[1]) == h + 2, "walking on W: no halt")
+	H.up("W") H.step(0.9)
+	check(not H.units[1]._prior_walk and H.count("dropped_order") == 0, "W let go, still moving: stopped, nothing dropped")
+end
+T.a_regiment_played_whole_stays_put_too = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 10, x = 20}, {type = "wh_test_melee", men = 10, x = 40}},
+		mct = {command_any_unit = true, combat_one_man = false, command_speed = "normal"}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	local h = orders("halt", H.units[2])
+	H.select(H.units[3]) H.sel[H.units[2]] = true
+	H.ca_order(0, 60) H.step(1)
+	check(orders("halt", H.units[2]) == h + 1 and not H.units[2]._prior_walk and H.units[3]._prior_walk,
+		"his regiment halted, the other marches")
+end
+-- the author's rule: one man of a regiment gives it no orders, so a CA order to his regiment is the player's
+T.one_man_leaves_his_regiment_to_the_player = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 10, x = 20}},
+		mct = {command_any_unit = true, command_speed = "normal"}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	check(H.E.F.model ~= nil, "one man played")
+	local function to_it() local n = 0 for _, c in ipairs(H.calls) do if c[1]:find("^uc:") and c[2] == H.units[2]._id then n = n + 1 end end return n end
+	local n = to_it()
+	H.sel[H.units[2]] = true H.ca_order(0, 60) H.step(1.5)
+	H.tap("Q") H.step(0.3)
+	check(to_it() == n and H.units[2]._prior_walk, "the pack sends his regiment nothing: CA's order is the player's")
+end
+T.cas_fire_at_will_is_held_again_and_his_melee_sent_again_on_leaving = function()
+	H.fresh({units = {{general = true, range = 100, ammo = 10}, {men = 10, x = 20}}, mct = {command_speed = "normal"}})
+	H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	check(H.units[1]._faw == false, "his fire held, as in third person")
+	H.units[1]._faw = true H.step(0.1) -- CA's fire-at-will button, his unit in the selection
+	check(H.units[1]._faw == false, "turned back off")
+	local n = orders("melee", H.units[1])
+	H.tap("Q") H.step(0.1)
+	check(orders("melee", H.units[1]) == n + 1, "leaving: his melee mode sent again")
+	-- the final review, 2026-10-23: F2 inside the mode skipped the stop's melee(false), as leaving had cleared what it reads
+	H.tap("Right mouse") H.step(0.6)
+	check(H.last("uc:melee")[3] == true, "the mode key: his unit in melee")
+	H.tap("Q") H.step(0.1) H.tap("F2") H.step(0.1)
+	check(H.last("uc:melee")[3] == false, "F2 inside the mode: melee mode off, as F2 outside it")
+end
+-- Review Focus 5
+T.in_multiplayer_the_stay_put_halt_is_one_shared_order = function()
+	in_net_mode(function()
+		H.fresh({mp = true})
+		H.phase.Deployed()
+		everyone_said_hello()
+		H.tap("F2") H.tap("Q") H.step(0.1)
+		local h = orders("halt", H.units[1])
+		H.sel[H.units[1]] = true H.ca_order(0, 60) H.step(1.5)
+		check(orders("halt", H.units[1]) == h + 1 and H.count("dropped_order") == 0, "halted once, through the shared command")
+	end)
+end
+
+-- live run 2026-10-23: the parked cursor sits on CA's 1x1 holders at the screen's centre pixel. Interactive, they took
+-- every click (no order, no selection) and drew CA's cursor over the pack's hide, the flicker the author saw
+T.cas_centre_holders_take_no_click_in_vanilla_command_mode = function()
+	local function all(b)
+		local hud = find_uicomponent(H.root, "hud_battle")
+		for _, id in ipairs({"spawn_zone_icons_parent", "reinforcement_icons_parent"}) do
+			if find_uicomponent(hud, id):IsInteractive() ~= b then return false end
+		end
+		return true
+	end
+	vanilla_battle()
+	check(all(true), "third person: CA's as it left them")
+	H.tap("Q") H.step(0.1)
+	check(all(false), "command mode: the click at the crosshair goes to the world")
+	H.tap("Q") H.step(0.1)
+	check(all(true), "leaving: interactive again")
+	H.tap("Q") H.step(0.1) H.tap("F2") H.step(0.3)
+	check(not H.E.F.on and all(true), "third person off inside the mode: interactive again")
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	check(all(true), "the Bannerlord style leaves them: CA's HUD is hidden there")
+end
+
+-- the author, 2026-10-23: "middle mouse dragging should not also activate toggle for freeview and fixed on character"
+T.a_middle_drag_turns_the_view_and_switches_nothing = function()
+	vanilla_battle()
+	H.tap("Q") H.step(0.1)
+	local yaw = H.E.rig.want_yaw
+	H.down("Middle mouse") H.step(0.05) H.mouse = {200, 0} H.step(0.05) H.up("Middle mouse") H.step(0.1)
+	check(not H.E.F.free_cursor and H.E.rig.want_yaw ~= yaw, "on the crosshair: a quick drag turns the view, nothing switched")
+	H.tap("Middle mouse") H.step(0.1)
+	check(H.E.F.free_cursor, "a click frees the cursor")
+	yaw = H.E.rig.want_yaw
+	H.down("Middle mouse") H.step(0.05) H.mouse = {200, 0} H.step(0.05)
+	check(H.E.F.dragging and H.E.rig.want_yaw ~= yaw, "free: held, the view turns with the mouse")
+	H.up("Middle mouse") H.step(0.1)
+	check(H.E.F.free_cursor and not H.E.F.dragging, "let go after the drag: free again")
+	H.down("Middle mouse") H.step(0.6) H.up("Middle mouse") H.step(0.1)
+	check(H.E.F.free_cursor, "a long press, the mouse still, is no click either")
+	H.tap("Middle mouse") H.step(0.1)
+	check(not H.E.F.free_cursor and H.E.F.dragging, "a click takes it back")
+end
+
+-- the final review, 2026-10-23: every uc: call reaches the engine's queue, so fire at will reads on until the next model
+-- tick; held again every frame meanwhile, it went out six times a tick at 1x, a shared order each in multiplayer
+T.cas_fire_at_will_is_held_again_once_while_it_lands = function()
+	H.fresh({units = {{general = true, range = 100, ammo = 10}, {men = 10, x = 20}}, mct = {command_speed = "normal"}})
+	H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	local n = orders("fire_at_will", H.units[1])
+	H.units[1]._faw_lags, H.units[1]._faw = true, true H.step(0.2) -- CA's fire-at-will button, his unit in the selection
+	check(orders("fire_at_will", H.units[1]) == n + 1, "held again once while it lands: " .. orders("fire_at_will", H.units[1]) - n)
+	H.step(0.4)
+	check(orders("fire_at_will", H.units[1]) == n + 2, "still on after the gap: held again")
+	H.units[1]._faw_lags, H.units[1]._faw = nil, false H.step(1)
+	check(orders("fire_at_will", H.units[1]) == n + 2, "landed: nothing more")
+end
+-- the final review, 2026-10-23: CA runs a listener unprotected in the released game (lib_core.lua,
+-- event_unprotected_callback), so leaving the mode from the click let a fault there skip the mod's clean stop
+T.the_way_back_leaves_the_mode_inside_the_ticks_guard = function()
+	vanilla_battle()
+	H.tap("Q") H.tap("Middle mouse") H.step(0.1)
+	local rig = H.E.rig.command
+	H.E.rig.command = function() error("a fault in leaving") end
+	local ok = pcall(H.trigger, "ComponentLClickUp", {string = "back_plate"})
+	H.step(0.1)
+	H.E.rig.command = rig
+	check(ok and H.E.strikes == 1 and not H.E.F.on, "the fault met in the tick: one strike, third person stopped")
+end
+-- the final review, 2026-10-23, then seen live: hidden, the plate stayed interactive where it last stood, over CA's cards
+-- (y 755 of 900 once the mode was left), and a hidden interactive component is a dead zone (docs/CUSTOM_UI.md)
+T.the_way_back_takes_no_click_while_hidden = function()
+	vanilla_battle()
+	local plate = find_uicomponent(H.root, "derpy_tp_hud", "back_plate")
+	check(not plate:Visible() and not plate:IsInteractive(), "third person: hidden, no click")
+	H.tap("Q") H.step(0.1)
+	check(plate:Visible() and plate:IsInteractive(), "command mode: shown, it takes the click")
+	H.tap("P") H.step(0.1)
+	check(not plate:IsInteractive(), "the interface hidden: no click")
+	H.tap("P") H.step(0.1)
+	check(plate:IsInteractive(), "shown again: it takes the click")
+	H.tap("Q") H.step(0.1)
+	check(not plate:IsInteractive(), "left: no click")
+	H.tap("Q") H.step(0.1) H.tap("F2") H.step(0.3)
+	check(not plate:IsInteractive(), "third person off inside the mode: no click")
+end
+-- the author, 2026-10-23, from the live frames: his plate met CA's unit information panel in the left column, and the
+-- action buttons and the bar's keys named keys the mode gives to other things (E pages, Shift slows). In the mode his
+-- plate and the actions stand aside; the bar shows his abilities with no keys
+T.vanilla_command_mode_sets_his_plate_and_the_actions_aside = function()
+	local abilities = {}
+	for i = 1, 11 do abilities[i] = "a" .. i end -- two pages: the page tab shows, with its key
+	local function battle(style)
+		H.fresh({units = {{general = true, abilities = abilities}, {type = "wh_test_melee", men = 10, x = 20}},
+			mct = {command_style = style}})
+		H.tap("F2") H.step(0.6)
+	end
+	local function part(id) return find_uicomponent(H.root, "derpy_tp_hud", id) end
+	local ASIDE = {"portrait", "name", "plate_left_short", "hp", "act_walk_frame", "act_sprint_key", "slot_1_key",
+		"slot_1_keyplate", "tab_plate", "tab"}
+	local function all(b) for _, id in ipairs(ASIDE) do if part(id):Visible() ~= b then return false, id end end return true end
+	battle("vanilla")
+	local ok, id = all(true)
+	check(ok and part("slot_1_icon"):Visible(), "third person: his plate, the actions and the keys: " .. tostring(id))
+	H.tap("Q") H.step(0.6)
+	ok, id = all(false)
+	check(ok and part("slot_1_frame"):Visible() and part("slot_10_icon"):Visible(), "command mode: aside, his abilities kept: " .. tostring(id))
+	local x1 = part("slot_1_frame"):Position()
+	local x10 = part("slot_10_frame"):Position()
+	local w10 = part("slot_10_frame"):Dimensions()
+	check(math.abs(x1 - (H.screen[1] - x10 - w10)) <= 1, "the bar centred, no tab beside it: " .. x1 .. ", " .. x10 + w10)
+	H.tap("P") H.step(0.1) H.tap("P") H.step(0.6)
+	ok, id = all(false)
+	check(ok and part("slot_1_icon"):Visible(), "the interface hidden and shown in the mode: still aside: " .. tostring(id))
+	x1, x10 = part("slot_1_frame"):Position(), part("slot_10_frame"):Position()
+	check(math.abs(x1 - (H.screen[1] - x10 - w10)) <= 1, "and the bar still centred, no tab beside it: " .. x1)
+	H.tap("Q") H.step(0.6)
+	ok, id = all(true)
+	check(ok, "leaving: all back: " .. tostring(id))
+	H.tap("Q") H.step(0.1) H.tap("F2") H.step(0.3) H.tap("F2") H.step(0.6)
+	ok, id = all(true)
+	check(ok, "F2 inside the mode, then a new session: all back: " .. tostring(id))
+	battle("bannerlord")
+	H.tap("Q") H.step(0.6)
+	ok, id = all(true)
+	check(ok, "the Bannerlord style keeps them: " .. tostring(id))
+end
+
+-- the final review's minors, 2026-10-23 (the author: "fix minor issues first")
+-- the stay-put halt was an order the steering never heard of, so W pressed just after it sent a walk the engine
+-- dropped, and he stood about half a second more
+T.a_walk_just_after_the_stay_put_halt_waits_out_its_gap = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 10, x = 20}, {type = "wh_test_melee", men = 10, x = 40}},
+		mct = {command_any_unit = true, combat_one_man = false, command_speed = "normal"}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	local h = orders("halt", H.units[2])
+	H.select(H.units[3]) H.sel[H.units[2]] = true
+	H.ca_order(0, 60)
+	for _ = 1, 120 do if orders("halt", H.units[2]) > h then break end H.step(1 / 60) end
+	check(orders("halt", H.units[2]) == h + 1, "his regiment halted")
+	H.down("W") H.step(1)
+	check(H.count("dropped_order") == 0 and orders("goto_location", H.units[2]) > 0,
+		"W at once: the walk waits out the halt's gap, nothing dropped")
+end
+-- leaving the mode drew the HUD over from nothing: the ability bar back on its first page
+T.leaving_the_mode_keeps_the_ability_bars_page = function()
+	local abilities = {}
+	for i = 1, 11 do abilities[i] = "a" .. i end
+	H.fresh({units = {{general = true, abilities = abilities}, {men = 10, x = 20}}, mct = {command_style = "vanilla"}})
+	H.tap("F2") H.step(0.3)
+	H.tap("T") H.step(0.1)
+	check(H.E.hud.page_name(0) == "Abilities 2", "T: the second page")
+	local plate = find_uicomponent(H.root, "derpy_tp_hud", "plate_right")
+	local function bottom() local _, y = plate:Position() local _, h = plate:Dimensions() return y + h end
+	local floor = bottom()
+	H.tap("Q") H.step(0.1) H.tap("Q") H.step(0.1)
+	check(H.E.hud.page_name(0) == "Abilities 2", "Q in and out: still the second page")
+	check(bottom() == floor, "and the panel back on the screen's floor, the minimap off: " .. bottom() .. ", " .. floor)
+end
+-- the author, 2026-10-24 ("healthbar is gone"), live: out of the mode the plate's health and stamina bars stayed hidden.
+-- The mode gives each part back as it was last asked to show, and no update asks about these: it only sizes them
+T.leaving_the_mode_gives_the_plate_its_bars_back = function()
+	H.fresh({units = {{general = true}, {men = 10, x = 20}}, mct = {command_style = "vanilla"}})
+	H.tap("F2") H.step(0.3)
+	local function shown(id) return find_uicomponent(H.root, "derpy_tp_hud", id):Visible() end
+	local ids = {"health_back", "health_fill", "health_frame", "stamina_icon", "stamina_back", "stamina_fill", "stamina_frame",
+		"stamina"}
+	for _, id in ipairs(ids) do check(shown(id), id .. ": shown in third person") end
+	H.tap("Q") H.step(0.1)
+	check(not shown("health_back"), "in the mode: set aside")
+	H.tap("Q") H.step(0.1)
+	for _, id in ipairs(ids) do check(shown(id), id .. ": back out of the mode") end
+end
+-- a part of CA's bottom band that CA itself hides, parked anywhere, set the panel's floor. The floor counts the parts CA
+-- shows: main.lua keeps CA's own visibility while third person hides its HUD
+T.a_band_part_ca_hides_sets_no_floor = function()
+	H.fresh({units = {{general = true}, {men = 10, x = 20}}, mct = {command_style = "vanilla"}})
+	local winds = find_uicomponent(H.root, "hud_battle", "winds_of_magic")
+	winds.visible, winds.y = false, 100 -- CA's own: an army with no magic, parked high
+	H.tap("F2") H.step(0.3) H.tap("Q") H.step(0.1)
+	local plate = find_uicomponent(H.root, "derpy_tp_hud", "plate_right")
+	local function bottom() local _, y = plate:Position() local _, h = plate:Dimensions() return y + h end
+	check(bottom() <= 852 - 24 and bottom() > 700, "entering: on CA's orders band, not under the hidden dial: " .. bottom())
+	H.tap("P") H.step(0.1) H.tap("P") H.step(0.1)
+	check(bottom() <= 852 - 24 and bottom() > 700, "drawn again in the mode: the same: " .. bottom())
+	check(not winds:Visible(), "CA's dial still as CA left it")
+end
+-- the author's picture, 2026-10-23 ("even conflicting ui"): the ability bar and the way back stood on CA's unit cards, at
+-- y 795 and 755 of 900 with CA's band at rest from 642. H.place ran once, at Q, as the mode turned CA's interface on, and
+-- the band was not yet where it rests: the panel stood where third person puts it. It follows the band to its rest
+T.command_mode_panel_follows_cas_band_to_its_rest = function()
+	H.fresh({screen = {1600, 900}, units = {{general = true}, {men = 10, x = 20}}, mct = {command_style = "vanilla"}})
+	local hud = find_uicomponent(H.root, "hud_battle")
+	local orders, winds = find_uicomponent(hud, "battle_orders"), find_uicomponent(hud, "winds_of_magic")
+	orders.x, orders.w, orders.h, winds.x, winds.w, winds.h = 350, 900, 228, 1364, 236, 245 -- measured at 1600x900
+	H.tap("F2") H.step(0.3)
+	orders.y, winds.y = 900, 900 -- out of sight
+	H.tap("Q") H.step(0.1)
+	orders.y, winds.y = 672, 655 -- at rest
+	H.step(0.5)
+	local slot = find_uicomponent(H.root, "derpy_tp_hud", "slot_1_frame")
+	local _, y = slot:Position()
+	local _, h = slot:Dimensions()
+	check(y + h <= 655, "the bar on CA's band at rest, off its cards: its foot at " .. (y + h))
+	H.tap("Q") H.step(0.1)
+	local _, y2 = slot:Position()
+	check(y2 > y, "out of the mode: back down where third person puts it")
+end
+-- the Bannerlord style's keys did not say so, and the keys' tooltip said no key is taken twice where four pairs share one
+T.the_key_texts_say_which_style_and_which_keys_share = function()
+	for _, a in ipairs({"cmd_follow", "cmd_charge", "cmd_hold", "ability_1", "ability_6", "ability_10"}) do
+		check(H.K.labels[a]:find("Bannerlord", 1, true), a .. ": names the Bannerlord style")
+	end
+	check(not H.K.labels.ability_7:find("Bannerlord", 1, true), "ability 7 picks no group")
+	local R = run_page()
+	for a, b in pairs(H.K.shares) do
+		check(R.options["key_" .. a].tooltip:find(H.K.labels[b], 1, true)
+			and R.options["key_" .. b].tooltip:find(H.K.labels[a], 1, true), a .. " and " .. b .. ": each names the other")
+	end
+	check(not R.options.key_toggle.tooltip:find("shares", 1, true), "a key that shares nothing says nothing of it")
+end
+
+-- the author, 2026-10-24: "now add mct unit stats buff or debuff, add options for stats, default is none". Each step is a
+-- hidden army ability cast at the unit played (buffs.lua); the harness's H.cast lands it as the engine did that day
+local MA50, AR25 = "derpy_tp_stat_melee_attack_p50", "derpy_tp_stat_armour_m25"
+local function casts(key)
+	local n = 0
+	for _, c in ipairs(H.all("army_ability")) do if not key or c[2] == key then n = n + 1 end end
+	return n
+end
+
+T.unit_stats_page_offers_none_and_every_step = function()
+	local R = run_page()
+	local Tst = assert(loadfile("/script/derpy_tp/stats"))()
+	for _, stat in ipairs(Tst.order) do
+		local o = R.options["stat_" .. stat]
+		check(o and o.kind == "dropdown" and o.section == "stats", stat .. ": a dropdown in Unit stats")
+		check(o.default == "none" and o.values[1].text == "None", stat .. ": None, and None the default")
+		check(#o.values == #Tst.steps(stat) + 1, stat .. ": None and every step")
+		-- each value the page offers reads back in settings.lua as its step
+		for i, step in ipairs(Tst.steps(stat)) do
+			local S = assert(loadfile("/script/derpy_tp/settings"))()(H.mct_stub({["stat_" .. stat] = o.values[i + 1].key}), H.K, Tst)
+			check(S.stats[stat] == step, stat .. ": " .. o.values[i + 1].text .. " reads back as " .. step)
+		end
+	end
+	check(R.options.stat_melee_attack.values[5].text == "+50%" and R.options.stat_leadership.values[2].text == "-20",
+		"a percent, and leadership in points")
+	local S = assert(loadfile("/script/derpy_tp/settings"))()(H.mct_stub({stat_armour = "p33"}), H.K, Tst)
+	check(next(S.stats) == nil, "a value no step has is none")
+end
+
+T.no_stat_chosen_casts_nothing = function()
+	general_on() H.step(3)
+	H.tap("F2") H.step(2)
+	check(casts() == 0, "None everywhere: no cast, on or off: " .. casts())
+end
+
+T.a_stat_chosen_goes_on_the_unit_played_and_comes_off_after = function()
+	H.fresh({mct = {stat_melee_attack = "p50"}}) H.tap("F2") H.step(2)
+	local g = H.units[1]
+	check(g._phases[MA50], "melee attack +50% on the general he plays")
+	check(casts(MA50) == 1, "one cast puts it on: " .. casts(MA50))
+	H.step(5)
+	check(casts(MA50) == 1 and g._phases[MA50], "and it stays, no cast again")
+	H.tap("F2") H.step(2)
+	check(not g._phases[MA50], "let go: it comes off")
+	check(casts(MA50) == 2, "one cast more takes it off: " .. casts(MA50))
+	H.step(5)
+	check(casts(MA50) == 2, "and nothing after")
+end
+
+T.two_stats_both_go_on = function()
+	H.fresh({mct = {stat_melee_attack = "p50", stat_armour = "m25"}}) H.tap("F2") H.step(2)
+	check(H.units[1]._phases[MA50] and H.units[1]._phases[AR25], "melee attack +50% and armour -25%")
+end
+
+T.the_stat_goes_with_him_to_the_next_unit = function()
+	H.fresh({mct = {stat_melee_attack = "p50"}, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.tap("F2") H.step(2)
+	H.tap("F2") H.step(1)
+	H.select(H.units[2]) H.tap("F2") H.step(3)
+	check(not H.units[1]._phases[MA50], "off the general")
+	check(H.units[2]._phases[MA50], "on the regiment played now")
+end
+
+-- its phase already on another unit, put there by nothing this battle saw: the first cast takes it off that one, and the
+-- next check puts it on him
+T.a_stat_on_a_unit_not_looked_at_is_put_right = function()
+	H.fresh({mct = {stat_melee_attack = "p50"}, units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}})
+	H.give(H.units[2], MA50)
+	H.tap("F2") H.step(3)
+	check(H.units[1]._phases[MA50] and not H.units[2]._phases[MA50], "on him, off the other")
+	check(casts(MA50) == 2, "off, then on: " .. casts(MA50))
+end
+
+T.a_cast_that_never_landed_is_cast_again = function()
+	H.fresh({mct = {stat_melee_attack = "p50"}}) H.drop_casts = 1
+	H.tap("F2") H.step(3)
+	check(H.units[1]._phases[MA50], "on, at the second cast")
+	check(casts(MA50) == 2, "two casts: " .. casts(MA50))
+end
+
+-- the man played alone is aimed at, not his regiment's centre: the nearest unit to the centre may be another's
+T.one_man_is_aimed_at_himself = function()
+	-- an even rank: no man stands on its centre
+	H.fresh({mct = {stat_melee_attack = "p50"}, units = {{general = true}, {type = "wh_test_melee", men = 20, x = 40}}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.2)
+	local m = H.E.F.model
+	check(m, "one man played")
+	local c = H.last("army_ability")
+	check(c and c[3] == m.x and c[4] == m.z, "aimed at his own spot")
+	check(m.x ~= H.units[2]._x, "which is not the regiment's centre")
+	H.step(1)
+	check(H.units[2]._phases[MA50], "and it lands on his regiment")
+end
+
+T.unit_stats_stay_out_of_multiplayer = function()
+	in_net_mode(function()
+		H.fresh({mp = true, mct = {stat_melee_attack = "p50"}})
+		H.E.buffs.tick(10)
+		H.E.F.on, H.E.F.unit = true, H.units[1]
+		H.E.buffs.tick(11)
+		H.step(1)
+		check(casts() == 0, "no cast in a multiplayer battle")
+	end)
+end
+
+T.a_faction_without_the_stats_is_told_once = function()
+	H.fresh({mct = {stat_melee_attack = "p50"}, owned = "wh3_main_army_abilities_fecundity"}) H.tap("F2") H.step(2)
+	check(casts() == 0, "no cast for an army that owns none")
+	H.tap("F2") H.step(1) H.tap("F2") H.step(1)
+	local n = 0
+	for _, s in ipairs(H.all("subtitle")) do if s[2] == "derpy_tp_stats_faction" then n = n + 1 end end
+	check(n == 1, "said once over two starts: " .. n)
+	check(casts() == 0, "and still no cast")
 end
 
 return T
