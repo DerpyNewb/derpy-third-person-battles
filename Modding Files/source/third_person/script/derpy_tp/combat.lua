@@ -35,6 +35,14 @@ local function reeling(s)
 end
 -- m from a regiment's centre its men can stand: a wide line of 160 is ~40 m across
 local SPREAD = 30
+-- a blow (C.strike): the engine launches a swing once the point where it lands (its IMPACT_POS, data.lua impacts)
+-- reaches the target's edge (exe+325fca4), so a man whose edge is inside that reach plus STRIKE_SLACK m, within
+-- STRIKE_COS of the blow's direction from him, can take it; the one nearest where it lands does. A clip whose point was
+-- not read lands STRIKE_AHEAD m ahead. ponytail: STRIKE_SLACK and STRIKE_COS are not the engine's own thresholds,
+-- which were not read; measure a whiff or a hit at the edge before moving them
+local STRIKE_SLACK, STRIKE_COS, STRIKE_AHEAD = 0.5, 0.5, 2.5
+-- the pending hit's type (platform.lua P.blow), for the log
+local BLOW = {[0] = "blocked", [1] = "hit", [3] = "knocked", [4] = "knocked", [5] = "knocked"}
 -- 9.0 ids (AssetEditor's dlc24 list + 2): SHOOT_READY_TO_AIM_LEVEL, FIRE_LEVEL; the reload slot comes from the
 -- unit's animation fragment, and a crossbow's is the raise to aim itself
 local SLOT_AIM = 1554 -- the fire clip is F.fire_slot (main.lua): FIRE_LEVEL 1557, or a thrower's GRENADIER 949
@@ -307,6 +315,50 @@ return function(E)
 		F.face_yaw = nil
 	end
 
+	-- a swing of his can be struck through the cave (P.strike): one man or a unit of one, single player. A unit played
+	-- whole swings every man and fights through the engine's own melee between swings; no blow is posted for it
+	local function strikes() return P.features.strike and not P.features.net and (F.model or F.single) ~= nil end
+
+	-- the enemy man a blow lands on: m the model playing slot, the point where it lands turned with his heading (as a
+	-- shot's muzzle is, launch). A rider's victim is his mount, where his hit points are. nil: nobody in its reach
+	local function victim(m, slot)
+		local imp = E.D.impacts and E.D.impacts[F.utype]
+		imp = imp and imp[slot - 453] or nil
+		local rx, rz = imp and imp[1] or 0, imp and imp[2] or STRIKE_AHEAD
+		local reach = math.max(math.sqrt(rx * rx + rz * rz), 0.01)
+		local x, _, z = P.model_pos(m)
+		local yaw = P.heading(m) or E.rig.yaw
+		local c, sn = math.cos(yaw), math.sin(yaw)
+		local ix, iz = x + rx * c + rz * sn, z - rx * sn + rz * c
+		local dx, dz = (ix - x) / reach, (iz - z) / reach
+		local best, best_d
+		local armies = bm:get_non_player_alliance():armies()
+		for a = 1, armies:count() do
+			local list = armies:item(a):units()
+			for i = 1, list:count() do
+				local u = list:item(i)
+				local q = u:position()
+				if u:number_of_men_alive() > 0 and (q:get_x() - x) ^ 2 + (q:get_z() - z) ^ 2 < (reach + SPREAD) ^ 2 then
+					local body = E.D.bodies and E.D.bodies[u:type()]
+					local r = body and body[1] or 0.5
+					for _, em in ipairs(P.models(u)) do
+						if P.model_hp(em) > 0 then
+							local vm = P.mount(em) or em
+							local ex, _, ez = P.model_pos(vm)
+							local ox, oz = ex - x, ez - z
+							local d = math.sqrt(ox * ox + oz * oz)
+							if d - r <= reach + STRIKE_SLACK and (d <= r or ox * dx + oz * dz >= STRIKE_COS * d) then
+								local di = (ex - ix) ^ 2 + (ez - iz) ^ 2
+								if not best_d or di < best_d then best, best_d = vm, di end
+							end
+						end
+					end
+				end
+			end
+		end
+		return best, best and math.sqrt(best_d)
+	end
+
 	local function swing(slots, primary, now, hold, mask)
 		-- only the clips his men have (the author, 2026-10-15: "rng on activating the animation" - measured, a list that
 		-- rotated past them played nothing), each list on its own count
@@ -334,8 +386,9 @@ return function(E)
 		-- a swing hits through its clip's SPLASH_ATTACK: one with none hits nothing when played here (the author,
 		-- 2026-10-25; a player, 2026-10-24: Celestial Guard "didnt manage to kill a single unit" - its four clips carry
 		-- IMPACT_POS alone). Those slots (data.lua dulls) are left out while one with a splash is left; a unit with none
-		-- keeps them all. ponytail: ground swings only, a flyer's FLY_ATTACK clips are not read
-		if attack and not air then
+		-- keeps them all. ponytail: ground swings only, a flyer's FLY_ATTACK clips are not read. Where a blow is struck
+		-- (strikes, C.strike) every clip lands its hit as the engine's own melee does, and all of them are swung
+		if attack and not air and not strikes() then
 			local dull, keep = {}, {}
 			for _, s in ipairs(E.D.dulls and E.D.dulls[F.utype] or {}) do dull[s] = true end
 			for _, s in ipairs(has) do if not dull[s] then keep[#keep + 1] = s end end
@@ -403,6 +456,8 @@ return function(E)
 					F.lock.m, F.lock.slot = carrier, played
 					-- a swing's clip outlives its hold (2.6-3.5 s against 1.5): it turns him itself to its end (move.lua)
 					if F.lock.turns then F.swung = {carrier, played} end
+					-- its blow, posted once the clip shows on him (C.strike)
+					if attack and strikes() then F.strike = {m = carrier, slot = played, till = give_up or 0} end
 				end
 				any = any or carrier ~= nil
 			end)
@@ -423,6 +478,28 @@ return function(E)
 		else
 			go()
 		end
+	end
+
+	-- each tick: a swing's blow posted the first tick its clip shows on him (the cave arms it only while he plays that
+	-- slot), on the man where it lands; and the blow the cave then armed, logged: blocked, a hit or a knock, and its damage
+	function C.strike(now)
+		local b = F.blow
+		if b and (P.struck() ~= b.n or now >= b.till) then
+			F.blow = nil
+			local kind, dmg = P.blow(b.m)
+			E.log("blow " .. b.slot .. " on a man " .. b.d .. " m from where it lands: "
+				.. (P.struck() == b.n and "not armed" or tostring(BLOW[kind] or kind) .. " " .. tostring(dmg)))
+		end
+		local s = F.strike
+		if not s then return end
+		if P.anim_slot(s.m) ~= s.slot then
+			if now >= s.till then F.strike = nil end
+			return
+		end
+		F.strike = nil
+		local v, d = victim(s.m, s.slot)
+		if not v then E.log("blow " .. s.slot .. ": nobody where it lands") return end
+		if P.strike(s.m, v, s.slot) then F.blow = {m = s.m, slot = s.slot, d = math.floor(d * 10 + 0.5) / 10, n = P.struck(), till = now + 1} end
 	end
 
 	function C.melee(now, primary)
@@ -947,13 +1024,14 @@ return function(E)
 	-- The native order enables charge collisions. A single entity keeps direct steering and its ordinary swings
 	-- disarmed; the order must not hand W control over to sustained melee. It lets go of an enemy he has turned his back
 	-- on, past 90 degrees: at the pick's 45 an enemy 4 m off in a crowd crossed it each step, and the order went to the
-	-- next and back (read live 2026-10-23: three orders in 0.6 s)
+	-- next and back (read live 2026-10-23: three orders in 0.6 s). None in the air: a melee order lands a flyer (a player,
+	-- 2026-10-28: flying generals landing at random)
 	function C.charge(now)
 		local co = F.charge_order
 		if co and (not F.sprinting or not co.target:is_valid_target() or co.target:is_routing() or not ahead(co.target, 0)) then
 			F.charge_order, co = nil, nil
 		end
-		if co or F.model or not F.sprinting then return end
+		if co or F.model or not F.sprinting or F.unit:is_currently_flying() then return end
 		local target = pick_target(CHARGE_REACH, false, true)
 		if not target then return end
 		F.charge_order = {target = target, at = now}

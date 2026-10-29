@@ -29,6 +29,9 @@ from the cave's first instruction, mov rax, <block>):
     skip, map_lookup   the carrier cave's two baked pointers: the store-skip target (exe+2ecfcc5) and exe+17aece4
     buf        the walk builder's 0x60-byte parameter block (platform.lua fills it as it always did)
     guards     multiplayer: ENTRIES entries of {man pointer, his +0x258 id}, claimed by GUARD_ON, freed by GUARD_OFF/death
+    strike     1: a blow for strike_man (exchanged with 0 as it is read): if his clip is still strike_slot and both he
+               and strike_victim live, the engine's melee roll (roll, exe+30a8ab0) and the pending hit it arms written
+               on him as exe+3251af8 writes it (docs/BATTLE_ENGINE_RE.md section 12). struck counts the arms (probes)
 
 Two caves share this block. The UPDATE cave (ASM, exe+3086f04) guards the one man played in single player from man/guard/
 walk as it always has, and in multiplayer also scans the guard table and stops the engine's four orders on every man with
@@ -53,11 +56,12 @@ PLACEHOLDER = 0x1122334455667788
 
 MB = {"man": 0x00, "walk_a": 0x08, "move_a": 0x10, "move_b": 0x18, "melee": 0x20, "walk_b": 0x28, "walk_stop": 0x30,
       "walk_start": 0x38, "guard": 0x40, "walk": 0x44, "stops": 0x48, "met": 0x4c, "has_angle": 0x50, "near": 0x51,
-      "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "buf": 0x80, "skip": 0xe8, "map_lookup": 0xf0,
-      "guards": 0x100, "size": 0x200}
+      "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "strike": 0x6c, "strike_man": 0x70,
+      "strike_victim": 0x78, "buf": 0x80, "strike_slot": 0xe0, "struck": 0xe4, "skip": 0xe8, "map_lookup": 0xf0,
+      "roll": 0xf8, "guards": 0x100, "size": 0x200}
 # the fields a cave calls or jumps through: written over, never zeroed (a cave already past its match goes through
 # them), so platform.lua keeps them outside every range check_mailbox zeroes; a harness test pins it
-FUNCS = ("walk_a", "move_a", "move_b", "melee", "walk_b", "walk_stop", "walk_start", "skip", "map_lookup")
+FUNCS = ("walk_a", "move_a", "move_b", "melee", "walk_b", "walk_stop", "walk_start", "skip", "map_lookup", "roll")
 # multiplayer guard table: ENTRIES entries of GE bytes at MB guards, {man pointer (+0), his +0x258 id (u32, +8)}.
 # count (MB count) is how many are claimed, so single player (count 0) skips the scan with no register traffic.
 # The fragment copy table is its OWN game_alloc (platform makes the copies, byte-identical to single player's), and the
@@ -80,15 +84,30 @@ HELLO_VERSION, HELLO_SLOTS = 3, 32
 # so the cave resolves its own 16-bit id the same way: battle = [record+0x30], map = battle+0x80, lookup by &id.
 REC_BATTLE, MAP_OFF, MAP_LOOKUP_RVA = 0x30, 0x80, 0x17aece4
 # the walk builder's parameter block (platform.lua) and the man's fields the in-place steer writes (docs section 3)
-BUF = {"x": 0x0, "z": 0x8, "run": 0x28, "speed": 0x2c, "angle": 0x30, "gait": 0x46}
-MAN = {"cmd": 0x330, "hp": 0xb1c, "x": 0x368, "z": 0x370, "run": 0x390, "speed": 0x394, "angle": 0x398,
-       "gait": 0x3ae, "fresh": 0x3c0}
+# surf/surf2: the goal location's surface ref, two qwords (null on the ground, a wall's or bridge deck's section on one;
+# P.steer copies his own +0x920/+0x928 into it). A goal with none on a wall or deck is the terrain under it, path state 7
+# and no move (measured 2026-10-29). The walk builder copies buf +0x10/+0x18 into his walk at +0x378/+0x380
+BUF = {"x": 0x0, "z": 0x8, "surf": 0x10, "surf2": 0x18, "run": 0x28, "speed": 0x2c, "angle": 0x30, "gait": 0x46}
+MAN = {"cmd": 0x330, "hp": 0xb1c, "x": 0x368, "z": 0x370, "surf": 0x378, "surf2": 0x380, "run": 0x390, "speed": 0x394,
+       "angle": 0x398, "gait": 0x3ae, "fresh": 0x3c0,
+       # the strike: his clip slot, whether one plays (+0x898 set or +0x284 not 0, P.anim_slot's test), the pointer
+       # whose +0x440 is the battle, and the pending hit exe+32654d0 lands (type, damage, slot u16, victim, pending)
+       "slot": 0x278, "busy": 0x284, "playing": 0x898, "world": 0x58,
+       "r_type": 0xaf0, "r_dmg": 0xaf4, "r_slot": 0xaf8, "r_victim": 0xb00, "r_pending": 0xb08}
+# the roll's first argument, as exe+3251af8 finds it: [[[man + 0x58] + 0x440] + 0xf8]. Its result block (0x20 bytes:
+# type, 1, damage, a flag byte, attacker, victim) is given 0x30 on the cave's stack, so a roll that writes a little more
+# than its vanilla caller's locals show lands in the cave's own frame and not on the saved xmm registers
+WORLD_BATTLE, BATTLE_RESOLVER = 0x440, 0xf8
+ROLL_RVA, ROLL_BYTES = 0x30a8ab0, bytes.fromhex("488bc4 55 53 56 57 4156 4157")  # mov rax, rsp; push rbp .. r15
 
 # At the site: a virtual call's entry, so the standard ABI - rsp is 8 past a 16-byte boundary, rcx/rdx/r8/r9 and
 # xmm0-3 may hold arguments, rax and the flags are dead (the next instruction is mov rax, rsp). Anything else the cave
 # touches it gives back. Every call is made with rsp on a 16-byte boundary and 32 bytes of shadow space.
 ASM = """
     mov rax, {placeholder}
+    cmp rcx, qword ptr [rax + {strike_man}]
+    je strike
+main:
     cmp rcx, qword ptr [rax + {man}]
     jne sec_b
     push rbx
@@ -173,7 +192,17 @@ in_place:
     or r8d, edx
     mov word ptr [rsi + {m_angle}], ax
 placed:
-    test r8d, r8d
+    mov rax, qword ptr [rbx + {b_surf}]
+    mov rdx, rax
+    xor rdx, qword ptr [rsi + {m_surf}]
+    or r8, rdx
+    mov qword ptr [rsi + {m_surf}], rax
+    mov rax, qword ptr [rbx + {b_surf2}]
+    mov rdx, rax
+    xor rdx, qword ptr [rsi + {m_surf2}]
+    or r8, rdx
+    mov qword ptr [rsi + {m_surf2}], rax
+    test r8, r8
     je restore
     mov byte ptr [rsi + {m_fresh}], 0
     jmp restore
@@ -199,6 +228,82 @@ restore:
     pop rsi
     pop rbx
     jmp done
+strike:
+    cmp dword ptr [rax + {strike}], 0
+    je main
+    push rbx
+    push rsi
+    push rdi
+    push rcx
+    push rdx
+    push r8
+    push r9
+    sub rsp, 0xa0
+    movdqu xmmword ptr [rsp + 0x60], xmm0
+    movdqu xmmword ptr [rsp + 0x70], xmm1
+    movdqu xmmword ptr [rsp + 0x80], xmm2
+    movdqu xmmword ptr [rsp + 0x90], xmm3
+    mov rbx, rax
+    mov rsi, rcx
+    xor eax, eax
+    xchg dword ptr [rbx + {strike}], eax
+    test eax, eax
+    je s_restore
+    cmp dword ptr [rsi + {m_hp}], 0
+    jle s_restore
+    mov rdi, qword ptr [rbx + {strike_victim}]
+    test rdi, rdi
+    je s_restore
+    cmp dword ptr [rdi + {m_hp}], 0
+    jle s_restore
+    movzx eax, word ptr [rsi + {m_slot}]
+    cmp ax, word ptr [rbx + {strike_slot}]
+    jne s_restore
+    cmp qword ptr [rsi + {m_playing}], 0
+    jne s_roll
+    cmp dword ptr [rsi + {m_busy}], 0
+    je s_restore
+s_roll:
+    xor eax, eax
+    mov qword ptr [rsp + 0x20], rax
+    mov qword ptr [rsp + 0x30], rax
+    mov qword ptr [rsp + 0x38], rax
+    mov qword ptr [rsp + 0x40], rax
+    mov qword ptr [rsp + 0x48], rax
+    mov qword ptr [rsp + 0x50], rax
+    mov qword ptr [rsp + 0x58], rax
+    mov dword ptr [rsp + 0x34], 1
+    mov rcx, qword ptr [rsi + {m_world}]
+    mov rcx, qword ptr [rcx + {world_battle}]
+    mov rcx, qword ptr [rcx + {battle_resolver}]
+    lea rdx, [rsp + 0x30]
+    mov r8, rsi
+    mov r9, rdi
+    call qword ptr [rbx + {roll}]
+    movzx eax, word ptr [rbx + {strike_slot}]
+    mov word ptr [rsi + {m_r_slot}], ax
+    mov eax, dword ptr [rsp + 0x30]
+    mov dword ptr [rsi + {m_r_type}], eax
+    mov eax, dword ptr [rsp + 0x38]
+    mov dword ptr [rsi + {m_r_dmg}], eax
+    mov dword ptr [rsi + {m_r_pending}], 1
+    mov qword ptr [rsi + {m_r_victim}], rdi
+    inc dword ptr [rbx + {struck}]
+s_restore:
+    movdqu xmm0, xmmword ptr [rsp + 0x60]
+    movdqu xmm1, xmmword ptr [rsp + 0x70]
+    movdqu xmm2, xmmword ptr [rsp + 0x80]
+    movdqu xmm3, xmmword ptr [rsp + 0x90]
+    mov rax, rbx
+    add rsp, 0xa0
+    pop r9
+    pop r8
+    pop rdx
+    pop rcx
+    pop rdi
+    pop rsi
+    pop rbx
+    jmp main
 sec_b:
     cmp dword ptr [rax + {count}], 0
     je done
@@ -472,6 +577,7 @@ def fields():
     f.update({"m_" + k: hex(v) for k, v in MAN.items()})
     f["placeholder"] = hex(PLACEHOLDER)
     f.update({"entries": hex(ENTRIES), "ge": hex(GE), "frag_row": hex(FRAG_ROW), "m_frag": hex(FRAG),
+              "world_battle": hex(WORLD_BATTLE), "battle_resolver": hex(BATTLE_RESOLVER),
               "magic": hex(MAGIC), "rec_battle": hex(REC_BATTLE), "map_off": hex(MAP_OFF), "op_hello": hex(OPS["HELLO"]),
               "hello_version": hex(HELLO_VERSION), "hello_slots": hex(HELLO_SLOTS)})
     return f
@@ -575,21 +681,29 @@ def check():
     if not funcs or tuple(re.findall(r'"(\w+)"', funcs.group(1))) != FUNCS:
         bad.append("platform.lua's FUNCS is not this file's: run py tools/third_person_cave.py")
     exe_re.pe()
-    for rva, want, what in ((SITE_RVA, SITE_BYTES, "his update"), (CARRIER_RVA, CARRIER_SITE, "the RELOAD_TIME float read")):
+    for rva, want, what in ((SITE_RVA, SITE_BYTES, "his update"), (CARRIER_RVA, CARRIER_SITE, "the RELOAD_TIME float read"),
+                            (ROLL_RVA, ROLL_BYTES, "the melee roll (platform.lua's roll)")):
         on_disk = exe_re._pe[exe_re.off(rva):exe_re.off(rva) + len(want)]
         if on_disk != want:
             bad.append("exe+%x reads %s, not %s: a patch moved %s" % (rva, on_disk.hex(" "), want.hex(" "), what))
     for b in bad:
         print("FAIL " + b)
     if not bad:
-        print("ok: update cave %d bytes (block +%d), carrier cave %d bytes (block +%d); sites exe+%x and exe+%x as expected"
-              % (len(code), at, len(ccode), cat, SITE_RVA, CARRIER_RVA))
+        print("ok: update cave %d bytes (block +%d), carrier cave %d bytes (block +%d); sites exe+%x, exe+%x and the roll "
+              "exe+%x as expected" % (len(code), at, len(ccode), cat, SITE_RVA, CARRIER_RVA, ROLL_RVA))
     return not bad
 
 
 # -- the emulator ----------------------------------------------------------------------------------------------------
 CODE, STUBS, BLOCK, HIM, OTHER, STACK = 0x10000000, 0x20000000, 0x30000000, 0x40000000, 0x41000000, 0x50000000
-STOP, START = STUBS, STUBS + 0x100
+STOP, START, ROLL = STUBS, STUBS + 0x100, STUBS + 0x200
+# the strike's world: him +0x58 -> WORLD, whose +0x440 is the battle (WORLD + 0x1000), whose +0xf8 is the resolver
+# the roll is given; VICTIM the man struck. ROLL_OUT: the type and damage the roll stub reports, set per run
+WORLD, VICTIM, RESOLVER, ROLL_OUT = 0x42000000, 0x43000000, 0x5e501e00, STUBS + 0x800
+# the roll stub: writes the scenario's type and damage where the real roll does ([rdx], [rdx+8]), and 16 bytes past
+# the vanilla 0x20-byte block, which the cave's frame must absorb, then wrecks the volatile registers like the others
+ROLL_HEAD = ("mov eax, dword ptr [%d]; mov dword ptr [rdx], eax; mov eax, dword ptr [%d]; mov dword ptr [rdx + 8], eax; "
+             "mov qword ptr [rdx + 0x20], -1; mov qword ptr [rdx + 0x28], -1; " % (ROLL_OUT, ROLL_OUT + 4))
 VT = {"walk_a": 0x143919350, "move_a": 0x1439199f8, "move_b": 0x143ae1928, "melee": 0x143ad24b8,
       "walk_b": 0x143ae2400, "clip": 0x143911fb0, "stand": 0x1439126f0, "idle": 0x143919b28, "fight": 0x143ae2b38,
       "fight2": 0x143ae2a08, "fight3": 0x143912820}
@@ -626,12 +740,13 @@ def run(code, at, setup, rcx=HIM, race=None):
     import unicorn
     from unicorn import x86_const as X
     uc = unicorn.Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_64)
-    for base in (CODE, STUBS, BLOCK, HIM, OTHER, STACK):
+    for base in (CODE, STUBS, BLOCK, HIM, OTHER, STACK, WORLD, VICTIM):
         uc.mem_map(base, 0x10000)
     ks = keystone.Ks(keystone.KS_ARCH_X86, keystone.KS_MODE_64)
     stub = bytes(ks.asm(WRECK, 0)[0])
     uc.mem_write(STOP, stub)
     uc.mem_write(START, stub)
+    uc.mem_write(ROLL, bytes(ks.asm(ROLL_HEAD + WRECK, ROLL)[0]))
     code = code[:at] + struct.pack("<Q", BLOCK) + code[at + 8:]
     uc.mem_write(CODE, code)
 
@@ -641,8 +756,13 @@ def run(code, at, setup, rcx=HIM, race=None):
         q(BLOCK + MB[k], VT[k])
     q(BLOCK + MB["walk_stop"], STOP)
     q(BLOCK + MB["walk_start"], START)
+    q(BLOCK + MB["roll"], ROLL)
     q(BLOCK + MB["man"], HIM)
     d(HIM + MAN["hp"], 80)
+    for m in (HIM, OTHER):
+        q(m + MAN["world"], WORLD)
+    q(WORLD + WORLD_BATTLE, WORLD + 0x1000)
+    q(WORLD + 0x1000 + BATTLE_RESOLVER, RESOLVER)
     setup(q, d, uc)
 
     regs = {r: getattr(X, "UC_X86_REG_" + r.upper()) for r in KEEP}
@@ -667,18 +787,28 @@ def run(code, at, setup, rcx=HIM, race=None):
         if addr in (STOP, START):
             calls.append(("stop" if addr == STOP else "start", u.reg_read(regs["rcx"]), u.reg_read(regs["rdx"]),
                           u.reg_read(regs["rsp"]) % 16))
+        elif addr == ROLL:
+            sp, rdx = u.reg_read(regs["rsp"]), u.reg_read(regs["rdx"])
+            calls.append(("roll", u.reg_read(regs["rcx"]), rdx, sp % 16,
+                          {"r8": u.reg_read(regs["r8"]), "r9": u.reg_read(regs["r9"]),
+                           "arg5": int.from_bytes(u.mem_read(sp + 0x28, 8), "little"),
+                           "block": struct.unpack("<iiiIQQ", bytes(u.mem_read(rdx, 0x20)))}))
     uc.hook_add(unicorn.UC_HOOK_CODE, hook, begin=STUBS, end=STUBS + 0x1000)
     st = {"read": False, "raced": False}
     if race:
         _race(uc, race, BLOCK + MB["count"], st)
-    uc.emu_start(CODE, CODE + len(code), count=10000)
+    fault = None
+    try:
+        uc.emu_start(CODE, CODE + len(code), count=10000)
+    except unicorn.UcError as e:  # a mutant that loses a pointer reads wild memory: a failure to report, not a crash
+        fault = str(e)
     after = {r: uc.reg_read(regs[r]) for r in KEEP}
     ok_xmm = all(uc.reg_read(xmm[i]) == 0x0123456789abcdef0011223344556677 + i for i in range(4))
     rip = uc.reg_read(X.UC_X86_REG_RIP)
 
     def rd(addr, n): return int.from_bytes(uc.mem_read(addr, n), "little")
-    return {"calls": calls, "before": before, "after": after, "xmm": ok_xmm, "end": rip == CODE + len(code), "rd": rd,
-            "raced": st["raced"]}
+    return {"calls": calls, "before": before, "after": after, "xmm": ok_xmm, "end": rip == CODE + len(code) and not fault,
+            "rd": rd, "raced": st["raced"], "fault": fault}
 
 
 def scenarios(code, at):
@@ -747,11 +877,15 @@ def scenarios(code, at):
     r = run(code, at, cmd("stand", walk=2, near=1))
     expect(not r["calls"] and r["rd"](BLOCK + MB["walk"], 4) == 0, "steer at the point: no walk, request taken")
     # steer under his own walk: written in place; the fresh byte cleared only when something changed
-    def own(same, angle_differs=False, has_angle=1, gait_differs=False):
+    # surf: (buf's, his) surface ref; a wall section's address differing only in its upper half must count as a change
+    WALL = 0x1_0000_2000
+    def own(same, angle_differs=False, has_angle=1, gait_differs=False, surf=(WALL, WALL)):
         def setup(q, d, uc):
             cmd("walk_b", walk=2, has_angle=has_angle)(q, d, uc)
             for k, v in (("x", 0x41200000), ("z", 0xC1A00000), ("run", 1), ("speed", 0x40800000)):
                 d(BLOCK + MB["buf"] + BUF[k], v)
+            uc.mem_write(BLOCK + MB["buf"] + BUF["surf"], struct.pack("<QQ", surf[0], 0))
+            uc.mem_write(HIM + MAN["surf"], struct.pack("<QQ", surf[1], 0))
             uc.mem_write(BLOCK + MB["buf"] + BUF["gait"], bytes([1]))
             uc.mem_write(BLOCK + MB["buf"] + BUF["angle"], struct.pack("<H", 0x4000))
             d(HIM + MAN["x"], 0x41200000 if same else 0x41100000)
@@ -762,11 +896,17 @@ def scenarios(code, at):
         return setup
     for name, kw, fresh in (("moved", dict(same=False), 0), ("same", dict(same=True), 7),
                             ("turned", dict(same=True, angle_differs=True), 0), ("gait", dict(same=True, gait_differs=True), 0),
-                            ("turned, no angle given", dict(same=True, angle_differs=True, has_angle=0), 7)):
+                            ("turned, no angle given", dict(same=True, angle_differs=True, has_angle=0), 7),
+                            ("onto the wall", dict(same=True, surf=(WALL, 0)), 0),
+                            ("off the wall", dict(same=True, surf=(0, WALL)), 0),
+                            ("another section", dict(same=True, surf=(WALL, WALL + 0x2_0000_0000)), 0)):
         r = run(code, at, own(**kw))
         kept(r, "in place " + name)
         expect(not r["calls"], "in place %s: no call" % name)
         rd = r["rd"]
+        want_surf = kw.get("surf", (WALL, WALL))[0]
+        expect(rd(HIM + MAN["surf"], 8) == want_surf and rd(HIM + MAN["surf2"], 8) == 0,
+               "in place %s: surface %x, want %x" % (name, rd(HIM + MAN["surf"], 8), want_surf))
         expect(rd(HIM + MAN["x"], 4) == 0x41200000 and rd(HIM + MAN["z"], 4) == 0xC1A00000, "in place %s: x, z" % name)
         expect(rd(HIM + MAN["run"], 4) == 1 and rd(HIM + MAN["speed"], 4) == 0x40800000 and rd(HIM + MAN["gait"], 1) == 1,
                "in place %s: run, speed, gait" % name)
@@ -776,6 +916,63 @@ def scenarios(code, at):
     # both requests in one update: the guard first, then the walk
     r = run(code, at, cmd("melee", guard=1, walk=2))
     expect([c[0] for c in r["calls"]] == ["stop", "start"], "guard then steer: %r" % r["calls"])
+
+    # the strike: a blow posted for him (strike_man), rolled and armed on his own update while his clip is the slot
+    def strike(posted=1, slot=457, his_slot=457, playing=True, busy=0, hp=80, vhp=60, victim=VICTIM, vt="clip", guard=0,
+               out=(1, 37)):
+        def setup(q, d, uc):
+            cmd(vt, guard=guard, hp=hp)(q, d, uc)
+            q(BLOCK + MB["strike_man"], HIM)
+            q(BLOCK + MB["strike_victim"], victim)
+            uc.mem_write(BLOCK + MB["strike_slot"], struct.pack("<H", slot))
+            d(BLOCK + MB["strike"], posted)
+            uc.mem_write(HIM + MAN["slot"], struct.pack("<H", his_slot))
+            q(HIM + MAN["playing"], 0x7a7a0000 if playing else 0)
+            d(HIM + MAN["busy"], busy)
+            d(VICTIM + MAN["hp"], vhp)
+            d(ROLL_OUT, out[0])
+            d(ROLL_OUT + 4, out[1])
+        return setup
+
+    def armed(r):
+        rd = r["rd"]
+        return (rd(HIM + MAN["r_pending"], 4), rd(HIM + MAN["r_type"], 4), rd(HIM + MAN["r_dmg"], 4), rd(HIM + MAN["r_slot"], 2),
+                rd(HIM + MAN["r_victim"], 8))
+
+    for name, kw in (("his clip playing", {}), ("his clip, +0x284 only", dict(playing=False, busy=1))):
+        r = run(code, at, strike(**kw))
+        kept(r, "strike: " + name)
+        rolls = [c for c in r["calls"] if c[0] == "roll"]
+        expect(len(rolls) == 1, "strike %s: one roll, got %r" % (name, r["calls"]))
+        if rolls:
+            c = rolls[0]
+            expect(c[1] == RESOLVER, "strike %s: the roll gets [[[him+0x58]+0x440]+0xf8], got %x" % (name, c[1]))
+            expect(c[4]["r8"] == HIM and c[4]["r9"] == VICTIM and c[4]["arg5"] & 0xff == 0,
+                   "strike %s: attacker him, victim, last argument 0: %r" % (name, c[4]))
+            expect(STACK <= c[2] < STACK + 0x10000, "strike %s: the result block on the cave's stack" % name)
+            expect(c[4]["block"] == (0, 1, 0, 0, 0, 0), "strike %s: the block starts as exe+3251af8's: %r" % (name, c[4]["block"]))
+        expect(armed(r) == (1, 1, 37, 457, VICTIM), "strike %s: the pending hit armed on him: %r" % (name, armed(r)))
+        expect(r["rd"](BLOCK + MB["strike"], 4) == 0 and r["rd"](BLOCK + MB["struck"], 4) == 1, "strike %s: taken, counted" % name)
+    r = run(code, at, strike(out=(0, 0)))
+    expect(armed(r) == (1, 0, 0, 457, VICTIM), "strike, blocked: armed as type 0, no damage: %r" % (armed(r),))
+    r = run(code, at, strike(out=(4, 41)))
+    expect(armed(r)[1:3] == (4, 41), "strike, a knock: type 4 and its damage, not swapped: %r" % (armed(r),))
+    for name, kw in (("not posted", dict(posted=0)), ("another clip", dict(his_slot=455)), ("no clip", dict(playing=False)),
+                     ("he is dead", dict(hp=0)), ("the victim is dead", dict(vhp=0)), ("no victim", dict(victim=0))):
+        r = run(code, at, strike(**kw))
+        kept(r, "strike, " + name)
+        expect(not [c for c in r["calls"] if c[0] == "roll"], "strike, %s: no roll, got %r" % (name, r["calls"]))
+        expect(armed(r)[0] == 0, "strike, %s: nothing armed" % name)
+        expect(r["rd"](BLOCK + MB["strike"], 4) == 0, "strike, %s: the request is taken all the same" % name)
+    # somebody else's update leaves it for him
+    r = run(code, at, strike(), rcx=OTHER)
+    kept(r, "strike, another man")
+    expect(not r["calls"] and r["rd"](BLOCK + MB["strike"], 4) == 1, "strike, another man: no roll, it waits for him")
+    # a strike and his guard on one update: both done, the strike first (the strike path hands the block back to the
+    # single-man path)
+    r = run(code, at, strike(vt="melee", guard=1))
+    kept(r, "strike and guard")
+    expect([c[0] for c in r["calls"]] == ["roll", "stop"], "strike then guard: %r" % r["calls"])
 
     # the multiplayer table scan (the update cave's second half): man 0 (no single-man path), count > 0, entries at MB
     # guards. The man being updated is rcx; his entry stops the engine's four, a non-engine command runs, a dead man's
@@ -1070,13 +1267,31 @@ MUTANTS = [
     ("the guard request never taken", "    xchg dword ptr [rbx + {guard}], eax\n", "    mov eax, dword ptr [rbx + {guard}]\n"),
     ("his own walk rebuilt every tick", "    je in_place\n", "    nop\n"),
     ("a dead man stopped", "    jg alive\n", "    jmp alive\n"),
-    ("fresh cleared on every steer", "    test r8d, r8d\n    je restore\n", ""),
+    ("fresh cleared on every steer", "    test r8, r8\n    je restore\n", ""),
+    # the surface (walls and bridges, 2026-10-29)
+    ("the surface not copied in place", "    mov qword ptr [rsi + {m_surf}], rax\n", ""),
+    ("a new surface keeps the old goal", "    xor rdx, qword ptr [rsi + {m_surf}]\n    or r8, rdx\n",
+     "    xor rdx, qword ptr [rsi + {m_surf}]\n"),
+    ("a change tested in 32 bits", "    test r8, r8\n    je restore\n", "    test r8d, r8d\n    je restore\n"),
     # the multiplayer table scan
     ("the table scan guards the wrong man", "    cmp qword ptr [rdx], rsi\n", "    cmp qword ptr [rdx], rbx\n"),
     ("a guarded man never stopped", "    jne b_restore\nb_stop:\n", "    jmp b_restore\nb_stop:\n"),
     # a free it lost still counted down (the feasibility record's Ruling 18)
     ("a dead man's free counts down unconditionally", "    lock cmpxchg qword ptr [rdx], rcx\n    jne b_restore\n",
      "    lock cmpxchg qword ptr [rdx], rcx\n"),
+    # the strike
+    ("the strike request never taken", "    xchg dword ptr [rbx + {strike}], eax\n", "    mov eax, dword ptr [rbx + {strike}]\n"),
+    ("a blow for a clip that is not his", "    cmp ax, word ptr [rbx + {strike_slot}]\n    jne s_restore\n", ""),
+    ("a blow with no clip", "    cmp dword ptr [rsi + {m_busy}], 0\n    je s_restore\n", ""),
+    ("a dead man strikes", "    cmp dword ptr [rsi + {m_hp}], 0\n    jle s_restore\n", ""),
+    ("a dead victim struck", "    cmp dword ptr [rdi + {m_hp}], 0\n    jle s_restore\n", ""),
+    ("the roll misaligned", "    sub rsp, 0xa0\n", "    sub rsp, 0x98\n"),
+    ("the result block on the saved xmm", "    lea rdx, [rsp + 0x30]\n", "    lea rdx, [rsp + 0x40]\n"),
+    ("type and damage swapped", "    mov eax, dword ptr [rsp + 0x30]\n    mov dword ptr [rsi + {m_r_type}]",
+     "    mov eax, dword ptr [rsp + 0x38]\n    mov dword ptr [rsi + {m_r_type}]"),
+    ("the hit never pending", "    mov dword ptr [rsi + {m_r_pending}], 1\n", ""),
+    ("the victim not written", "    mov qword ptr [rsi + {m_r_victim}], rdi\n", ""),
+    ("the strike loses the block", "    mov rax, rbx\n    add rsp, 0xa0\n", "    add rsp, 0xa0\n"),
 ]
 
 # the carrier cave's own mistakes; each must be caught by carrier_scenarios()

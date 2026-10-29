@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-10-29
+
+Workshop manifest 2741433552219872419.
+
+- Army abilities on the ability bar: T now turns through the unit's abilities, its spells and then its army's abilities,
+  the ones on the game's own army-ability buttons, with their icons, cooldowns and uses. A click casts at the
+  crosshair, on the unit nearest it, or where he stands. Hidden abilities, the mod's 40 unit-stat ones among them,
+  never show.
+- Walls and bridge decks: he walks on them now. Every walk's goal had a null surface, which is the ground under the wall
+  or deck, so the game found no path and he stood. The goal now carries the surface he stands on. Single player;
+  multiplayer steering is not checked there.
+- Melee damage for one man of a regiment or a unit of one, single player: each swing picks the enemy man where its
+  animation lands, and the update cave rolls the blow with the game's own melee roll. Those units swing all their
+  attack animations again. A unit played whole and multiplayer are unchanged.
+- Unit stats from the MCT work in campaign battles too: a hidden faction bundle enables the 40 stat abilities, applied by
+  a new campaign script.
+- Alt shows enemy unit banners again.
+- Cavalry: the charge attack also counts the rider's own moving attack, so more mounted units have it.
+- Flyers should no longer land when you sprint in the air.
+- Multiplayer: the game's portrait and ability bar should stay hidden while you look around.
+- Seen working in game: the first six. The last two were tested in the harness only.
+
 ## 2026-10-25
 
 - Multiplayer: a player who is only watching the battle is no longer waited for. A watcher's machine cannot send

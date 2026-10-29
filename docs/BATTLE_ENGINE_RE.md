@@ -22,6 +22,8 @@ all on the same build.
 | Which vtable slot holds this function? | `py tools/exe_re.py ptrs <rva>` | seconds |
 | Who calls the virtual at slot `+disp`? | `py tools/exe_re.py slotcalls <disp>` | seconds |
 | Who writes a constant into field `+disp`, and which constant? | `py tools/exe_re.py stores <disp>` | seconds |
+| Who writes field `+disp` from a register, or adds to it? | `py tools/exe_re.py writes <disp>` | seconds |
+| Where exactly does the function holding this address start and end? | `py tools/exe_re.py pdata <rva>` | instant |
 | Which subclass vtable is this pointer in, at which slot? | `py tools/exe_re.py vtmatch <known_vt> <rva>` | seconds |
 | What does this function do? (assembly) | `py tools/exe_re.py dis <rva> [n]` / `fn <rva>` | instant |
 | What does this function do? (C) | `py tools/ghidra_decompile.py <rva> [...]` | ~8 s per call |
@@ -37,10 +39,11 @@ checks each command against a fact of this build. Two traps it works around:
 - **There is no RTTI.** Vtables run into each other with no complete-object-locator between them, so "scan back to
   where the vtable starts" is a guess. `vtmatch` aligns the region against a vtable whose base you know instead: a
   subclass keeps most of its base class's entries at the same index. That is how slot `0x4a8` was found (section 4).
-- **A function's start is a guess.** `fn` and the "in fn" column walk back to CC padding, and can land on an earlier
-  function: `fstart(2fda558)` gave `2fd97cc`, where the PE `.pdata` unwind range is `2fda19c..2fda624` (2026-10-20).
-  Settle a doubtful one from `.pdata`, and give Ghidra the true start: its helper makes a function at whatever RVA
-  it is asked.
+- **A function's start was a guess.** Walking back to CC padding can land on an earlier function: it gave `2fd97cc`
+  for `2fda558`, where the PE `.pdata` unwind range is `2fda19c..2fda624` (2026-10-20). Since 2026-10-29 `fn` and
+  every "in fn" column read `.pdata` first. Only a leaf function, which has no entry, still falls back to the CC
+  walk. Give Ghidra the true start: its helper makes a function at whatever RVA it is asked, mid-body included. On
+  2026-10-29, three of eight hit-point writers decompiled as fragments that way.
 
 The analysis behind this document was done with `exe_re.py` (then a scratchpad script) and live reads. **Ghidra
 was set up afterwards** (section 10) and its decompile of the same five functions agrees with every line of the
@@ -95,14 +98,19 @@ Offsets on the model object (the man; for a rider, his mount is a model too, at 
 | `+0x330` | the command's vtable (section 5) | live |
 | `+0x340` | his own walk's done byte (`+0x10` of the command; `+0x360` is its `+0x30`), set when a walk with no path ends itself (section 5) | live / code, 2026-10-18 |
 | `+0x368..` | the command's payload: a walk's target x/z (`+0x368/+0x370`), run flag `+0x390`, speed `+0x394`; a forced clip's 16-byte clip payload | live |
+| `+0x378` / `+0x380` | a walk's goal **surface** ref, two qwords (the walk builder copies its block's `+0x10/+0x18` here). Null is the terrain: a goal on a wall or bridge deck needs the section's object, else path state 7 and no move. `+0x3c0` cleared re-sets the goal from them | live, 2026-10-29 |
+| `+0x7f8..+0x817` | the goal the pathfinder works to: x/y/z, then its surface ref at `+0x808/+0x810` | live, 2026-10-29 |
+| `+0x910..+0x92f` | **his own location**: x/y/z, then the surface he stands on at `+0x920` (null on the ground; a per-section object, vtable `exe+3ad7190`, on a wall walk or bridge deck; it changes at each section) and `+0x928` (0 in every read) | live, 2026-10-29 |
 | `+0x3ae` | his walk's gait byte (stayed 0 through the engine's charge, section 5); the mailbox cave reads and writes it | live / code |
 | `+0x490` | **running** action holder: action object `+0x4a8`, its done byte `+0x4c8`, has `+0x5c0`, started `+0x5c1` | live |
 | `+0x5c8` | **queued** action holder: action object `+0x5e0`, its done byte `+0x600`, has `+0x6f8`, started `+0x6f9` | live |
 | `+0x710` | path state: 7 = the pathfinder found no way (set in `exe+3077009`); 6 = a walk reached its point (he coasts on until the command is replaced, 2026-10-14); a walk that moves him goes 2, then 4 | live, 2026-10-14 / 10-18 / 10-21 |
 | `+0x884` | the tick his wait ends (compared with the battle's `+0x98`) | live |
 | `+0x88a` | read 1 in every melee frame; non-zero sends the action update straight to the runner | live / code |
-| `+0x898` | with `+0x284`, whether `+0x278` holds a clip (`P.anim_slot`: neither set, no clip) | live |
-| `+0xb18` / `+0xb1c` | hit points max / current, int32 | live |
+| `+0x898` | with `+0x284`, whether `+0x278` holds a clip (`P.anim_slot`: neither set, no clip). While it is null the update counts `+0x27c` up a tick; all three clear cancels a pending hit | live / code |
+| `+0x27c` | ticks into his clip; a pending hit lands when it reaches the impact frame (section 12) | live / code, 2026-10-29 |
+| `+0xaf0..+0xb08` | **the pending hit** (section 12): `+0xaf0` result type, `+0xaf4` damage, `+0xaf8` the swing's slot u16, `+0xb00` the victim, `+0xb08` pending | live / code, 2026-10-29 |
+| `+0xb18` / `+0xb1c` | hit points max / current, int32. Subtracted by `exe+310157c(man + 0xb18, n)` | live / code |
 | `+0xb20` | when set, the update calls his virtual `+0x490` instead of the command/action path | code |
 | `+0xb64` / `+0xb68` | child count / array (the subclass's `+0x4a8` repeats the clip on them) | code |
 
@@ -130,7 +138,7 @@ start or command `3918e90`, chosen by its fragment's `+0x127c` bit 2.
 | `3ae2400` | his own walk | built by `walk_start` `exe+306f954`; speed from `exe+303b744`. Built from the mailbox's block it has no path of its own (`+0x88` of the command null): to a point the pathfinder cannot reach (path state 7) its update `exe+3262850` ends it, done byte `+0x340`, and it **stays on him**, so writing its point in place moves him no more. A walk with a path re-plans instead (`+0x91`). Measured 2026-10-18 in a dwarf hold; `P.walk_ended` reads it |
 | `3919350` | the regiment's walk | the pack's guard stops it |
 | `39199f8`, `3ae1928` | the engine's moves | guard stops |
-| `3ad24b8` | the engine's melee attack | guard stops |
+| `3ad24b8` | the engine's melee attack | guard stops. Its target is at `+0x38`; vtable `+0xc0`, the target getter, is `mov rax, [rcx+0x38]`, and every other command here returns null from it. Per swing it builds an attack object at `+0x80` (section 12) |
 | `3ad2d18` | the engine's charge | measured 2026-10-18 (`probes/zz_tp_charge_gait.lua`, Harald on CA's `attack_unit` from 45 m): his own walk for 0.4 s, then this for 5.4 s at 4.0 m/s against his run's 3.3, **no forced clip on him** (the charge cycle is his locomotion and loops), then MOVING_ATTACK_2 (485) at contact. The walk's gait byte `+0x3ae` stayed 0 throughout. The pack's sprint fakes it with the CHARGE clip (135), 0.8 s and not looping on Harald; re-sent every 0.6 s until 2026-10-18, now at its own length (data.lua `charges`). **Built by** `exe+30538b4`, whose only caller is `exe+306eb24(man, target)` (vslot `+0x4f8`): if `+0x324 < 2` it clears `+0x328` and builds the charge at `+0x330`. `target` is a 0x38-byte block copied to the command's `+0x90`: an entity at `+0x18`, a group at `+0x20` (one of its men picked at random), a position object at `+0x28` used when `+0x18` is null; the engine builds one in `exe+2eab460`. `exe+311bf9c(body, target)` charges a body and puts each rider on a ride-along command (`3ae1ce0`) - a chariot's or a mounted man's charge (code, 2026-10-20). **Called through the mailbox cave it crashed the game, with no dump, on a Seeker Chariot body and on an infantry man** (live, 2026-10-20); the cave went back to its 410-byte form, the charge version is in `Modding Files/Backup/third_person_charge_cave_20261020/` |
 | `39126f0` | stand in his state | what `walk_stop` `exe+306edd4` leaves |
 | `3919b28` | idle | |
@@ -298,9 +306,17 @@ answers the existing cave, so a later battle reads its block pointer back out of
 
 Every model class's update reaches `3086f04`: the subclass `312de40` calls it first, and so do seven other
 updates. Measured on a horse. `tools/third_person_cave.py` assembles the cave with keystone and runs the shipped
-bytes under unicorn: every path, register and stack alignment, plus 8 broken variants (11 now, with 18 more for the
+bytes under unicorn: every path, register and stack alignment, plus 8 broken variants (22 now, with 18 more for the
 carrier cave, section 13). Live, 795 stops with no
 fault (session handoff 2026-10-17 section 10).
+
+**The strike** (2026-10-29, section 12) is the second request the update cave serves. Its entry compares rcx with the
+block's `strike_man` (`+0x70`) before the played man's path, so the struck man's own update does the work. It
+`xchg`s the `strike` flag (`+0x6c`) to take the request once. It rolls only when his hit points are above 0, the
+victim (`+0x78`) is non-null with hit points above 0, `+0x278` equals `strike_slot` (`+0xe0`), and `+0x898` or `+0x284`
+is set. The roll is `call [block+0xf8]` (`exe+30a8ab0`) with a 0x20-byte result block on its own stack frame and
+xmm0-3 saved. Then it writes the record and counts the roll at `struck` (`+0xe4`). It ends by jumping back to the
+played man's path, so a strike and a stop on one update both run.
 
 **Recipes that made the measurement work** (all in `Modding Files/source/lord_control/probes/`, test scaffolding):
 
@@ -385,6 +401,47 @@ searches loaded effects only, so a new effect key with a `particle_effects` row 
 of a level Drakegun shot was forward, `(0, 1.50, 29.96)`. **Withdrawn:** the earlier chain `2efaa20 -> 2f19874 ->
 2f1a4bc -> 2ea7298` is a camera path read from metadata beside the serialiser, not the projectile's.
 
+**Melee damage: the pending hit** (2026-10-29; `sessions/THIRD_PERSON_FIXES_20261029.md` has the runs). A clip's
+`IMPACT_POS` deals no damage on its own. A blow is a record on the man, at `+0xaf0..+0xb08` (section 3):
+
+- **The attack object.** Each swing, the melee command (`3ad24b8`) builds an attack object in `exe+3081f18`. There are
+  four kinds, made by factories `3255edc`, `3256008`, `3256134` and `3255db0`, with vtables `3918230`, `3918278`,
+  `39182c0` and `3918308`. Each is pool-allocated with base constructor `3250e60(obj, man, cmd)`, and stored at
+  `cmd+0x80`. Its fields are `obj+0x8` the man, `+0x10` the command, `+0x18` the animating entity, `+0x20` the slot
+  u16 and `+0xc8` the flags. Its vtable `+0x28` picks a weighted slot (`exe+3050578`) and starts it; `+0x30` is the
+  update, and `+0x38` ends it (and clears the man's `+0x298`).
+- **The arm.** The update (`325fca4` in kind 4) calls `exe+3251af8`, which plays the slot (`exe+3081d40`) and then
+  rolls the blow with `exe+30a8ab0(*(battle+0xf8), &result, man, victim, 0)`, where battle is
+  `*(*(man+0x58)+0x440)` (section 3). The roll
+  covers melee attack against defence, the damage after armour and the result type, from the battle's RNG at battle
+  `+0x90`; it also uses a shared scratch block at `exe+433fdb0`. The result is `[0]` type and `[2]` damage. The arm
+  then writes `+0xaf8` the slot, `+0xaf0/+0xaf4` the type and damage, `+0xb08` = 1 and `+0xb00` the victim.
+- **The landing.** The man's update (`exe+3086f04`, vslot `+0x18`) calls `exe+32654d0(man + 0xaf0, man)` every tick.
+  The impact frame comes from the clip in that slot: its first event's time, or its frame count - 1. When `+0x27c`
+  reaches it, the landing builds a hit (`exe+3250ef0`) and branches on type:
+  - 0 calls the victim's vslot `+0x3a8`, a reaction with no damage.
+  - 1 calls `exe+3253204`.
+  - 3, 4 and 5 call `exe+3253204` and then a knock (`325369c`, `3253864`, `32539ac`).
+
+  `exe+3253204` goes to `exe+3260a34`, which runs the damage through `exe+2e3ce30` (not read) and keeps the damage
+  and kill counts, then `exe+3075b20`, then `exe+310157c`. **No range or
+  facing check**: the arm's caller did that (`325fca4`). A lethal blow goes on through `exe+325b75c` to the man's
+  vslot `+0x470`, death (`exe+3071dc8`).
+- **The cancel.** The record is zeroed if `+0x898` is null, `+0x284` is 0 and `exe+306ba98` (the `+0xb20` check) is
+  false.
+
+Measured on 100 Dragon Guard in melee: 42 arms in 8 s, `+0xaf8` the playing slot in 42 of 42, `+0x898` set in every
+pending frame. The forced clip has no attack object, so nothing arms the record. Written by hand from Lua on the
+played man (type 1, damage 35, his slot, a victim) under the forced clip, it landed 4 of 4, exactly 35 each.
+
+**Built** (2026-10-29): the pack rolls and arms it through the update cave (section 9, "The strike").
+
+- The script supplies the slot and the victim: the enemy man nearest the clip's `IMPACT_POS` turned with his heading,
+  inside the blow's reach plus 0.5 m and 60 degrees of its direction.
+- Live, the roll answered about 0.1 s after the post. The struck man lost exactly the rolled damage at the impact
+  frame (a hit for 32: 81 -> 49), and a blocked roll moved no hit points.
+- Single player only. In multiplayer the roll would advance one machine's RNG.
+
 ## 13. Multiplayer and the command queue
 
 (2026-10-21, code only; decision record `docs/sessions/MP_FEASIBILITY_20261021_THIRD_PERSON.md`.) A battle
@@ -453,6 +510,9 @@ constructor `exe+2d98420` calls with the queue. The `BNCQ_PLAYER_LEFT_GAME` comm
 that tick length.
 
 **Every `uc:` call the third-person pack makes is a queued command**: the record lists each binding and its `BCQ_*`.
+So is `army:use_special_ability` (binding `exe+2f263ac`, read 2026-10-29): it tests `+0x3b0`/`+0x3b1` and pushes
+through `exe+1bc2a40` on the queue at `+0x644e8`, carrying the binding's own `+0x8` and `+0x20` of the record its key
+looked up. The army-ability page casts through it.
 The pack's direct memory writes (steer, hold, face, the disarm's fragment pointer, the gate patch) are not `uc:` calls,
 and they do not travel (measured for `P.steer` in Task 2, where it was not recorded; inferred for the rest). **A slot
 without a clip is not a no-op:** the reader parks the action without looking at the
@@ -474,7 +534,7 @@ one override or clip per man is parked at a time, and each meets the gate of sec
 | `_ORDER_HALT`, `exe+406cea8` | `exe+2ecf98c`, 0 | model | vtable `exe+390ba88`; after a draw of up to 2 ticks from the battle's generator (`exe+1bab1b0`), the stop `exe+306edf8` with state `0x81` (what `walk_stop` calls with his `+0x318`) |
 | `_ORDER_JUMP`, `exe+406cd64` | `exe+2ecf9e8`, 0 | model; point | vtable `exe+390b980`; vslot `+0x538` (`exe+306f158`) with a jump block from `exe+2d9f998` |
 | `_ORDER_TELEPORT`, `exe+406cd30` | `exe+2ecfbd4`, 0 | model; position; byte | vtable `exe+390b5e8`; vslot `+0xe8` (`exe+3078268`): byte 1 puts him at the point, byte 0 turns him toward it; then the stop with `0x81`. Never marks itself done (`exe+8f5a70`) |
-| `_ORDER_ATTACK`, `exe+406c82c` | `exe+2ecf644`, 0 | model; target model | vtable `exe+390c2c8`; target block `exe+2eab460`, then the order issuer `exe+306e89c` (or vslot `+0x580`) |
+| `_ORDER_ATTACK`, `exe+406c82c` | `exe+2ecf644`, 0 | model; target model | vtable `exe+390c2c8`; target block `exe+2eab460`, then the order issuer `exe+306e89c` (or vslot `+0x580`). The action waits out a delay (slot 1 `exe+2f780a8`), then `exe+2f7ec44` calls the man's vslot `+0x4b0` (or `+0x580`). **Forged live 2026-10-29 on one man of a regiment: within 93 ms he stood idle beside his regiment, 53-287 m away, in one frame, and no melee command ran on him** (guard on or off; `sessions/THIRD_PERSON_FIXES_20261029.md`) |
 | `_ORDER_FOLLOW_FIRST_PERSON`, `exe+406cc88` | `exe+2ecf6d0`, 1 | model; position; u16 heading; `0x25`; `0x21`; byte; point, model, `0x28`; int32; float; int32 state; byte; float; v1: byte, byte | vtable `exe+390bc98`; starts only on its own tick (`exe+2f783f0`); turns him to the heading (vslot `+0x5f8`, `exe+30702b8`) unless his command is busy, or stops him with the state, or attacks when the target byte and a weapon index are set; 10 ticks |
 | `_AIM_DELAY_TIME`, `exe+406c784` | `exe+2ecf498`, 1 | float | no action: the global `exe+3d10790` (default -1.0), read at `exe+32580b1` instead of the unit's value |
 | `_RELOAD_TIME`, `exe+406cda4` | `exe+2ecfc88`, 1 | float | no action: the global `exe+3d10794` (default -1.0); no reader found by a full rip-relative operand scan (`exe_re.py refs` misses `movss`) |
@@ -703,11 +763,13 @@ which lengthens the windows that wait for a clip to show; the simulation uses `D
   move `39199f8` in `324e2c8` (five callers). Refusing them at the source would need a cave at each.
 - A charge for one man or one chariot: the engine's charge (section 5) through the cave crashed twice (2026-10-20).
   Not to be reused for the flamethrower work either.
-- **Walls** (2026-10-21, `WORKSHOP_REPORTS_20261021_THIRD_PERSON.md`): a man deployed on a siege wall gets a walk from
-  the mailbox, path state goes 2 then 7, and he moves 0 m in every direction; after one native `goto_location` for his
-  regiment the walk goes 2 then 4 and the same walk moves him (7.8 m in 3.6 s). The field the pack's walk leaves unset
-  is not found; `+0x330..+0x400` dumps before and after a native move were taken, not decoded. The author refused the
-  regiment-order workaround: a later RE goal.
+- **Melee damage in multiplayer** (section 12): the strike rolls through the update cave in single player. In
+  multiplayer the roll has to go through the carrier cave, so every machine rolls at the same tick; not tried. The
+  reach and facing test is the pack's own guess (0.5 m slack, 60 degrees), not `325fca4`'s thresholds.
+- ~~Walls~~ **Closed 2026-10-29** (`sessions/THIRD_PERSON_WALLS_ARMY_ABILITIES_20261029.md`): the field was the walk's
+  goal surface (`+0x378`, from the block's `+0x10`), left null by the mailbox, so a goal on a wall or deck was the
+  terrain under it (state 7). The native move of 10-21 had built a walk with a real surface and the pack only rewrote
+  its point. `P.steer` now copies his own `+0x920/+0x928` into the block, and the cave into his walk in place.
 - The Irondrake flame drawn upward from `trigger_projectile_launch` (section 12): which effect is wrong is not
   isolated; first run the nulled launch-FX discriminator in the handoff.
 - Multiplayer (section 13), code only and not on the live checklist: whether the host checks a relayed buffer against

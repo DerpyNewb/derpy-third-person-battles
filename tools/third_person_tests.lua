@@ -856,8 +856,8 @@ T.input_unreadable_reports_input_failure = function()
 	check(H.logged("no keyboard or mouse"), "the reason is logged")
 end
 
-local function playing(o, enemies)
-	H.fresh({units = {{general = true}, o}, enemies = enemies})
+local function playing(o, enemies, features)
+	H.fresh({units = {{general = true}, o}, enemies = enemies, features = features})
 	H.select(H.units[2])
 	H.tap("F2")
 	H.step(0.1)
@@ -1108,6 +1108,122 @@ T.a_swing_skips_the_clips_with_no_splash = function()
 	check(got == "454 456", "only the clips with a splash, one a button: " .. got)
 	got = played({454, 455, 456, 457})
 	check(got == "454 455 456 457", "none has one: all four, as before: " .. got)
+end
+
+-- the author, 2026-10-29: "find out whats causing damage for other units without any splash attack". A blow is the pending
+-- hit the engine melee arms on the man per swing (+0xaf0..+0xb08); a clip played here has no attack object, so nothing
+-- armed it. One man's swing (F2) is now struck through the cave (P.strike) on the enemy man nearest where its clip lands
+-- (data.lua impacts), once the clip shows on him; the cave rolls it as the engine's melee does
+local STRIKES = {input = true, anim = true, wheel = true, strike = true}
+-- he is 2011, the middle man of 21 at x 40 facing +z; the debug log on, for the blow's line. men = 1: a unit of one
+local function striking(enemies, impacts, o)
+	o = o or {}
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = o.men or 21, x = 40, slots = o.slots or {[454] = true, [455] = true}}},
+		enemies = enemies, features = STRIKES, mct = {debug_log = true}, blow_out = o.blow_out})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	H.E.D.impacts = {wh_test_melee = impacts}
+	H.report_ms = o.report_ms
+end
+
+T.one_mans_swing_strikes_the_enemy_where_it_lands = function()
+	-- three men 2.5 m ahead of him (he is 2011 at x 40): ATTACK_1 lands 2.5 m ahead, on the middle one, 3002; the
+	-- engine reports his clip 0.3 s late, and the blow waits for it
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}, {1.5, 1.5}}, {report_ms = 300})
+	H.tap("Left mouse")
+	check(H.count("strike") == 0, "nothing posted before his clip shows")
+	H.step(0.4)
+	local s = H.last("strike")
+	check(H.count("strike") == 1 and s[2] == 2011 and s[3] == 3002 and s[4] == 454, "ATTACK_1 struck on the man ahead: "
+		.. tostring(s and s[3]))
+	H.step(0.1)
+	check(H.logged("blow 454 on a man 0 m from where it lands: hit 35"), "the cave's hit logged: " .. tostring(H.log[#H.log]))
+	-- ATTACK_2 lands 1.5 m right and 1.5 ahead: the man to the right, 3003
+	past_swing_gap()
+	H.tap("Right mouse") H.step(0.4)
+	s = H.last("strike")
+	check(H.count("strike") == 2 and s[3] == 3003 and s[4] == 455, "ATTACK_2 struck on the man to his right: " .. tostring(s[3]))
+	-- a unit of one (a lord on foot) strikes as one man does
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {men = 1})
+	H.tap("Left mouse") H.step(0.3)
+	s = H.last("strike")
+	check(H.E.F.single and s and s[2] == 2001 and s[3] == 3002, "a unit of one struck: " .. tostring(s and s[2]))
+end
+
+T.a_blow_with_nobody_where_it_lands_strikes_nothing = function()
+	-- one man close behind him, the rest far ahead: the blow lands on nobody
+	striking({{x = 40, z = -2, men = 1}, {x = 40, z = 30, men = 10}}, {{0, 2.5}})
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("strike") == 0, "no strike on the man behind him nor the unit 30 m ahead")
+	check(H.logged("blow 454: nobody where it lands"), "logged: " .. tostring(H.log[#H.log]))
+	-- a dead man ahead is nobody too
+	striking({{x = 40, z = 2.5, men = 1}}, {{0, 2.5}})
+	H.enemies[1]._models[1].hp = 0
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("strike") == 0, "no strike on a dead man")
+end
+
+T.the_cave_logs_a_blocked_blow_and_one_it_never_armed = function()
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {blow_out = {0, 0}})
+	H.tap("Left mouse") H.step(0.3)
+	check(H.logged("blow 454 on a man 0 m from where it lands: blocked 0"), "blocked: " .. tostring(H.log[#H.log]))
+	-- the victim dies between the post and the cave's tick: the cave rolls nothing and the blow is logged unarmed
+	past_swing_gap()
+	H.down("Left mouse")
+	for _ = 1, 30 do H.step(1 / 60) if H.count("strike") == 2 then break end end
+	H.up("Left mouse")
+	check(H.count("strike") == 2 and H.struck_n == 1, "the second blow posted, not yet taken")
+	H.enemies[1]._models[2].hp = 0
+	H.step(1.2)
+	check(H.logged("blow 454 on a man 0 m from where it lands: not armed"), "not armed: " .. tostring(H.log[#H.log]))
+end
+
+T.no_blow_is_struck_for_a_whole_unit_in_multiplayer_or_without_the_cave = function()
+	-- a unit played whole: every man swings, the engine's melee fights between swings
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true}}},
+		enemies = {{x = 40, z = 2.5, men = 21}}, features = STRIKES, mct = {combat_one_man = false}}) -- a man ahead of each of his
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("play") > 1 and H.count("strike") == 0, "a whole unit's swing strikes nothing: " .. H.count("play"))
+	-- multiplayer: the roll is not the same on every machine
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.P.features.net = true
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("play") == 1 and H.count("strike") == 0, "no strike in multiplayer")
+	-- no cave strike (its function not found on this build)
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true}}, {{x = 40, z = 2.5, men = 3}})
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("play") == 1 and H.count("strike") == 0, "no strike without the cave's")
+	-- a jump attack is not struck
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {slots = {[454] = true, [489] = true}}) -- JUMPING_ATTACK_1
+	H.tap("E") H.step(0.5)
+	check(H.count("play") == 1 and H.count("strike") == 0, "no strike for a jump attack: " .. H.count("play"))
+end
+
+-- a blow not yet posted goes with a stop, and with his death
+T.a_blow_waiting_for_its_clip_goes_with_a_stop_or_his_death = function()
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {report_ms = 300})
+	H.tap("Left mouse") H.tap("F2") H.tap("F2") H.step(0.5)
+	check(H.count("strike") == 0, "none after a stop and a restart")
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {report_ms = 300})
+	H.tap("Left mouse")
+	H.E.F.model.hp = 0
+	H.step(0.5)
+	check(H.count("strike") == 0, "none for a dead man")
+end
+
+-- where blows are struck the clips with no splash hit as well as the rest, so all of them are swung
+T.with_strikes_every_attack_clip_is_swung = function()
+	playing({type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true, [455] = true, [456] = true, [457] = true}}, nil, STRIKES)
+	H.E.D.dulls = {wh_test_melee = {455, 457}}
+	local seen, out = {}, {}
+	for k = 1, 8 do
+		past_swing_gap()
+		H.tap(k % 2 == 1 and "Left mouse" or "Right mouse")
+		seen[H.last("play")[3]] = true
+	end
+	for s in pairs(seen) do out[#out + 1] = s end
+	table.sort(out)
+	check(table.concat(out, " ") == "454 455 456 457", "all four: " .. table.concat(out, " "))
 end
 
 -- the author, 2026-10-19: "ranged units can only use the left button so attacks 1-10 should be on the left button if its
@@ -3846,6 +3962,27 @@ T.a_steer_posts_the_walk_builders_block = function()
 	check(posted(P, M, mr, "walk") == nil, "no speed, no request")
 end
 
+-- walls and bridges (a player, 2026-10-29: "cant move whenever on bridge or on top of wall"): the goal carries the surface
+-- he stands on, his own location's +0x920/+0x928 (null on the ground, a wall's or deck's section on one, measured that
+-- day). Left null it is the terrain under the wall, path state 7, and he stood; a rider's is his horse's
+T.a_steer_carries_the_surface_he_stands_on = function()
+	local P, mr, put, BASE, M = patched_platform()
+	local m, horse = mr.add(mr.base, 0x6300000), BASE + 0x6400000
+	put(m.addr + 0x2e8, BASE + 0x6500000, 8)
+	function mr.call(f) if f.addr == BASE + SPEED_AT then return 1.5 end end
+	put(m.addr + 0x920, BASE + 0x6600000, 8)
+	P.steer(m, 0, 6, false)
+	check(posted(P, M, mr, "buf", 0x10) == BASE + 0x6600000 and posted(P, M, mr, "buf", 0x18) == 0, "on the wall: its section")
+	put(m.addr + 0x920, 0, 8)
+	P.steer(m, 0, 6, false)
+	check(posted(P, M, mr, "buf", 0x10) == 0, "off it: none, the ground")
+	put(m.addr + 0x2e0, horse, 8)
+	put(horse + 0x2e8, BASE + 0x6500000, 8)
+	put(horse + 0x920, BASE + 0x6700000, 8)
+	P.steer(m, 0, 6, false)
+	check(posted(P, M, mr, "buf", 0x10) == BASE + 0x6700000, "a rider: his horse's deck")
+end
+
 -- measured 2026-10-18 (probes/zz_tp_siege_walk.lua, a Vault Sweeper on open floor in a dwarf hold): his walk to a point
 -- the pathfinder finds no way to ends itself and stays on him. exe+3077009 sets his path state (+0x710) to 7, and his
 -- walk's update (exe+3262850), having no path of its own (+0x88 of it, null in every walk built from our block), sets
@@ -4315,8 +4452,8 @@ T.solo_moves_with_own_facing_and_run_toggle = function()
 	check(c[5] == true and c[6] == H.E.rig.yaw, "movement passes run and camera facing to the controlled model")
 end
 
-local function battle_hud()
-	H.fresh()
+local function battle_hud(o)
+	H.fresh(o)
 	local h = find_uicomponent(H.root, "hud_battle") -- the harness makes it, with the unit cards
 	local radar = H.comp("radar_holder", h)
 	local hidden = H.comp("defeat_notification", h) hidden:SetVisible(false)
@@ -4329,11 +4466,35 @@ local function battle_hud()
 	return radar, hidden, face, abilities, button, banners, own
 end
 
+-- CA's portrait and skills with the freed mouse only: while he looks the cinematic UI hid them alone, and in
+-- multiplayer, which has none, they stood over the pack's (a player, 2026-10-28)
 T.third_person_hides_unrequested_hud = function()
 	local radar, hidden, face, abilities, button, banners, own = battle_hud()
-	H.tap("F2")
+	H.tap("F2") H.step(0.1)
 	check(not radar:Visible() and not banners:Visible() and not button:Visible(), "radar, banners and portrait controls hidden")
-	check(face:Visible() and abilities:Visible() and own:Visible(), "portrait, abilities and custom HUD kept")
+	check(H.E.F.dragging and not face:Visible() and not abilities:Visible() and own:Visible(),
+		"looking: CA's portrait and abilities hidden, the pack's HUD kept")
+	H.down("Middle mouse") H.step(0.4) -- past the lock-on click
+	check(face:Visible() and abilities:Visible() and not button:Visible(), "the mouse freed: portrait and abilities, no controls")
+	H.up("Middle mouse") H.step(0.1)
+	check(not face:Visible() and not abilities:Visible(), "looking again: hidden")
+	H.tap("F2")
+	check(face:Visible() and abilities:Visible() and button:Visible() and radar:Visible(), "third person off: all back")
+end
+
+T.multiplayer_hides_cas_portrait_and_abilities_while_looking = function()
+	in_net_mode(function()
+		local _, _, face, abilities, _, _, own = battle_hud({mp = true})
+		H.phase.Deployed()
+		everyone_said_hello()
+		H.tap("F2") H.step(0.1)
+		check(H.E.F.on and H.E.F.dragging, "on, looking")
+		check(H.count("cinematic_ui") == 0, "no cinematic UI in multiplayer")
+		check(not face:Visible() and not abilities:Visible() and own:Visible(), "CA's portrait and abilities hidden, the pack's HUD shown")
+		H.down("Middle mouse") H.step(0.4)
+		check(face:Visible() and abilities:Visible(), "the mouse freed: back")
+		H.up("Middle mouse")
+	end)
 end
 
 T.third_person_restores_hud_visibility_after_error = function()
@@ -4377,7 +4538,8 @@ end
 local function hud_on(o)
 	o = o or {}
 	H.fresh({units = {{general = true, abilities = o.abilities or {}, can = o.can or {}, men = o.men or 1, hp = o.hp,
-		range = o.range or 0, ammo = o.ammo or 0}}, mct = o.mct})
+		range = o.range or 0, ammo = o.ammo or 0}}, mct = o.mct, army_abilities = o.army, owned = o.owned,
+		enemies = o.enemies})
 	H.cco = o.cco or hud_cco(o.abilities or {}, o.secs, o.order)
 	H.tap("F2")
 	return find_uicomponent(H.root, "derpy_tp_hud")
@@ -7771,7 +7933,8 @@ local function pages_cco(abilities, spells)
 end
 local function pages_on(abilities, spells, o)
 	o = o or {}
-	return hud_on({abilities = owned(abilities, spells), cco = o.cco or pages_cco(abilities, spells), mct = o.mct})
+	return hud_on({abilities = owned(abilities, spells), cco = o.cco or pages_cco(abilities, spells), mct = o.mct,
+		army = o.army, owned = o.owned, enemies = o.enemies})
 end
 local function shown_keys()
 	local t = {} for n = 1, 10 do t[n] = H.E.hud.key(n) end return table.concat(t, ",")
@@ -7934,6 +8097,107 @@ end
 T.settings_page_key_defaults_to_t = function()
 	local S = settings_with(nil)
 	check(S.keys.page == 0x54 and S.names.page == "T", "the page key is T")
+end
+
+-- army abilities (a player, 2026-10-29: "faction spell to be use when on third person mode ... its soo annoying to use
+-- it just to exit the third person mode"): a third page after his abilities and spells, read off CA's own army ability
+-- buttons (H.army_ability, as read live 2026-10-29) and cast by his army
+local ROD, SWARM = "wh2_dlc11_army_abilities_rod_of_the_storm", "wh2_dlc09_army_abilities_tomb_swarm"
+local function army_page(o)
+	pages_on({}, {}, o)
+	H.step(0.3)
+end
+
+T.army_abilities_are_a_third_page = function()
+	pages_on({"a1"}, {"s1"}, {army = {{key = ROD}, {key = SWARM}}})
+	check(H.E.hud.page_name(0) == "Abilities" and H.E.hud.page_name(2) == "Army abilities", "his own first, the army's third")
+	H.E.hud.next_page() H.E.hud.next_page()
+	check(shown_keys() == ROD .. "," .. SWARM, "the army's page: " .. shown_keys())
+	check(hud_part("slot_1_icon").img[0] == "ui/battle ui/ability_icons/" .. ROD .. ".png", "slot 1 wears CA's icon for it")
+	check(hud_part("tab").text == "(T) Abilities", "the tab names the way round: " .. tostring(hud_part("tab").text))
+	H.E.hud.next_page()
+	check(shown_keys() == "a1", "and round to his abilities: " .. shown_keys())
+end
+
+-- a regiment with no ability of its own still has its army's, on the only page
+T.a_unit_with_no_abilities_has_its_armys = function()
+	army_page({army = {{key = ROD}}})
+	check(shown_keys() == ROD and H.E.hud.page_name(0) == "Army abilities", "the army's alone: " .. shown_keys())
+	check(not hud_part("tab"):Visible(), "one page: no tab")
+end
+
+-- CA's buttons are one army's: an ability his unit's army does not own (an ally's unit played) gets no slot
+T.an_ability_his_army_does_not_own_gets_no_slot = function()
+	army_page({army = {{key = ROD}, {key = SWARM}}, owned = SWARM})
+	check(shown_keys() == SWARM, "only the one his army owns: " .. shown_keys())
+end
+
+T.an_army_ability_lands_where_he_aims = function()
+	army_page({army = {{key = ROD}}})
+	local released = H.count("uc:release_control")
+	H.tap("1") H.step(1)
+	check(H.E.F.armed and hud_part("slot_1_armed"):Visible(), "a ground ability arms")
+	H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("army_ability")
+	check(c and c[2] == ROD, "his army casts it: " .. tostring(c and c[2]))
+	check(c[4] > 30 and c[4] < 40 and near(c[3], 0, 0.01), "where the view meets the ground, ~37 m ahead: " .. c[3] .. ", " .. c[4])
+	check(H.count("uc:perform_special_ability") + H.count("uc:perform_special_ability_ground") == 0, "no unit order")
+	check(H.count("uc:release_control") == released, "so no control handed back")
+end
+
+T.an_army_ability_goes_the_way_he_looks = function()
+	army_page({army = {{key = ROD}}})
+	H.E.rig.look(150, 0) H.step(0.5)
+	H.tap("1") H.step(1)
+	H.tap("Left mouse") H.step(1 / 60)
+	local c, want = H.last("army_ability"), math.deg(H.E.rig.yaw) % 360
+	check(want > 5 and want < 355, "the view is off bearing 0: " .. want)
+	check(c and c[5] and near(c[5], want, 0.5), "cast along his view, " .. want .. " deg: " .. tostring(c and c[5]))
+end
+
+T.an_army_ability_for_enemies_lands_on_the_one_on_the_ray = function()
+	army_page({army = {{key = ROD, flags = {TargetEnemies = true}}}, enemies = {{x = 30, z = 50}, {x = 0, z = 50}}})
+	H.tap("1") H.step(1 / 60) H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("army_ability")
+	check(c and near(c[3], 0, 0.01) and near(c[4], 50, 0.01), "on the enemy straight ahead: " .. tostring(c and c[3]))
+end
+
+-- CA's button greys out what cannot go off (CanCurrentlyPerform false at the start of a siege, read live 2026-10-29);
+-- the slot dims and the key casts nothing
+T.an_army_ability_that_cannot_go_off_is_dimmed_and_not_cast = function()
+	army_page({army = {{key = ROD, CanCurrentlyPerform = false}}})
+	check(hud_part("slot_1_dim"):Visible(), "dimmed")
+	H.tap("1") H.step(1 / 60) H.tap("Left mouse") H.step(1 / 60)
+	check(not H.E.F.armed and H.count("army_ability") == 0, "not armed, not cast")
+end
+
+-- Rod of the Storm after a cast, read live 2026-10-29: 2 uses left, 90 s recharge
+T.an_army_abilitys_cooldown_and_uses_show = function()
+	army_page({army = {{key = ROD, RechargeTimeRemainingSecs = 90, HasLimitedUses = true, RemainingUses = 2}}})
+	check(hud_part("slot_1_cool").text == "90" and hud_part("slot_1_coolplate"):Visible(), "90 s: " .. tostring(hud_part("slot_1_cool").text))
+	check(hud_part("slot_1_uses").text == "2" and hud_part("slot_1_uses"):Visible(), "2 uses left")
+	check(hud_part("slot_1_dim"):Visible(), "dim while it recharges")
+	H.tap("1") H.step(1 / 60) H.tap("Left mouse") H.step(1 / 60)
+	check(H.count("army_ability") == 0, "not cast while it recharges")
+end
+
+-- his context's list unreadable: his own slots go dark (the slots part fails), the army's page is CA's buttons and shows
+T.the_army_page_needs_no_list_of_his = function()
+	local t = H.default_cco()
+	t["BattleAbilityList.Size"] = function() error("test: no list") end
+	army_page({cco = t, army = {{key = ROD}}})
+	check(shown_keys() == ROD and hud_part("slot_1_icon").img[0] == "ui/battle ui/ability_icons/" .. ROD .. ".png",
+		"the army's page wears its icon: " .. shown_keys())
+end
+
+-- an army ability granted mid-battle (a Reign of Chaos reward, CcoBattleAbility.IsReignOfChaosReward): the pages again
+T.an_army_ability_granted_mid_battle_gets_a_slot = function()
+	army_page({army = {{key = ROD}}})
+	H.army_ability({key = SWARM})
+	H.owned = H.owned .. "," .. SWARM
+	H.step(0.5)
+	check(shown_keys() == ROD .. "," .. SWARM, "both: " .. shown_keys())
+	check(hud_part("slot_2_icon").img[0] == "ui/battle ui/ability_icons/" .. SWARM .. ".png", "wearing its icon")
 end
 
 -- overcast by pressing twice (the author, 2026-10-20: "pressing the spell twice can upgrade the spells", "third press
@@ -8350,6 +8614,31 @@ T.no_charge_held_on_a_target_that_hid = function()
 	check(H.E.F.charge_order == nil, "the target hid: the charge is over")
 	H.up("W") H.up("Shift")
 end
+-- a melee order lands a flyer (a player, 2026-10-28: flying generals landing at random): none in the air
+T.a_sprint_in_the_air_orders_no_charge = function()
+	charging_on({type = "wh_test_lord", men = 1, can_fly = true, flying = true})
+	H.down("Shift") H.down("W") H.step(2) H.up("W") H.up("Shift") H.step(0.5)
+	check(H.count("uc:attack_unit") == 0, "flying: no attack order: " .. H.count("uc:attack_unit"))
+	H.units[2]._flying = false
+	H.down("Shift") H.down("W") H.step(2) H.up("W") H.up("Shift")
+	check(H.count("uc:attack_unit") == 1, "landed: the sprint charges: " .. H.count("uc:attack_unit"))
+end
+-- a player, 2026-10-28: cavalry had no charge attack. 468 of 1,121 mounted units carry MOVING_ATTACK on the rider alone,
+-- and only the mount's was read: the rider's is his, played on him where his mount has none (combat.lua swing)
+T.a_riders_own_charge_attack_counts = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_lord", men = 1, slots = {[454] = true, [484] = true, [485] = true}}},
+		enemies = {{men = 20, x = 0, z = 20}}, mct = {combat_one_man = false}})
+	local man = H.units[2]._models[1]
+	man.mount = {id = 999, x = man.x, y = man.y, z = man.z, hp = 100, hp_max = 100, slots = {[454] = true, [455] = true}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	check(H.E.F.can_charge, "his own MOVING_ATTACK counts")
+	H.down("Shift") H.down("W") H.step(1)
+	H.tap("Left mouse")
+	local p = H.last("play")
+	check(H.E.F.lock and H.E.F.lock.runs and p and p[2] == man.id and (p[3] == 484 or p[3] == 485),
+		"the charge attack, on the rider: " .. (p and p[2] .. " " .. p[3] or "none"))
+	H.up("W") H.up("Shift")
+end
 
 -- CA binds plain T to cycling the reinforcement spawn zone (default_keys.xml, read 2026-10-20): off while T turns pages
 T.the_games_t_shortcut_is_off_while_on = function()
@@ -8755,6 +9044,8 @@ T.the_guide_key_brings_cas_banners_back_and_the_bars_step_aside = function()
 	check(shown(H.enemies[1]) and shown(H.allies[1]), "the bars show")
 	H.down("Alt") H.step(1 / 60) H.step(1 / 60)
 	check(H.last("banners")[2] == true and holder:Visible(), "Alt held: CA's banners, and their holder shown")
+	-- CA hides every banner under the cinematic UI (measured 2026-10-29), so it is off while they show
+	check(H.E.F.dragging and H.last("cinematic_ui")[2] == false, "looking, the cinematic UI off with them")
 	check(not shown(H.enemies[1]) and not shown(H.allies[1]), "the bars step aside, at once")
 	local n = H.count("banners")
 	H.step(1)
@@ -8767,6 +9058,7 @@ T.the_guide_key_brings_cas_banners_back_and_the_bars_step_aside = function()
 	check(not shown(H.enemies[1]), "and the bars step aside at once, the key unchanged")
 	H.up("Alt") H.step(1 / 60) H.step(1 / 60)
 	check(H.last("banners")[2] == false and not holder:Visible(), "let go: off")
+	check(H.last("cinematic_ui")[2] == true, "and the cinematic UI back on")
 	check(shown(H.enemies[1]), "the bars back")
 	H.down("Alt") H.step(0.1)
 	H.tap("F2") H.step(0.1)

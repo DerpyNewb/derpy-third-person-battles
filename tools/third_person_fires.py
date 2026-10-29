@@ -70,23 +70,25 @@ def unpack(b, comp):
     return zstandard.ZstdDecompressor().decompress(body, max_output_size=1 << 28)
 
 
-def fire_pos(meta):
-    """Every FIRE_POS event in .anm.meta bytes, in time order, as (start, x, y, z). A v10 tag: u16 name length 8, the
+def fire_pos(meta, name=b"FIRE_POS"):
+    """Every FIRE_POS event in .anm.meta bytes, in time order, as (start, x, y, z). A v10 tag: u16 name length, the
     name, u32 version, f32 start, f32 end, string filter (u16 byte count), i32 id, then its Vector3 Position
-    (TheAssetEditor's FirePos_v10: "measured from the unit's animroot bone, in meters"). Other versions: time only."""
-    out, i = [], 0
+    (TheAssetEditor's FirePos_v10: "measured from the unit's animroot bone, in meters"). Other versions: time only.
+    name: another tag of that shape (IMPACT_POS)."""
+    out, i, tag = [], 0, struct.pack("<H", len(name)) + name
     while True:
-        i = meta.find(b"\x08\x00FIRE_POS", i)
+        i = meta.find(tag, i)
         if i < 0:
             return sorted(out)
-        ver, t = struct.unpack_from("<If", meta, i + 10)
+        base = i + len(tag)
+        ver, t = struct.unpack_from("<If", meta, base)
         if ver == 10:
-            n, = struct.unpack_from("<H", meta, i + 22)
-            x, y, z = struct.unpack_from("<fff", meta, i + 24 + n + 4)
+            n, = struct.unpack_from("<H", meta, base + 12)
+            x, y, z = struct.unpack_from("<fff", meta, base + 14 + n + 4)
             out.append((round(t, 3), round(x, 3), round(y, 3), round(z, 3)))
         else:
             out.append((round(t, 3),))
-        i += 10
+        i = base
 
 
 def anim_length(b):
@@ -205,6 +207,31 @@ def dull_slots(files, man_animation):
     return sorted(out) or None
 
 
+def impact_slots(files, man_animation):
+    """His bin's ATTACK_1-10 slots -> where the blow lands, (x right, z ahead) in m from his animroot: the first IMPACT_POS
+    of the slot's first clip that has one. The engine launches a swing once that point reaches its target's edge
+    (exe+325fca4) and lands the blow at its time (docs/BATTLE_ENGINE_RE.md section 12); combat.lua picks the man a blow
+    lands on by it. Most land 1.6-3.6 m ahead, a giant's or a troll's up to 7 m out and to the side (read 2026-10-29).
+    ponytail: the slot's first clip only, the engine picks among them. None when no slot has one."""
+    b = files.get(BIN + man_animation + ".bin")
+    if not b:
+        return None
+    try:
+        _h, rows = RA.read_bin(b)
+    except (ValueError, struct.error):
+        return None
+    out = {}
+    for r in rows:
+        if r["slot"] in ATTACKS and r["slot"] not in out:
+            for _anim, meta, _snd in r["anims"]:
+                m = meta and files.get(meta)
+                p = [e for e in (fire_pos(m, b"IMPACT_POS") if m else ()) if len(e) == 4]
+                if p:
+                    out[r["slot"]] = (round(p[0][1], 1), round(p[0][3], 1))
+                    break
+    return out or None
+
+
 def lands(packs, table="land_units"):
     """land unit key -> row, a mod's row over CA's (or another table's key -> row)."""
     out = {}
@@ -235,17 +262,19 @@ def times_of(files, man_animation, slots=(FIRE, GRENADIER, RIDER_FIRE)):
     return None
 
 
-def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None):
+def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None, impacts=None):
     """land unit key -> FIRE_POS times, for every unit with a missile weapon whose fire clip carries any. specs: the
     slot lists to read, each in order of preference (default FIRE_LEVEL, else GRENADIER, else RIDER_FIRE); one dict per spec, or the
     one dict when given none or one. raises: a dict to fill with each such unit's raise_lengths. runs: one to fill with
     every land unit's longest charge attack, s. charges: one to fill with every land unit's (CHARGE, FLY_CHARGE) lengths,
-    s, the longest of each, 0 for none; blanks: one with its blank_slots; dulls: one with its dull_slots. All three off
-    the body combat.lua plays them on: his mount's bin (mounts.animation) when he rides one, else his own."""
+    s, the longest of each, 0 for none; blanks: one with its blank_slots; dulls: one with its dull_slots; impacts: one
+    with its impact_slots. All of these off the body combat.lua plays them on: his mount's bin (mounts.animation) when
+    he rides one, else his own."""
     specs = specs or ((FIRE, GRENADIER, RIDER_FIRE),)
     mods = mod_packs()
     files = Files(mods + [os.path.join(DATA, n) for n in CA_ANIM])
-    mounts = lands(mods, "mounts") if charges is not None or blanks is not None or dulls is not None else {}
+    bodied = charges is not None or blanks is not None or dulls is not None or impacts is not None
+    mounts = lands(mods, "mounts") if bodied else {}
     outs = [{} for _ in specs]
     for key, r in lands(mods).items():
         if runs is not None and r.get("man_animation"):
@@ -265,6 +294,10 @@ def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None)
             t = dull_slots(files, body)
             if t:
                 dulls[key] = t
+        if impacts is not None and body:
+            t = impact_slots(files, body)
+            if t:
+                impacts[key] = t
         if r.get("primary_missile_weapon") and r.get("man_animation"):
             for out, slots in zip(outs, specs):
                 t = times_of(files, r["man_animation"], slots)
@@ -309,6 +342,22 @@ def _selftest():
         assert dull_slots(f, "b") == [455, 456], "a slot with any clip short of a splash: %s" % dull_slots(f, "b")
         RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [hit]}])
         assert dull_slots(f, "b") is None, "every slot with a splash: none"
+    finally:
+        RA.read_bin = real
+    # IMPACT_POS: the same v10 shape under a longer name, read by fire_pos(meta, name); a FIRE_POS beside it is not read
+    imp = lambda t, x, z: (struct.pack("<H", 10) + b"IMPACT_POS" + struct.pack("<Iff", 10, t, t) + struct.pack("<H", 0)
+                           + struct.pack("<i", 0) + struct.pack("<fff", x, 0.9, z))
+    assert fire_pos(ev(0.5) + imp(0.86, 0.196, 2.772), b"IMPACT_POS") == [(0.86, 0.196, 0.9, 2.772)], "IMPACT_POS, not FIRE_POS"
+    # ATTACK_1: the first clip's (a second clip ignored); ATTACK_2: its first clip has none, its second does; ATTACK_3 none
+    f.at["animations/x/i1.anm.meta"], f.at["animations/x/i2.anm.meta"] = imp(0.9, 0.24, 2.77), imp(0.7, -5.37, -0.14)
+    i1, i2 = ("animations/x/full.anim", "animations/x/i1.anm.meta", None), ("animations/x/full.anim", "animations/x/i2.anm.meta", None)
+    RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [i1, i2]}, {"slot": 455, "anims": [dud, i2]}, {"slot": 456, "anims": [dud]},
+                                    {"slot": 489, "anims": [i1]}])
+    try:
+        got = impact_slots(f, "b")
+        assert got == {454: (0.2, 2.8), 455: (-5.4, -0.1)}, "x right and z ahead, 0.1 m, per ATTACK slot: %s" % got
+        RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [dud]}])
+        assert impact_slots(f, "b") is None, "no IMPACT_POS anywhere: none"
     finally:
         RA.read_bin = real
     print("selftest ok")

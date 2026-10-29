@@ -2,11 +2,13 @@
 
     py tools/exe_re.py q <rva> [n]            n qwords at rva (a vtable), each tagged when it points into the code
     py tools/exe_re.py dis <rva> [n]          disassemble n instructions from rva
-    py tools/exe_re.py fn <rva> [n]           disassemble from the start of the function holding rva (CC padding before it)
+    py tools/exe_re.py fn <rva> [n]           disassemble from the start of the function holding rva (.pdata, else CC padding)
+    py tools/exe_re.py pdata <rva>            the exact bounds of the function holding rva, from the PE's .pdata
     py tools/exe_re.py refs <rva>             every call/jmp rel32 and RIP-relative lea/mov/cmp to rva
     py tools/exe_re.py ptrs <rva>             every place the image stores exe+rva as a pointer (its vtable slots)
     py tools/exe_re.py slotcalls <disp>       every call/jmp qword ptr [reg+disp]: who calls a virtual at that slot
     py tools/exe_re.py stores <disp>          every mov dword ptr [reg+disp], imm32, with the value: who writes a field
+    py tools/exe_re.py writes <disp>          every instruction that writes [reg+disp] from any source (a register too)
     py tools/exe_re.py vtmatch <vt> <rva>     the vtable holding the pointer at rva that lines up best with vtable vt
     py tools/exe_re.py --selftest             each command against a fact measured on build 6acec6f4
 
@@ -100,9 +102,38 @@ def dis(rva, n=40):
     return lines
 
 
+_pdata = None
+
+
+def pdata(rva):
+    """(begin, end) of the function holding rva, from the PE exception directory's RUNTIME_FUNCTION entries, a chained
+    entry (a function split in parts) followed back to its primary; None for a leaf function, which has no entry"""
+    global _pdata
+    import bisect
+    b = pe()
+    if _pdata is None:
+        peo = struct.unpack_from("<I", b, 0x3C)[0]
+        exc, size = struct.unpack_from("<II", b, peo + 24 + 112 + 3 * 8)  # PE32+ data directory 3
+        o = off(exc)
+        _pdata = [struct.unpack_from("<III", b, o + 12 * k) for k in range(size // 12)]
+    i = bisect.bisect_right(_pdata, (rva, 0xFFFFFFFF, 0xFFFFFFFF)) - 1
+    if i < 0 or not _pdata[i][0] <= rva < _pdata[i][1]:
+        return None
+    e = _pdata[i]
+    for _ in range(16):
+        u = off(e[2] & ~1)
+        if u is None or not (b[u] >> 3) & 4:  # UNW_FLAG_CHAININFO: the parent's entry follows the unwind codes
+            break
+        e = struct.unpack_from("<III", b, u + 4 + 2 * ((b[u + 2] + 1) & ~1))
+    return e[0], e[1]
+
+
 def fstart(rva):
-    """the start of the function holding rva: back to the first byte after two CC. ponytail: a function after a single
-    int3 is missed (the one before it is returned); the call graph, or Ghidra, settles a doubtful one"""
+    """the start of the function holding rva: from .pdata (exact), else back to the first byte after two CC. ponytail:
+    the CC walk, used only for a leaf function, misses a function after a single int3 and returns the one before it"""
+    p = pdata(rva)
+    if p:
+        return p[0]
     o = off(rva)
     b = pe()
     i = o
@@ -186,6 +217,37 @@ def stores(disp):
     return sorted(out, key=lambda x: x[1])
 
 
+WRITES = {"mov", "add", "sub", "and", "or", "xor", "inc", "dec", "neg", "not", "xchg", "xadd", "cmpxchg", "movss",
+          "movsd", "movd", "movq", "movaps", "movups", "movdqa", "movdqu", "shl", "shr", "sar", "bts", "btr"}
+
+
+def writes(disp):
+    """every instruction whose FIRST operand is memory [reg+disp32] and whose mnemonic writes it: what stores misses
+    when the value is a register. Each hit is decoded from the earliest start that covers the displacement, so a REX
+    prefix stays on (mov [r14+..] and not the mis-decode mov [rsi+..] one byte on). disp32 only: below 0x80 the
+    compiler uses disp8 and the byte pattern is everywhere"""
+    from capstone import x86
+    if disp < 0x80:
+        raise SystemExit("writes needs a displacement of 0x80 or more")
+    va, rptr, rsz = text()
+    seg = pe()[rptr:rptr + rsz]
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    md.detail = True
+    pat, out, i = struct.pack("<I", disp), [], -1
+    while True:
+        i = seg.find(pat, i + 1)
+        if i < 0:
+            return out
+        for back in range(8, 1, -1):
+            s = i - back
+            ins = next(md.disasm(seg[s:s + 16], BASE + va + s, 1), None)
+            if ins and ins.mnemonic in WRITES and s + ins.size >= i + 4 and ins.operands \
+                    and ins.operands[0].type == x86.X86_OP_MEM and ins.operands[0].mem.disp == disp:
+                a = va + s
+                out.append((a, "%s %s" % (ins.mnemonic, ins.op_str), fstart(a)))
+                break
+
+
 def vtmatch(known, rva, n=400):
     """the base of the vtable holding rva that shares the most slots with vtable `known`: a subclass's vtable keeps
     most of its base class's entries at the same index"""
@@ -209,7 +271,13 @@ def selftest():
     assert (0x306f093, 18) in [(a, v) for a, v, _ in stores(0x324)], "the stop writing 18 to +0x324"
     top = vtmatch(0x3912950, 0x3915ec8)[0]
     assert top[1] == 0x3915a20 and top[2] == 149 and top[3] == 0x306e850, "the subclass vtable: %r" % (top,)
-    print("ok: refs, dis, ptrs, slotcalls, stores and vtmatch each found what build 6acec6f4 holds")
+    # the CC walk gave 2fd97cc here (2026-10-20); .pdata holds the true start
+    assert fstart(0x2fda558) == 0x2fda19c and pdata(0x2fda558) == (0x2fda19c, 0x2fda624), "pdata: %r" % (pdata(0x2fda558),)
+    w = writes(0xb08)
+    hit = [t for a, t, f in w if a == 0x3251dde and f == 0x3251af8]
+    assert hit and "r14" in hit[0], "the pending-hit arm's mov [r14+0xb08] in exe+3251af8: %r" % hit
+    assert not any(a == 0x3251ddf for a, _, _ in w), "the REX-less mis-decode one byte on"
+    print("ok: refs, dis, ptrs, slotcalls, stores, writes, pdata and vtmatch each found what build 6acec6f4 holds")
     return 0
 
 
@@ -242,6 +310,12 @@ def main(argv):
     elif cmd == "stores":
         for r, v, f in stores(a):
             print("exe+%x  [reg+0x%x] = %d  in fn exe+%s" % (r, a, v, ("%x" % f) if f is not None else "?"))
+    elif cmd == "writes":
+        for r, t, f in writes(a):
+            print("exe+%x  %-44s in fn exe+%s" % (r, t, ("%x" % f) if f is not None else "?"))
+    elif cmd == "pdata":
+        p = pdata(a)
+        print("exe+%x in fn exe+%x..%x" % (a, p[0], p[1]) if p else "exe+%x: no .pdata entry (a leaf function)" % a)
     elif cmd == "vtmatch":
         for same, base, k, held in vtmatch(a, n):
             print("vtable exe+%x: %d slots shared; exe+%x is slot %d (+0x%x), where the known one holds exe+%x"

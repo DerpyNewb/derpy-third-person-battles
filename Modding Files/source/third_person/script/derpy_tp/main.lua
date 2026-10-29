@@ -99,17 +99,21 @@ return function(E)
 	local function chariot(unit) return E.D.chariots ~= nil and E.D.chariots[unit:type()] == true end
 
 	local function capabilities(m)
+		local man = m
 		m = m and (P.mount(m) or m)
 		-- a slot whose every clip is an empty file is none (data.lua blanks): the Great Unclean One's jump is in his
 		-- fragment, and "clip 489 never played" four times in the author's log, 2026-10-18
 		local blank = {}
 		for _, s in ipairs(E.D.blanks and E.D.blanks[F.utype] or {}) do blank[s] = true end
-		local function any(a)
-			if m then for s = a, a + 4 do if P.has_slot(m, s) and not blank[s] then return true end end end
+		local function any(a, on)
+			on = on or m
+			if on then for s = a, a + 4 do if P.has_slot(on, s) and not blank[s] then return true end end end
 			return false
 		end
-		-- an artillery crew has no melee of its own here: the gun is what is played (the author, 2026-10-18)
-		F.can_charge, F.can_jump = not F.arty and any(484), not F.arty and any(489)
+		-- an artillery crew has no melee of its own here: the gun is what is played (the author, 2026-10-18). A rider's
+		-- charge attack is his own where his mount has none, as swing() plays it (combat.lua): 468 of 1,121 mounted units
+		-- carry MOVING_ATTACK on the rider alone (a player, 2026-10-28: cavalry had no charge attack)
+		F.can_charge, F.can_jump = not F.arty and (any(484) or any(484, man)), not F.arty and any(489)
 		F.can_cheer = any(1094) or any(1099) or any(1104) or any(1109)
 	end
 
@@ -152,8 +156,10 @@ return function(E)
 		-- 2026-10-24), and its handler hid every machine's interface and cursor (a player, 2026-10-24: "the other ... cannot
 		-- do anything anymore"). There the HUD goes the pack's way (hud below) and the cursor each frame (P.hide_cursor).
 		-- ponytail: CA's selection markers stay, and its cursor between two frames
+		-- CA's banners (banners below) are off too while it is on: each reads Visible() false under it with the holder
+		-- shown (measured 2026-10-29). So they take it off, and the HUD goes the multiplayer way meanwhile
 		if not P.features.net then
-			if (show or E.command.vanilla()) and not F.ui_off then bm:enable_cinematic_ui(false, true, false)
+			if (show or E.command.vanilla() or F.banners) and not F.ui_off then bm:enable_cinematic_ui(false, true, false)
 			else bm:enable_cinematic_ui(true, show, false) end
 		end
 		-- the flags over every unit: the switch brings them back, so they are set again as the guide key has them (banners
@@ -165,12 +171,13 @@ return function(E)
 	-- unit types and a way to quickly show friend from foe.. like a keybind to toggle unit banners"): unit type, side,
 	-- health, morale and status in CA's art. The pack's bars step aside meanwhile (hud.lua bars), and hud() shows their
 	-- holder. An MCT switch, on by default: off, the key is the markers alone, and "Health bars: With the markers key"
-	-- shows the bars with them, as before. ponytail: that CA draws them under the cinematic UI is read off the switch
-	-- bringing them back, not measured
+	-- shows the bars with them, as before. CA draws none under the cinematic UI (a player, 2026-10-28; measured
+	-- 2026-10-29), so cursor() applies again in the same frame and takes it off while they show
 	local function banners(on)
 		on = on == true
 		if F.banners == on then return end
 		F.banners = on
+		F.cursor_shown = nil
 		bm.battle:set_banners_enabled(on)
 	end
 
@@ -217,8 +224,16 @@ return function(E)
 		local h = find_uicomponent(root, "hud_battle")
 		if h then for i = 0, h:ChildCount() - 1 do local c = UIComponent(h:Find(i)) if c:Id() ~= "porthole_parent" then hide(c, "hud_battle") end end end
 		local port = find_uicomponent(root, "porthole_parent")
+		-- CA's portrait and skills with the mouse freed, none while it looks: the cinematic UI hid them then, and in
+		-- multiplayer and under CA's banners there is none (a player in multiplayer, 2026-10-28: CA's portrait and ability
+		-- bar stayed up over the pack's)
 		local keep = {model_parent = true, porthole_mask = true, ability_parent = true, ability_page_parent = true}
-		if port then for i = 0, port:ChildCount() - 1 do local c = UIComponent(port:Find(i)) if not keep[c:Id()] then hide(c, "porthole_parent") end end end
+		if port then for i = 0, port:ChildCount() - 1 do
+			local c = UIComponent(port:Find(i))
+			local id = c:Id()
+			if not keep[id] or F.dragging then hide(c, "porthole_parent")
+			elseif saved.porthole_parent[id] ~= nil then c:SetVisible(saved.porthole_parent[id] == true) saved.porthole_parent[id] = nil end
+		end end
 		for _, id in ipairs({"unit_id_holder", "capture_point_visibility_parent", "building_icon_holder", "menu_bar", "under_advisor_docker", "df_launcher_button", "df_fountain_1_layer", "watermark_square", "ursun_mouse_follower"}) do
 			local c = find_uicomponent(root, id)
 			if c then hide(c, "root") end
@@ -334,6 +349,7 @@ return function(E)
 			-- he died, or he is the last man: the next front-centre man, or the whole unit; a crewman's mate on the same
 			-- chariot first, so the camera stays on the chariot played (F.body: read while he lived, not off a dead man)
 			F.model, F.man_hold, F.shot, F.lock, F.swung = E.move.front_man(unit, F.body), nil, nil, nil, nil
+			F.strike, F.blow = nil, nil -- his swing's blow went with him
 			F.body = F.model and P.mount(F.model)
 			F.reload_slot = F.model and P.reload_slot(F.model)
 			-- played whole from here: it holds its fire until third person ends
@@ -459,6 +475,7 @@ return function(E)
 				if c == pd.slot then pd.seen = true end
 				if pd.seen and c ~= pd.slot or not pd.seen and gnow >= pd.till then F.pending = nil end
 			end
+			E.combat.strike(gnow) -- a swing's blow, once its clip shows (combat.lua)
 			-- one man of a regiment: none of its volleys either, armed only for his own shot (F.shot); a unit of one keeps his
 			-- shot clips, the engine's own order fires him (combat.lua C.ground)
 			local man = F.model or single
@@ -730,6 +747,7 @@ return function(E)
 			ready_by[F.unit:unique_ui_id()] = F.ready_at
 		end)
 		F.shot, F.want_shot = nil, false
+		F.strike, F.blow = nil, nil -- a blow not yet posted is dropped; one posted lands as the engine's would
 		-- his swings back; nothing written to a dead man, whose model may be gone
 		if F.disarmed then try(function() if P.alive(F.unit, F.disarmed) then P.arm(F.disarmed) end end) F.disarmed = nil end
 		if F.guarded and P.features.net then try(P.unguard) end -- by its id: nothing read off a dead man

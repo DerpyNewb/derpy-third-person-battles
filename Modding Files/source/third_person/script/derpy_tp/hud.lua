@@ -17,8 +17,10 @@ return function(E)
 	local F, L = E.F, E.load("hud_layout")
 	local H = {}
 	local ui, last, dead, errors, off = nil, {}, {}, 0, false
-	local cco_id, cco_at, keys, slot_of, reload_cco = nil, 0, {}, {}, nil
+	local cco_id, cco_at, keys, on_page, reload_cco = nil, 0, {}, {}, nil -- on_page: the shown page's entries (build)
 	local cooling = {} -- slot n's ability is recharging, as the last context read found it
+	local able = {} -- slot n's army ability can go off, as the last read of CA's button found it
+	local army_n = 0 -- CA's army ability buttons the pages came from
 	local acts, act_at = {}, {} -- the action buttons this unit shows, in order, and each one's place in that order
 	local caster = false -- an ability of his spends winds: his army's pool and its bar show
 	local home -- CA's radar's holder and place while the radar is in this panel (H.map): {holder, x, y}
@@ -188,10 +190,30 @@ return function(E)
 		H.s = s
 	end
 
+	-- his army's abilities (a player, 2026-10-29: "faction spell to be use when on third person mode"): CA's own buttons
+	-- under hud_battle's army_ability_parent, in CA's order, those his unit's army owns. Their live record is reachable
+	-- there only (a CcoBattleArmy by its id answers nothing, measured 2026-10-29), and CA leaves the hidden ones out, the
+	-- pack's 40 stat abilities among them. Also how many buttons CA has, for the update to see one come. ponytail: a
+	-- player with two armies in one battle - whose buttons CA shows is unmeasured
+	local function army_parent() return find_uicomponent(core:get_ui_root(), "hud_battle", "army_ability_parent") end
+	local function army_entries()
+		local p, out = army_parent(), {}
+		local own = H.value('ArmyContext.ArmyAbilitiesList(false).JoinString(RecordKey, ",")')
+		if not p then return out, 0 end
+		for i = 0, p:ChildCount() - 1 do
+			-- keys are [a-z0-9_]: no pattern character, so a plain match (find with a pattern finds nothing in game)
+			local key = UIComponent(p:Find(i)):Id():match("^button_holder_(.+)$")
+			if key and type(own) == "string" and ("," .. own .. ","):match("," .. key .. ",") then
+				out[#out + 1] = {key = key, army = true}
+			end
+		end
+		return out, p:ChildCount()
+	end
+
 	-- the bar's pages (the 2026-10-20 design, Part 2): CA's own list in its order, each ability once - the owned list
 	-- holds every spell twice, its key and its overcast's (measured 2026-10-20) - abilities first, then spells (they cost
-	-- winds, CcoBattleAbility.ManaUsed), L.slots a page. No context: the owned list, its overcast copies dropped, one kind.
-	-- Each slot {key, i: its place in CA's list, up: the spell's overcast key}
+	-- winds, CcoBattleAbility.ManaUsed), then his army's, L.slots a page. No context: the owned list, its overcast copies
+	-- dropped, one kind. Each slot {key, i: its place in CA's list, up: the spell's overcast key} or {key, army = true}
 	local function build()
 		local owned, has = F.unit:owned_non_passive_special_abilities() or {}, {}
 		for _, k in ipairs(owned) do has[k] = true end
@@ -227,8 +249,9 @@ return function(E)
 				table.insert(kinds[e.spell and 2 or 1], e)
 			end
 		end
+		kinds[3], army_n = army_entries()
 		pages = {}
-		for k, name in ipairs({"Abilities", "Spells"}) do
+		for k, name in ipairs({"Abilities", "Spells", "Army abilities"}) do
 			for p = 1, math.ceil(#kinds[k] / L.slots) do
 				local slots = {}
 				for j = (p - 1) * L.slots + 1, math.min(p * L.slots, #kinds[k]) do slots[#slots + 1] = kinds[k][j] end
@@ -246,10 +269,31 @@ return function(E)
 		if not dead.winds then for _, id in ipairs(GROUPS.winds) do vis(id, caster) end end
 	end
 
+	-- hotbar slot n's ability, a field of its live record: his unit's own at its place in his context's list, his army's
+	-- on CA's button for it (army_entries). Throws when the slot has none or the context gave nothing, so a caller can
+	-- fall back
+	local function ability_at(n)
+		local i = on_page[n] and on_page[n].i
+		if not i or not cco_id then error("no context for ability slot " .. n) end
+		return "BattleAbilityList.At(" .. i .. ")."
+	end
+	local function read(n, field)
+		local e = on_page[n]
+		if not (e and e.army) then return cco(ability_at(n) .. field) end
+		local p = army_parent()
+		local b = p and find_uicomponent(p, "button_ability_" .. e.key)
+		local c = b and b:GetContextObject("CcoBattleAbility")
+		local val = c and c:Call(field)
+		if val == nil then error("CA's army ability button gave nothing for " .. e.key .. " " .. field) end
+		return val
+	end
+	-- a slot read now: his unit's with a place in his context's list, an army's always (CA's button, not his context)
+	local function live(n) return on_page[n] ~= nil and (on_page[n].i ~= nil or on_page[n].army == true) end
+
 	-- the shown page into the slots: each one's key, place in CA's list, icon and key label
 	local function show_page(indexed, why)
-		keys, slot_of = {}, {}
-		for n, e in ipairs(pages[page] and pages[page].slots or {}) do keys[n], slot_of[n] = e.key, e.i end
+		keys, on_page = {}, pages[page] and pages[page].slots or {}
+		for n, e in ipairs(on_page) do keys[n] = e.key end
 		if off then return end
 		for n = 1, L.slots do
 			local on = keys[n] ~= nil
@@ -258,7 +302,7 @@ return function(E)
 				"uses", "manaplate", "mana"}) do
 				vis("slot_" .. n .. "_" .. s, false)
 			end
-			cooling[n] = nil
+			cooling[n], able[n] = nil, nil
 			if on then text("slot_" .. n .. "_key", E.S.names["ability_" .. n] or "") end
 			text("slot_" .. n .. "_cool", "") -- the page before's seconds; this page's come at the next read
 		end
@@ -269,9 +313,10 @@ return function(E)
 		tab_text = tab and "(" .. tab .. ") " .. H.page_name(1) or nil
 		if tab then text("tab", tab_text) end
 		guard("slots", function()
-			if not indexed then error(why, 0) end
-			for n, i in pairs(slot_of) do
-				img("slot_" .. n .. "_icon", cco("BattleAbilityList.At(" .. i .. ").SetupAbilityContext.IconPath"))
+			-- an army's page is read off CA's buttons: no context of his is wanted for it
+			if not indexed and not (on_page[1] and on_page[1].army) then error(why, 0) end
+			for n in ipairs(on_page) do
+				if live(n) then img("slot_" .. n .. "_icon", read(n, "SetupAbilityContext.IconPath")) end
 			end
 		end)
 	end
@@ -325,20 +370,26 @@ return function(E)
 		text("map_key", E.S.names.minimap or "")
 	end
 
-	-- hotbar slot n's ability in the unit's context: a field of its record, or a command run on it. Both throw when the
-	-- slot has no matched ability or the context gave nothing, so a caller can fall back
-	local function ability_at(n)
-		local i = slot_of[n]
-		if not i or not cco_id then error("no context for ability slot " .. n) end
-		return "BattleAbilityList.At(" .. i .. ")."
-	end
-	function H.ability(n, field) return cco(ability_at(n) .. "SetupAbilityContext." .. field) end
+	-- hotbar slot n's ability: a field of its record, or a command run on it in the unit's context (none for an army's).
+	-- Both throw when the slot has no matched ability or the context gave nothing, so a caller can fall back
+	function H.ability(n, field) return read(n, "SetupAbilityContext." .. field) end
 	-- on the battle ability itself: PerformAbilityForOwner on its SetupAbilityContext does nothing (measured 2026-10-14)
 	function H.ability_command(n, fn) common.call_context_command("CcoBattleUnit", cco_id, ability_at(n) .. fn) end
 	-- slot n's ability is recharging; no context, no answer: false (-1 is no cooldown, measured)
 	function H.cooling(n)
-		local ok, secs = pcall(function() return cco(ability_at(n) .. "RechargeTimeRemainingSecs") end)
+		local ok, secs = pcall(read, n, "RechargeTimeRemainingSecs")
 		return ok and secs > 0
+	end
+	-- slot n holds his army's ability (abilities.lua casts it through his army)
+	function H.army(n) return on_page[n] ~= nil and on_page[n].army == true end
+	-- slot n's ability can go off now: his unit's by the engine's own test, his army's by CA's button's (CanCurrentlyPerform,
+	-- false through its recharge too)
+	function H.can(n)
+		local e = on_page[n]
+		if not e then return false end
+		if not e.army then return F.unit:can_perform_special_ability(e.key) end
+		local ok, can = pcall(read, n, "CanCurrentlyPerform")
+		return ok and can == true
 	end
 
 	-- the armed ability (abilities.lua): its slot shows CA's selected ring; nil clears every slot
@@ -361,7 +412,7 @@ return function(E)
 	end
 	-- slot n's winds cost (CcoBattleAbility.ManaUsed), 0 without one; the army's winds now, nil without a context
 	function H.mana(n)
-		local ok, c = pcall(function() return cco(ability_at(n) .. "ManaUsed") end)
+		local ok, c = pcall(read, n, "ManaUsed")
 		return ok and type(c) == "number" and c or 0
 	end
 	function H.winds()
@@ -683,21 +734,23 @@ return function(E)
 		guard("slots", function()
 			for n = 1, math.min(#keys, L.slots) do
 				-- recharging too: can_perform_special_ability stays true through a cooldown (measured 2026-10-21), and CA's
-				-- button greys out through it
-				vis("slot_" .. n .. "_dim", not u:can_perform_special_ability(keys[n]) or cooling[n]
-					or hint ~= nil and hint.n == n and now < hint.till)
+				-- button greys out through it. An army's: what CA's button said at the last read
+				local can = on_page[n].army and able[n] or not on_page[n].army and u:can_perform_special_ability(keys[n])
+				vis("slot_" .. n .. "_dim", not can or cooling[n] or hint ~= nil and hint.n == n and now < hint.till)
 			end
 		end)
 		if now >= cco_at then
 			cco_at = now + CCO_EVERY
-			-- an ability granted or spent mid-battle: the pages again, on the page of the same name if it is still there
+			-- an ability granted or spent mid-battle, his or his army's: the pages again, on the page of the same name if it
+			-- is still there
 			local okn, n = pcall(cco, "BattleAbilityList.Size")
-			if okn and list_n and n ~= list_n then
+			local p = army_parent()
+			if okn and list_n and n ~= list_n or (p and p:ChildCount() or 0) ~= army_n then
 				if F.armed then E.abilities.cancel() end -- an armed slot may hold another ability after (the final review)
 				local name = H.page_name(0)
 				local indexed, why = build()
 				page = 1
-				for p, pg in ipairs(pages) do if pg.name == name then page = p end end
+				for k, pg in ipairs(pages) do if pg.name == name then page = k end end
 				show_page(indexed, why)
 				show_caster()
 				H.place()
@@ -705,18 +758,19 @@ return function(E)
 			guard("slots", function()
 				-- CA's timer ring states: winding up (the cast before it takes effect; -1 when not) the plain ring, running
 				-- the green one, each with its seconds left; then the cooldown's seconds
-				for n, i in pairs(slot_of) do
-					local at = "BattleAbilityList.At(" .. i .. ")."
-					local windup = cco(at .. "WindUpTimeRemainingSecs")
+				for n in ipairs(on_page) do if live(n) then
+					local function at(field) return read(n, field) end
+					local windup = at("WindUpTimeRemainingSecs")
 					local winding = windup > 0
-					local active = cco(at .. "IsActive") == true -- false through a wind-up (measured)
-					local secs = winding and windup or cco(at .. (active and "ActiveTimeRemainingSecs" or "RechargeTimeRemainingSecs"))
+					local active = at("IsActive") == true -- false through a wind-up (measured)
+					local secs = winding and windup or at(active and "ActiveTimeRemainingSecs" or "RechargeTimeRemainingSecs")
 					text("slot_" .. n .. "_cool", secs > 0 and tostring(math.ceil(secs)) or "")
 					vis("slot_" .. n .. "_coolplate", secs > 0)
 					cooling[n] = secs > 0 and not active and not winding
+					if on_page[n].army then able[n] = at("CanCurrentlyPerform") == true end
 					-- its uses left, of an ability that has a count (RemainingUses, -1 without one)
-					local okl, limited = pcall(cco, at .. "HasLimitedUses")
-					local left = okl and limited == true and cco(at .. "RemainingUses")
+					local okl, limited = pcall(at, "HasLimitedUses")
+					local left = okl and limited == true and at("RemainingUses")
 					text("slot_" .. n .. "_uses", left and tostring(left) or "")
 					vis("slot_" .. n .. "_uses", left ~= false) vis("slot_" .. n .. "_usesplate", left ~= false)
 					-- a spell's winds (ManaUsed; CA shows them in its tooltip only), the overcast's while it is armed
@@ -728,7 +782,7 @@ return function(E)
 					vis("slot_" .. n .. "_mana", winds ~= false) vis("slot_" .. n .. "_manaplate", winds ~= false)
 					vis("slot_" .. n .. "_active_l", active) vis("slot_" .. n .. "_active_r", active)
 					vis("slot_" .. n .. "_windup_l", winding) vis("slot_" .. n .. "_windup_r", winding)
-				end
+				end end
 			end)
 			-- hidden (the 2026-10-20 design, Part 4: third person turns off CA's banners, which show it): unspottable is the
 			-- unit's own trait and CA shows it always; hidden is his cover, the context's IsHidden or "hidden in tall

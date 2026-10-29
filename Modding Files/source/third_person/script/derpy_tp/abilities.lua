@@ -82,7 +82,7 @@ return function(E)
 	local function ready(n)
 		local key = E.hud.key(n) -- slot n of the page shown (hud.lua)
 		if not key then return nil, "no ability in slot " .. n end
-		if not F.unit:can_perform_special_ability(key) then return nil, key .. " cannot be cast now" end
+		if not E.hud.can(n) then return nil, key .. " cannot be cast now" end
 		-- can_perform stays true through a cooldown (measured): the order went out anyway
 		if E.hud.cooling(n) then return nil, key .. " is cooling down" end
 		return key
@@ -106,6 +106,31 @@ return function(E)
 			return nil
 		end
 		local kind = kind_of(n, key)
+		-- his army's (hud.lua army_entries): his army casts it at a point - the ground aimed at, the unit on the crosshair,
+		-- else where he stands - along his view (CA's battle_army doc: use_special_ability(key, position, [bearing]); a
+		-- queued command like a unit's cast, exe+2f263ac, read 2026-10-29). No unit order, so none to hand back
+		if E.hud.army(n) then
+			local at
+			if kind == "ground" then
+				local x, _, z = E.combat.aim_point(reach(n))
+				if not x then return "no aim yet" end
+				at = v(x, bm:get_terrain_height(x, z), z)
+			elseif kind == "enemy" or kind == "friend" then
+				local target, far = nearest_to_ray(kind == "enemy", reach(n), key)
+				if not target and kind == "friend" then target = F.unit end
+				if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key end
+				at = target:position()
+			else
+				at = F.unit:position()
+			end
+			local ok, err = pcall(function() F.unit:army():use_special_ability(key, at, math.deg(E.rig.yaw) % 360) end)
+			if not ok then
+				E.once("cast_" .. key, "the game refused " .. key .. " (army, " .. kind .. "): " .. tostring(err))
+				return nil
+			end
+			E.log("cast " .. key .. " (army, " .. kind .. ")")
+			return nil
+		end
 		local up = over and E.hud.upgraded(n)
 		local ok, err, via_context
 		local base = key

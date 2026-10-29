@@ -28,6 +28,7 @@ local RV = {
 	g_halt = {0x4060000, 0xcea8},
 	g_follow = {0x4060000, 0xcc88},
 	g_reload = {0x4060000, 0xcda4},
+	g_attack = {0x4060000, 0xc82c}, -- 2026-10-29: BCQ_ENTITY_USER_OVERRIDE_ORDER_ATTACK, handler exe+2ecf644, v0
 	reload_global = {0x3d10000, 0x0794},
 	walk_speed = {0x3030000, 0xb744},
 }
@@ -102,6 +103,13 @@ end
 function TPO.reload(v)
 	mr.write(BLOB, 0, v)
 	return push(RV.g_reload, 0x0a, 4)
+end
+-- ATTACK (2026-10-29): 0x23 man; 0x23 target man. 9 bytes after the first tag
+function TPO.attack(m, target)
+	man_id(0, m)
+	mr.write(BLOB, 4, mr.uint8(0x23))
+	man_id(5, target)
+	return push(RV.g_attack, 0x23, 9)
 end
 function TPO.reload_global() return mr.read_float(A(RV.reload_global), 0) end
 -- FOLLOW through CA's own pusher: the 0x90-byte command the builder exe+2d9b4ec makes (O4 recipe)

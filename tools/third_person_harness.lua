@@ -92,7 +92,7 @@ function UNIT:select_in_ui() rec("select_in_ui", self._id) H.select(self) end
 function UNIT:owned_non_passive_special_abilities() return self._abilities end
 -- his army: its winds (army:winds_of_magic_current) from _army_winds; none set, the read throws. use_special_ability: H.cast
 function UNIT:army() local u = self return {winds_of_magic_current = function() return assert(u._army_winds, "test: no army winds") end,
-	use_special_ability = function(_, key, pos) H.cast(u, key, pos) end} end
+	use_special_ability = function(_, key, pos, bearing) H.cast(u, key, pos, bearing) end} end
 function UNIT:can_perform_special_ability(key) return self._can[key] ~= false end
 function UNIT:unary_hitpoints() return self._hp end
 function UNIT:initial_number_of_men() return #self._models end
@@ -130,12 +130,23 @@ local function listof(items) return {count = function() return #items end, item 
 -- the engine's next tick; while its phase is on a unit (H.phases[key]) the cast takes it off and nothing lands, else the
 -- phase goes on the caster's side's unit nearest the point within STAT_RANGE (10 m, build_third_person.py). H.drop_casts: the
 -- next n casts never land (a cast the engine refused)
-function H.cast(caster, key, pos)
-	rec("army_ability", key, pos.x, pos.z)
+function H.cast(caster, key, pos, bearing)
+	rec("army_ability", key, pos.x, pos.z, bearing)
 	H.casts[#H.casts + 1] = {key = key, x = pos.x, z = pos.z, side = caster._enemy and H.enemies or caster._ally and H.allies
 		or H.units, due = H.model_ms() + 100}
 end
 function H.give(u, key) u._phases[key], H.phases[key] = true, u end -- a phase already on a unit (not by the script)
+-- the cave's strike (tools/third_person_cave.py): the request taken on his next update; rolled, counted and armed on him
+-- (H.blow_out {type, damage}, a hit for 35 unless a test says) only while he is alive and plays that slot and the victim
+-- is alive
+local function land_strike()
+	local r = H.strike_req
+	H.strike_req = nil
+	if r and r.m.hp > 0 and r.victim.hp > 0 and r.m.anim_slot == r.slot then
+		H.struck_n = H.struck_n + 1
+		r.m.blow = H.blow_out or {1, 35}
+	end
+end
 local function land_casts()
 	local now, keep = H.model_ms(), {}
 	for _, c in ipairs(H.casts) do
@@ -392,6 +403,18 @@ function COMP:SetInteractive(b) self.interactive = b end
 function COMP:IsInteractive() return self.interactive ~= false end
 function COMP:SetContextObject(o) self.context = o end
 function COMP:GetContextObjectId(kind) if kind == "CcoBattleUnit" then return self.cco end end
+-- CA's army ability button's own record (H.fresh army_abilities): obj:Call(expr) answers self.ability[expr], a value or a
+-- function that returns it or throws; nil for an expression it does not hold
+function COMP:GetContextObject(kind)
+	if kind ~= "CcoBattleAbility" or not self.ability then return nil end
+	local a = self.ability
+	return {Call = function(_, expr)
+		rec("ability_call", self.id, expr)
+		local val = a[expr]
+		if type(val) == "function" then return val() end
+		return val
+	end}
+end
 function COMP:MoveTo(x, y) self.x, self.y = x, y end
 -- CA's uicomponent:Adopt(address, [index]): the child leaves its old parent; index 0-based, -1 or none the end
 function COMP:Address() return self end
@@ -594,6 +617,16 @@ local function fake_platform()
 	function P.watch() end
 	function P.disarm(m, shots) rec("disarm", m and m.id, shots) end
 	function P.arm(m) rec("arm", m and m.id) end
+	-- a blow (platform.lua P.strike): each post recorded with the victim's id, refused ones too (the script asks for none
+	-- where the platform refuses), and taken on the engine's next tick (land_strike) as the cave takes it
+	function P.strike(m, victim, slot)
+		rec("strike", m.id, victim.id, slot)
+		if not P.features.strike or P.features.net then return false end
+		H.strike_req = {m = m, victim = victim, slot = slot}
+		return true
+	end
+	function P.struck() return H.struck_n end
+	function P.blow(m) if m.blow then return m.blow[1], m.blow[2] end end
 	-- the order gate (platform.lua P.gate): its state, and every time it was set with the model clock. In a lasting melee
 	-- the fake engine of tools/third_person_lockstep.lua starts a queued action for a man only while it is in.
 	-- H.net_gate == false: a gate that goes in and changes nothing (L.new's gate = false, the test of what it is for)
@@ -688,6 +721,7 @@ function H.step(seconds)
 			local now = H.model_ms()
 			for _, t in ipairs({unpack(H.model_timers)}) do if now >= t.at then t.at = now + t.every t.fn() end end
 			land_casts()
+			land_strike()
 		end
 		if not H.paused then for _, u in ipairs(H.units) do if u._prior_walk then
 			u._z = u._z + H.speed / fps
@@ -721,6 +755,25 @@ function H.tap(name) H.down(name) H.step(1 / 60) H.up(name) H.step(1 / 60) end
 -- a fresh battle with the mod loaded. opts: units, enemies, mct, memreader, mp, replay, spectator, features, problems,
 -- players (CA's network player list, player_list; a multiplayer battle's default is this machine and one other),
 -- speed_lag, unit_flags, keep_svr
+-- one of CA's army ability buttons under hud_battle's army_ability_parent, as read live 2026-10-29 (Rod of the Storm):
+-- button_holder_<key> holding button_ability_<key>, whose CcoBattleAbility answers these. a: {key, flags = {TargetGround
+-- = true}, and any field to override}. Returns the record, for a test to change mid-battle
+function H.army_ability(a)
+	local holder = comp("button_holder_" .. a.key, H.army_parent)
+	local b = comp("button_ability_" .. a.key, holder)
+	local s = "SetupAbilityContext."
+	local r = {CanCurrentlyPerform = true, RechargeTimeRemainingSecs = 0, IsActive = false, ActiveTimeRemainingSecs = 4,
+		WindUpTimeRemainingSecs = -1, HasLimitedUses = false, RemainingUses = -1, ManaUsed = 0,
+		[s .. "RecordKey"] = a.key, [s .. "IconPath"] = "ui/battle ui/ability_icons/" .. a.key .. ".png", [s .. "TargetRange"] = -1}
+	for _, f in ipairs({"TargetGround", "TargetGroundUnderEnemies", "TargetGroundUnderAllies", "TargetEnemies", "TargetFriends",
+		"TargetSelf"}) do
+		r[s .. "UnitSpecialAbilityRecordContext." .. f] = (a.flags or {TargetGround = true})[f] == true
+	end
+	for k, val in pairs(a) do if k ~= "key" and k ~= "flags" then r[k] = val end end
+	b.ability = r
+	return r
+end
+
 function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
@@ -728,6 +781,7 @@ function H.fresh(opts)
 	H.log, H.phase, H.selection_cbs, H.selected, H.sel, H.listeners = {}, {}, {}, nil, {}, {}
 	H.model_timers, H.heard = {}, {}
 	H.casts, H.phases, H.drop_casts = {}, {}, 0
+	H.struck_n, H.blow_out, H.strike_req = 0, opts.blow_out, nil
 	-- the army abilities this army owns: every stat ability (stat_rows gives one to every CA faction), or opts.owned
 	local T, owned = assert(real_loadfile(file("script/derpy_tp/stats")))(), {}
 	for _, s in ipairs(T.order) do for _, step in ipairs(T.steps(s)) do owned[#owned + 1] = T.ability(s, step) end end
@@ -783,6 +837,11 @@ function H.fresh(opts)
 		local c = comp(b[1], hud) c.x, c.y, c.w, c.h = b[2], b[3], b[4], b[5]
 	end
 	for _, u in ipairs(H.units) do comp(tostring(u._id), cards).cco = "cco_" .. u._id end
+	H.army_parent = comp("army_ability_parent", hud)
+	for _, a in ipairs(opts.army_abilities or {}) do H.army_ability(a) end
+	if opts.army_abilities and not opts.owned then
+		for _, a in ipairs(opts.army_abilities) do H.owned = H.owned .. "," .. a.key end
+	end
 	H.P = fake_platform()
 	if real_loadfile(file("script/battle/mod/derpy_third_person")) then
 		dofile(file("script/battle/mod/derpy_third_person"))
