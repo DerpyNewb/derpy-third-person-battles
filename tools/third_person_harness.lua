@@ -96,6 +96,7 @@ function UNIT:army() local u = self return {winds_of_magic_current = function() 
 function UNIT:can_perform_special_ability(key) return self._can[key] ~= false end
 function UNIT:unary_hitpoints() return self._hp end
 function UNIT:initial_number_of_men() return #self._models end
+function UNIT:number_of_enemies_killed() return self._kills or 0 end
 function UNIT:is_invulnerable() return self._invulnerable == true end
 function UNIT:is_player_controlled() return not (self._enemy or self._ally) end
 
@@ -368,7 +369,7 @@ function COMP:CreateComponent(id, path)
 	elseif path == "ui/derpy_tp/hud" then
 		c.hud = true
 		if H.refuse_layout or not build_twui(c, path) then table.remove(self.kids) return nil end
-	elseif path:find("^ui/derpy_tp/bar_") then
+	elseif path:find("^ui/derpy_tp/bar_") or path == "ui/derpy_tp/man_bar" then
 		c.layout = path
 		if H.refuse_bar or not build_twui(c, path) then table.remove(self.kids) return nil end
 	end
@@ -525,7 +526,8 @@ end, call_context_command = function(kind, id, expr) rec("cco_cmd", kind, id, ex
 	get_localised_string = function(key) return (H.loc or {})[key] or "" end}
 function H.default_cco()
 	return {IconPath = "ui/units/icons/test_card.png", Name = "Test Regiment", ["BattleAbilityList.Size"] = 0,
-		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000, IsHidden = false, IsUnspottable = false}
+		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000, IsHidden = false, IsUnspottable = false,
+		MoralePercent = 1.2, MoraleState = 2} -- at its best, morale runs past 1 (measured 1.06-1.57 at deploy)
 end
 -- CA's lib_battle sound helpers: new_sfx(event, is_cinematic, is_vo) and play_sound(position, sfx)
 function new_sfx(event, cinematic, vo) return {event = event, cinematic = cinematic, vo = vo} end
@@ -657,7 +659,8 @@ local function fake_platform()
 	function P.heading(m) return (m.mount or m).yaw end
 	function P.alive(unit, m) return m.alive ~= false and m.hp > 0 end
 	function P.same(a, b) return a == b end
-	function P.check_men(unit) if unit._men_ok == false then return false, "test: men off" end return true end
+	-- as the real check: a pass says the build's man reads hold (P.features.men), which the bars over each man ask for
+	function P.check_men(unit) if unit._men_ok == false then return false, "test: men off" end P.features.men = true return true end
 	-- net mode (H.net, set by tools/third_person_lockstep.lua): every change to the battle goes out as a queued command
 	-- through H.send and is applied on every machine at delivery, with the functions above (P.apply); nothing is written
 	-- here directly. H.net_unrouted: net mode without the routing, the platform writing on its own machine (the oracle's

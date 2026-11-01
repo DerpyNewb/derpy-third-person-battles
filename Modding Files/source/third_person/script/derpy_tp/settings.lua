@@ -48,6 +48,7 @@ return function(mct, K, T)
 	S.one_man = get("combat_one_man", true) == true
 	S.bars = ({always = "always", guide = "guide", off = false})[get("display_bars_show", "always")]
 	S.bars_range = get("display_bars_range", 40)
+	S.man_bars = get("display_man_bars", true) == true -- a bar over each man too, within bars_range, shown as the bars are
 	S.guide_hold = get("display_guide_hold", true) == true
 	S.guide_banners = get("display_guide_banners", true) == true
 	S.command_speed = ({normal = 1, half = 0.5, quarter = 0.25, paused = 0})[get("command_speed", "quarter")] or 0.25

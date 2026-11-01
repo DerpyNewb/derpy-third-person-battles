@@ -90,6 +90,13 @@ return function(E)
 
 	-- over: the spell's overcast, its <key>_upgraded, through the controller as CA's own scripts cast one
 	-- (battle_benchmark.lua: perform_special_ability("wh3_main_spell_tempest_hailstorm_upgraded", ...))
+	-- slot n's ability brings a unit (CcoUnitAbility SpawnedUnitLandRecordContext, a CcoUnitLandRecord): a transformation
+	-- or a summon; false when the context says nothing
+	local function spawns(n)
+		local ok, k = pcall(E.hud.ability, n, "SpawnedUnitLandRecordContext.Key")
+		return ok and type(k) == "string" and k ~= ""
+	end
+
 	function A.cast(n, over)
 		local key, why = ready(n)
 		if not key then return why end
@@ -97,10 +104,15 @@ return function(E)
 		-- was steered on and the new unit never came (the author, 2026-10-17: "change ammunition units will disappear
 		-- when the ability is pressed"). Third person ends first, everything put back while the unit is there, then it
 		-- goes off as CA's button sends it, which swapped them whole with third person off (seen in game); the new
-		-- form is played on when it comes (main.lua M.follow)
-		if E.D.abilities[key] == "transform" then
+		-- form is played on when it comes (main.lua M.follow).
+		-- An ability of a mod installed after data.lua was made that brings a unit and aims at nothing may be one (a player,
+		-- 2026-10-30: modded legendary characters work "only sometimes"): it goes off the same way, and M.follow plays him
+		-- on again if he is still there once the new unit has come, a summon
+		local maybe = E.D.abilities[key] == nil and (kind_of(n, key) == "none" or kind_of(n, key) == "self") and spawns(n)
+		if E.D.abilities[key] == "transform" or maybe then
+			local caster = F.unit
 			E.main.stop("transform")
-			E.main.follow()
+			E.main.follow(maybe and caster or nil)
 			if not pcall(E.hud.ability_command, n, "PerformAbilityForOwner") then pcall(F.uc.perform_special_ability, F.uc, key, F.unit) end
 			E.log("cast " .. key .. " (transform)")
 			return nil

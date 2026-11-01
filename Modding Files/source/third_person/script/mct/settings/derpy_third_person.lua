@@ -60,7 +60,7 @@ checkbox("camera", "camera_invert_y", "Invert up and down", "Moving the mouse up
 slider("camera", "camera_distance", "Distance behind", "Metres from the unit to the camera.", 6, 3, 15)
 local side = m:add_new_option("camera_shoulder", "dropdown")
 side:set_text("Aiming shoulder")
-side:set_tooltip_text("Where the camera sits in ranged mode: over his right or left shoulder, or above his head.")
+side:set_tooltip_text("Where the camera sits in ranged mode: over the right or left shoulder of the entity you play, or above its head.")
 side:add_dropdown_values({{key = "right", text = "Right", tt = "", is_default = true},
 	{key = "left", text = "Left", tt = "", is_default = false}, {key = "top", text = "Top", tt = "", is_default = false}})
 side:set_assigned_section("camera")
@@ -78,22 +78,22 @@ m:add_new_section("combat", "Combat")
 checkbox("combat", "combat_walk_hold", "Hold to walk",
 	"On, you walk only while the walk key is held. Off, a press switches between running and walking.", false)
 slider("combat", "move_turn_rate", "Turning speed",
-	"Degrees a second one man turns toward a new direction. Higher turns sharper.", 360, 90, 1440)
+	"Degrees a second the entity you play turns toward a new direction. Higher turns sharper.", 360, 90, 1440)
 slider("combat", "combat_swing_cooldown", "Time between swings",
 	"Tenths of a second between two attacks. Forced swings deal damage, so this keeps them fair.", 40, 5, 100)
 slider("combat", "combat_charge_cooldown", "Time between charge attacks",
 	"Tenths of a second between two charge attacks.", 100, 0, 600)
 slider("combat", "combat_jump_cooldown", "Time between jump attacks",
 	"Tenths of a second between two jump attacks.", 100, 5, 300)
-slider("combat", "combat_reload", "Reload time (one man)",
-	"How long the one man you play takes to reload, as a percent of the game's time: lower is faster. 25 reloads in a "
-	.. 'quarter of the time, 300 takes three times as long. Only with "Play one man of a regiment" on, for a man who '
-	.. "shoots alone: a whole regiment, a hero, a monster with a crew such as a stegadon, and artillery reload at the "
+slider("combat", "combat_reload", "Reload time (one entity)",
+	"How long the entity you play takes to reload, as a percent of the game's time: lower is faster. 25 reloads in a "
+	.. 'quarter of the time, 300 takes three times as long. Only with "Play one entity of a regiment" on, for an entity '
+	.. "that shoots alone: a whole regiment, a hero, a monster with a crew such as a stegadon, and artillery reload at the "
 	.. "game's own speed.", 100, 25, 300)
 slider("combat", "combat_spread", "Volley scatter",
 	"Tenths of a metre each shot of a several-shot volley lands from your aim. 0 sends them all to one point.", 15, 0, 50)
-checkbox("combat", "combat_one_man", "Play one man of a regiment",
-	"On, you play the regiment's front man: he walks, swings and shoots alone while the rest hold. Off, you move the "
+checkbox("combat", "combat_one_man", "Play one entity of a regiment",
+	"On, you play the regiment's front entity: it walks, swings and shoots alone while the rest hold. Off, you move the "
 	.. "whole regiment as before.", true)
 
 m:add_new_section("display", "On the battlefield")
@@ -108,8 +108,11 @@ bars:add_dropdown_values({{key = "always", text = "Always", tt = "", is_default 
 bars:set_assigned_section("display")
 slider("display", "display_bars_range", "Health bar distance",
 	"Metres from you within which a unit shows its health bar. 1000 shows every unit on the field.", 40, 10, 1000)
+checkbox("display", "display_man_bars", "A health bar over every entity",
+	"On, each entity of a regiment within the health bar distance has a small bar of its own over its head, shown when the "
+	.. "unit bars are. A single lord, hero or monster has the unit's bar already. Off, units show only their own bar.", true)
 checkbox("display", "display_guide_hold", "Hold to show enemies and allies",
-	"Coloured markers under the men of every unit you do not command, an enemy only while you can see it. On, they show "
+	"Coloured markers under the entities of every unit you do not command, an enemy only while you can see it. On, they show "
 	.. "while the key is held (Alt unless changed under Keys). Off, a press shows or hides them.", true)
 checkbox("display", "display_guide_banners", "Unit banners with the markers",
 	"On, the game's own banners come back over every unit while the markers show: what each unit is, its side, its "

@@ -15,9 +15,9 @@ engine, and the design record.
 - **A follow camera.** It trails the unit a moment behind, sits over the right, left or top
   shoulder in ranged mode, centres on him in melee mode, and keeps out of the ground. Beside a
   building or under a gatehouse it stays with him instead of rising over the roof. V, or zooming
-  in all the way, goes first person.
-- **One man of a regiment.** In a regiment you play the front man. He walks, turns, swings and
-  shoots alone while the rest hold their ground. A unit of one, such as a lord or a monster, is
+  in all the way, goes first person. On hills the boom eases in and out instead of snapping.
+- **One entity of a regiment.** In a regiment you play the front entity. It walks, turns, swings
+  and shoots alone while the rest hold their ground. A unit of one, such as a lord or a monster, is
   steered the same way, and so is a crew on one body (the Necrofex Colossus, the Warsphinx).
   Artillery, war machines and any regiment whose men cannot shoot alone are played whole. He
   walks along castle walls and bridge decks as on the ground (single player; multiplayer is not
@@ -36,15 +36,18 @@ engine, and the design record.
     blocks a blow that lands while he stands still.
   - In single player, a blow from one man of a regiment or a unit of one deals damage: the script
     picks the enemy man where the swing's animation lands, and the game's own melee roll decides
-    the hit. A unit played whole, and multiplayer, are as before: only swings whose animation
-    carries a splash attack hit.
+    the hit. Locked on, the locked enemy's man is struck when one is in reach. A unit played
+    whole, and multiplayer, are as before: only swings whose animation carries a splash attack
+    hit.
 - **Shooting.** A click fires one shot from the man himself: the raise, the shot and the reload.
   Hold the button and he keeps firing. Thrown bombs leave the hand late in the throw, as the
   animation does. A lord or monster fires at the crosshair through the game's own ground fire,
-  waits out his reload, and plays his whole firing animation. A click on a gun fires it at the
-  enemy in range nearest the crosshair, and its crew never swing; the mode key hands over to the
-  game's own Manual fire view.
-- **A HUD of its own.** It shows the portrait, health, men, ammo and reload, plus a ten-slot
+  waits out his reload, and plays his whole firing animation. Units that can fire on the move in
+  the base game (horse archers, skirmishers) do here too: one entity plays its moving-fire
+  animation as it goes, and a regiment played whole fires at will while it moves. A click on a
+  gun fires it at the enemy in range nearest the crosshair, or says there is none ahead, and its
+  crew never swing; the mode key hands over to the game's own Manual fire view.
+- **A HUD of its own.** It shows the portrait, health, men, kills, morale, ammo and reload, plus a ten-slot
   ability hotbar with cooldowns and an action bar for run, attack, fire, charge and jump. It uses
   the game's own fonts and art, by path.
 - **Army abilities.** T turns the hotbar from the unit's abilities to its spells and then to its
@@ -54,7 +57,8 @@ engine, and the design record.
 - **Health bars and side markers.** A health bar over each unit near you, in its side's colour,
   pinned and filled by the game itself, with its morale under it. An icon beside the bar shows
   when the unit wavers or breaks, and another while a spell or ability is on it, up for good and
-  down for bad. Holding Alt shows the game's own markers under the men of every unit you do not
+  down for bad. Each entity of a regiment near you gets a small bar of its own too, placed
+  through a projection calibrated against the game's own. Holding Alt shows the game's own markers under the men of every unit you do not
   command, an enemy only while you can see it, and brings back the game's own unit banners in
   place of the bars. The unit an armed spell or ability would hit is marked, your own units too.
 - **Command mode.** Q, while playing your general or a hero, slows the battle and lets you order
@@ -82,7 +86,7 @@ behind it, never the whole mod.
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 5,700 lines of Lua, plus the generated data), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 678 tests, the two-machine simulation and its 47, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 694 tests, the two-machine simulation and its 47, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
 | `Modding Files/source/lord_control/probes/` | 378 probe scripts run against the live game, and 92 mutation sets (1237 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs, the core plan and the multiplayer plan |
@@ -106,7 +110,7 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 678 tests.
+  frame by frame and asserts on the commands the modules sent: 694 tests.
 - **Two machines, simulated.** `tools/third_person_lockstep.lua` runs two copies of the shipped
   modules side by side, each with its own globals, and hands every queued command to both two
   ticks late, as a multiplayer battle does. `third_person_lockstep_tests.lua` fails if the two

@@ -197,32 +197,27 @@ def pack():
     import datetime
     import shutil
     sys.path.insert(0, os.path.join(ROOT, "tools"))
-    from check_skill_trees import _rpc, _call
+    from rpfm_client import call, ensure_game, exists, new_pack, open_pack
 
     _selftest()
-    _rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
-                        "clientInfo": {"name": "build_lord_control", "version": "1"}})
-    _rpc("notifications/initialized", notify=True)
-    _call("set_game_selected", {"game_name": "warhammer_3", "rebuild_dependencies": False})
+    ensure_game()
 
     if os.path.exists(PACK):
         stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup = os.path.join(ROOT, "Modding Files", "Backup", "derpy_lord_control.pack.bak_" + stamp)
         os.makedirs(os.path.dirname(backup), exist_ok=True)
         shutil.copy2(PACK, backup)
-        key = _call("open_packfiles", {"paths": [PACK]})["StringContainerInfo"][0]
+        key = open_pack(PACK)
     else:
-        key = _call("new_pack", {})["String"]
-        assert key, "new_pack returned no key"
-        _call("set_pack_file_type", {"pack_key": key, "pack_file_type": '"Mod"'})
+        key = new_pack()
 
-    _call("add_packed_files", {"pack_key": key, "source_paths": [SCRIPT],
-                               "destination_paths": json.dumps([{"File": IN_PACK}])})
-    _call("save_pack_as", {"pack_key": key, "path": PACK})
+    call("add_files_from_disk", {"pack": key, "paths": [SCRIPT], "pack_paths": [IN_PACK]})
+    call("save_pack", {"pack": key, "path": PACK})
 
-    again = _call("open_packfiles", {"paths": [PACK]})["StringContainerInfo"][0]
-    files = _call("get_packed_files_info", {"pack_key": again, "values": [IN_PACK]})["VecRFileInfo"]
-    assert any(e.get("path") == IN_PACK for e in files), "%s is not in the saved pack" % IN_PACK
+    # closed first, so the re-opened key is the saved file and not the pack still in memory
+    call("close_pack", {"pack": key})
+    again = open_pack(PACK)
+    assert exists(again, IN_PACK), "%s is not in the saved pack" % IN_PACK
     print("saved and verified %s" % PACK)
 
 

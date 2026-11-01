@@ -41,6 +41,13 @@ local SPREAD = 30
 -- not read lands STRIKE_AHEAD m ahead. ponytail: STRIKE_SLACK and STRIKE_COS are not the engine's own thresholds,
 -- which were not read; measure a whiff or a hit at the edge before moving them
 local STRIKE_SLACK, STRIKE_COS, STRIKE_AHEAD = 0.5, 0.5, 2.5
+-- each swing family's first slot and its IMPACT_POS table in data.lua: ATTACK_1-10, FLY_ATTACK_1-10 off the body that
+-- flies, RIDER_ATTACK_1-10 and RIDER_FLY_ATTACK_1-10 off the rider's own bin (a flyer's and a rider's blow landed
+-- STRIKE_AHEAD m ahead until 2026-11-01: 580 and 711 land units have their own point)
+local IMPACTS = {{454, "impacts"}, {494, "impacts_fly"}, {1901, "impacts_rider"}, {1941, "impacts_rider_fly"}}
+-- fire on the move (C.solo): MOVING_FIRE_FORWARD, _LEFT, _RIGHT, _BACKWARD_LEVEL on foot, a rider's RIDER_FIRE_FORWARD,
+-- _LEFT, _RIGHT, _BACK_LEVEL (9.0 ids; data.lua fires_moving)
+local MOVING_FIRE, RIDER_MOVING_FIRE = {1570, 1572, 1573, 1574}, {2105, 2108, 2111, 2114}
 -- the pending hit's type (platform.lua P.blow), for the log
 local BLOW = {[0] = "blocked", [1] = "hit", [3] = "knocked", [4] = "knocked", [5] = "knocked"}
 -- 9.0 ids (AssetEditor's dlc24 list + 2): SHOOT_READY_TO_AIM_LEVEL, FIRE_LEVEL; the reload slot comes from the
@@ -299,6 +306,7 @@ return function(E)
 			F.native_attack = true
 			E.log("attack order on " .. target:type())
 		end)
+		return true
 	end
 
 	-- the next attack animation of the list, on the one man or every model that has it (measured 2026-10-15: the
@@ -319,11 +327,22 @@ return function(E)
 	-- whole swings every man and fights through the engine's own melee between swings; no blow is posted for it
 	local function strikes() return P.features.strike and not P.features.net and (F.model or F.single) ~= nil end
 
+	-- where slot's blow lands, {x right, z ahead}; nil when data.lua has no point for it
+	local function impact(slot)
+		for _, t in ipairs(IMPACTS) do
+			if slot >= t[1] and slot < t[1] + 10 then
+				local d = E.D[t[2]] and E.D[t[2]][F.utype]
+				return d and d[slot - t[1] + 1] or nil
+			end
+		end
+	end
+
 	-- the enemy man a blow lands on: m the model playing slot, the point where it lands turned with his heading (as a
-	-- shot's muzzle is, launch). A rider's victim is his mount, where his hit points are. nil: nobody in its reach
+	-- shot's muzzle is, launch). A rider's victim is his mount, where his hit points are. nil: nobody in its reach.
+	-- Locked on, his man first, where one is in its reach (a player, 2026-10-23: "two lords fighting focus their attacks
+	-- on one entity"; a blow went to whoever stood nearest where it landed, an enemy lord in his guard hard to kill)
 	local function victim(m, slot)
-		local imp = E.D.impacts and E.D.impacts[F.utype]
-		imp = imp and imp[slot - 453] or nil
+		local imp = impact(slot)
 		local rx, rz = imp and imp[1] or 0, imp and imp[2] or STRIKE_AHEAD
 		local reach = math.max(math.sqrt(rx * rx + rz * rz), 0.01)
 		local x, _, z = P.model_pos(m)
@@ -332,28 +351,32 @@ return function(E)
 		local ix, iz = x + rx * c + rz * sn, z - rx * sn + rz * c
 		local dx, dz = (ix - x) / reach, (iz - z) / reach
 		local best, best_d
-		local armies = bm:get_non_player_alliance():armies()
-		for a = 1, armies:count() do
-			local list = armies:item(a):units()
-			for i = 1, list:count() do
-				local u = list:item(i)
-				local q = u:position()
-				if u:number_of_men_alive() > 0 and (q:get_x() - x) ^ 2 + (q:get_z() - z) ^ 2 < (reach + SPREAD) ^ 2 then
-					local body = E.D.bodies and E.D.bodies[u:type()]
-					local r = body and body[1] or 0.5
-					for _, em in ipairs(P.models(u)) do
-						if P.model_hp(em) > 0 then
-							local vm = P.mount(em) or em
-							local ex, _, ez = P.model_pos(vm)
-							local ox, oz = ex - x, ez - z
-							local d = math.sqrt(ox * ox + oz * oz)
-							if d - r <= reach + STRIKE_SLACK and (d <= r or ox * dx + oz * dz >= STRIKE_COS * d) then
-								local di = (ex - ix) ^ 2 + (ez - iz) ^ 2
-								if not best_d or di < best_d then best, best_d = vm, di end
-							end
+		local function men_of(u)
+			local q = u:position()
+			if u:number_of_men_alive() > 0 and (q:get_x() - x) ^ 2 + (q:get_z() - z) ^ 2 < (reach + SPREAD) ^ 2 then
+				local body = E.D.bodies and E.D.bodies[u:type()]
+				local r = body and body[1] or 0.5
+				for _, em in ipairs(P.models(u)) do
+					if P.model_hp(em) > 0 then
+						local vm = P.mount(em) or em
+						local ex, _, ez = P.model_pos(vm)
+						local ox, oz = ex - x, ez - z
+						local d = math.sqrt(ox * ox + oz * oz)
+						if d - r <= reach + STRIKE_SLACK and (d <= r or ox * dx + oz * dz >= STRIKE_COS * d) then
+							local di = (ex - ix) ^ 2 + (ez - iz) ^ 2
+							if not best_d or di < best_d then best, best_d = vm, di end
 						end
 					end
 				end
+			end
+		end
+		local held = held_target()
+		if held then men_of(held) end
+		if not best then
+			local armies = bm:get_non_player_alliance():armies()
+			for a = 1, armies:count() do
+				local list = armies:item(a):units()
+				for i = 1, list:count() do men_of(list:item(i)) end
 			end
 		end
 		return best, best and math.sqrt(best_d)
@@ -523,6 +546,9 @@ return function(E)
 	-- a regiment played whole: not a crew on one body or a war machine (the Tilean tank's ground fire was tuned on
 	-- 2026-10-17 and stays). One man who shoots alone goes to C.solo and one who cannot is never ranged; a gun is never here
 	local function unit_order() return not F.crew and not F.unit:is_war_machine() end
+	-- a unit with CA's fire whilst moving (data.lua fire_moves, the mounted_fire_move attribute)
+	local function fire_moves() return E.D.fire_moves ~= nil and E.D.fire_moves[F.utype] == true end
+	C.fire_moves = fire_moves
 	local function whole_volley() return unit_order() and F.unit:number_of_men_alive() > 1 end
 
 	local function fire(now)
@@ -593,7 +619,19 @@ return function(E)
 	-- a move key ends it (main.lua). The author, 2026-10-18: "Kugath cant use his ranged attack ... why cant the full
 	-- animation play" - measured: the throw started 7 s after the order (his reload; base 10 s) and the nurgling left
 	-- 3.8 s into its 5.8 s clip, and a halt 4 s from the click stopped every one before it began
+	-- fire on the move for a unit played whole or a unit of one: one with CA's fire whilst moving walks on with the button
+	-- held, fire at will on, and the game picks what it shoots in range, as its own does on the move. Standing, a click is
+	-- the order below. ponytail: the game's pick, not the crosshair's - an attack order would end the walk
+	local function move_fire(on)
+		if on == (F.move_fire == true) then return end
+		F.move_fire = on or nil
+		if on or F.held_fire then F.uc:fire_at_will(on) F.uc:release_control() end
+		E.log(on and "fire on the move" or "fire on the move over")
+	end
+
 	function C.ground(now, clicked, held)
+		move_fire(F.moving == true and held == true and not F.firing and fire_moves() and E.can_shoot())
+		if F.move_fire then return end
 		if clicked and not F.firing and E.can_shoot() then
 			-- the commit counts from the click: a turn that never ends does not keep him firing (round 25)
 			F.firing, F.fire_ammo, F.fire_order_t, F.fire_clip = true, F.unit:ammo_left(), now, nil
@@ -650,10 +688,36 @@ return function(E)
 
 	local function r1(n) return math.floor(n * 10 + 0.5) / 10 end
 
+	-- the clip man m shoots with on the move at (ax, az): by where the aim is from his heading, ahead inside 45 deg, to his
+	-- left, right or behind, the forward clip when he has none that way. A rider shoots from the saddle, a man on foot his
+	-- own clips (Ellyrian Reavers have both). nil: he does not fire on the move, no fire whilst moving or no forward clip.
+	-- ponytail: level clips only; the 29 units with MOVING_FIRE_FORWARD_LOW/HIGH shoot level, the shot still goes to the aim
+	local function moving_slot(m, ax, az)
+		if not fire_moves() then return nil end
+		local set = P.mount(m) and RIDER_MOVING_FIRE or MOVING_FIRE
+		if not P.has_slot(m, set[1]) then return nil end
+		local x, _, z = P.model_pos(m)
+		local a = (math.atan2(ax - x, az - z) - (P.heading(m) or E.rig.yaw) + math.pi) % (2 * math.pi) - math.pi
+		local i = math.abs(a) <= math.pi / 4 and 1 or math.abs(a) >= math.pi * 3 / 4 and 4 or a > 0 and 3 or 2
+		return P.has_slot(m, set[i]) and set[i] or set[1]
+	end
+
 	local function man_shot(now)
 		local ax, ay, az = C.aim_point(F.unit:missile_range())
 		if not ax then return end
 		local shot = {model = F.model, unit = F.unit, aim = {ax, ay, az}}
+		-- on the move (a player, 2026-10-28: "must stop to shoot"; the author, 2026-11-01: "fire on the move for supported
+		-- units with moving fire animations"): its clip at once, no raise, no hold; he walks on under it (main.lua) and
+		-- reloads on the clock (C.solo)
+		local moving = F.moving and moving_slot(F.model, ax, az)
+		if moving then
+			shot.pair, shot.moving, shot.fire_slot = "moving", moving, moving
+			E.log("shot on the move: " .. moving)
+			if not play_phase(shot, "fire", moving, now) then return end
+			F.shot = shot
+			F.shot_n = F.shot_n + 1
+			return
+		end
 		-- nothing drives him while a shot runs, so a walk under way would carry him along under the aim clip
 		local x, y, z = P.model_pos(F.model)
 		local pair, angle, want = pair_of(x, y, z, ax, ay, az)
@@ -685,8 +749,10 @@ return function(E)
 		local from
 		if at[2] then
 			-- FIRE_POS's position: metres from his animroot, x right, y up, z ahead, turned with him (he faces the
-			-- camera through the shot; the author, 2026-10-15: "the projectile spawn is mismatched to the model")
-			local c, sn = math.cos(E.rig.yaw), math.sin(E.rig.yaw)
+			-- camera through the shot; the author, 2026-10-15: "the projectile spawn is mismatched to the model"). On
+			-- the move he faces where he walks
+			local yaw = shot.moving and P.heading(shot.model) or E.rig.yaw
+			local c, sn = math.cos(yaw), math.sin(yaw)
 			from = v(x + at[2] * c + at[4] * sn, y + at[3], z - at[2] * sn + at[4] * c)
 			-- a muzzle inside him (a raised gun's, over his head) moves out along the line to the aim until clear of
 			-- him: k solves |p + k d| = clear across the ground, p the muzzle from him, d the line. Clear is SHOT_CLEAR, or
@@ -763,7 +829,10 @@ return function(E)
 				if shot.phase == "fire" then
 					shot.from, shot.spawned = math.max(now, shot.raise_end or now), 0
 					local fires = E.D[shot.pair == "level" and "fires" or "fires_" .. shot.pair]
-					shot.times = fires and fires[F.utype] or {{(F.thrown and THROW_MS or SHOT_DELAY_MS) / 1000}}
+					local times = fires and fires[F.utype]
+					-- on the move: that clip's own spawns, by slot, else the standing clip's
+					if shot.moving then times = times and times[shot.moving] or E.D.fires[F.utype] end
+					shot.times = times or {{(F.thrown and THROW_MS or SHOT_DELAY_MS) / 1000}}
 				end
 			end
 			-- before the phase moves on: a spawn due in the clip's last model tick reads as due with the clip already over
@@ -780,9 +849,9 @@ return function(E)
 			-- "twitching when aiming high"), else the one learned on the first whole raise. Timed from the raise's send: its
 			-- report comes 0.2-0.31 s after it starts, and timed from there the next clip went after the raise had ended (measured
 			-- 2026-10-16, Hochland Long Rifles: raise reported 92.0 s, no clip at 92.8, hold 93.0 - "reverts to idle for 1 frame")
-			local r = E.D.raises and E.D.raises[F.utype]
+			local r = shot.phase == "aim" and E.D.raises and E.D.raises[F.utype]
 			local len = r and r[shot.aim_slot - 1552]
-			if not len or len <= 0 then len = aim_len[F.utype .. shot.aim_slot] end
+			if shot.phase == "aim" and (not len or len <= 0) then len = aim_len[F.utype .. shot.aim_slot] end
 			if shot.phase == "aim" and shot.started and clip == shot.slot and len and now >= shot.sent + len - AIM_LEAD then
 				shot.raise_end = shot.at + len
 				if shot.hold_slot then play_phase(shot, "hold", shot.hold_slot, now) else play_phase(shot, "fire", shot.fire_slot, now) end
@@ -798,8 +867,9 @@ return function(E)
 				return
 			end
 			if shot.phase == "hold" then play_phase(shot, "fire", shot.fire_slot, now) return end
-			-- no reload clip (a weapon team, a crossbow): the projectile's reload time on the clock from the fire clip's end
-			if shot.phase == "fire" and not F.reload_slot then
+			-- no reload clip (a weapon team, a crossbow), or a shot on the move (the reload clip takes his whole body, legs
+			-- too): the projectile's reload time on the clock from the fire clip's end
+			if shot.phase == "fire" and (not F.reload_slot or shot.moving) then
 				F.ready_at, F.shot = now + E.D.shots[F.utype][2] * E.S.reload_factor, nil
 				return
 			end
@@ -875,6 +945,7 @@ return function(E)
 	-- the shot or fire order under way stops, the reload still counting: the mode key, and arming an ability
 	function C.stand_down(now)
 		F.native_attack = nil
+		move_fire(false)
 		if F.firing then C.stop_fire() end
 		C.drop(now)
 		F.want_shot = false
@@ -923,7 +994,8 @@ return function(E)
 		if F.ranged then
 			-- a gun's click is its attack on the enemy nearest the crosshair, out to its range: ground fire drove a flame
 			-- cannon toward the point and fired nothing (measured 2026-10-18, probes/zz_tp_arty_order.lua)
-			if F.arty then if clicked then order(true, F.unit:missile_range()) end
+			-- No enemy there: said on screen (a player, 2026-10-30: "artillery never fires")
+			if F.arty then if clicked and not order(true, F.unit:missile_range()) then E.say("derpy_tp_no_target") end
 			elseif F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
 		elseif clicked and not F.arty then -- a gun out of shot is nothing: its crew never swing (the author, 2026-10-18)
 			C.melee(now, true)

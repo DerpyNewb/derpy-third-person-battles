@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-11-01
+
+Workshop manifest 6262936272307300740 (build `441a78a2`). It carries the 2026-10-31 build too, which was never uploaded
+on its own.
+
+- Fire on the move, for the 348 units with the game's fire whilst moving (horse archers, skirmishers and the like). One
+  entity plays its moving-fire animation by where the aim is from where it walks, and keeps walking. A regiment
+  played whole, or a unit of one, fires at will while it moves, at targets the game picks.
+- Morale on the panel: the percent, the game's word for shaken and wavering, and a red fill from shaken.
+- Kill count on the panel (the unit's).
+- A small health bar over each entity of nearby regiments (MCT option, on by default). Positions come from memreader
+  and a pinhole projection, calibrated once a second against the game's own `WorldSpaceToScreenSpace`.
+- Blows in the air and from the saddle land at their own animation's impact point (the `FLY_ATTACK`, `RIDER_ATTACK`
+  and `RIDER_FLY_ATTACK` tables), not 2.5 m ahead.
+- Locked on, a blow from one entity or a unit of one goes to the locked enemy's man when one is in reach.
+- Artillery: a click with no enemy in range ahead says so on screen.
+- An ability the data does not know (a mod's) that brings a new unit and aims at nothing is treated as a
+  transformation: third person moves to the new unit, or stays on the caster if it turns out a summon.
+- The camera boom eases in and out on hills instead of snapping in whole tenths.
+- Multiplayer: the unit card is re-clicked at most every 0.5 s, and never while you look around (it made the rapid
+  clicking noise). A partner with no army of their own is told why F2 does nothing.
+- MCT texts say "entity" for one figure of a unit, not "man". The option keys are unchanged.
+- Seen working in game before the upload: fire on the move (one entity and whole), the locked enemy first, the artillery
+  message, morale and kills, the bars over each entity (0.86 px from the game's projection on average), the camera on a
+  slope, and both multiplayer lines (in a solo multiplayer battle). Not seen: blows in the air or from the saddle (the
+  Empire Knights tried carry the swing on the horse, which already had its point), modded transformations, and the red
+  fill at shaken.
+
 ## 2026-10-29
 
 Workshop manifest 2741433552219872419.

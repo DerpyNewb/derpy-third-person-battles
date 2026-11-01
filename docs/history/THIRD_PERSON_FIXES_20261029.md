@@ -184,6 +184,8 @@ it lands: hit 32", "...: not armed" (the cave refused it), or "blow 455: nobody 
 - Multiplayer: the roll is not yet carried to every machine, and both `strikes()` and `P.strike` refuse there.
 - Jump and charge attacks.
 - A flyer's FLY_ATTACK and a rider's RIDER_ATTACK slots: no impact point is read for them, so they land 2.5 m ahead.
+  **Fixed 2026-11-01:** read off their own clips (`data.lua impacts_fly`, `impacts_rider`, `impacts_rider_fly`;
+  `PATCH_NOTES_20261101_THIRD_PERSON.md`).
 
 Ponytail marks: the 0.5 m slack and the 60 degrees are guesses, not `exe+325fca4`'s thresholds, and only each slot's
 first clip's impact point is used.
@@ -209,7 +211,8 @@ call in `main.lua`, and both resets. The cave's emulator selftest has 40 of 40, 
 
 - Melee damage for a unit played whole and in multiplayer (the strike above covers one man and a unit of one, single
   player). Multiplayer needs the roll carried like the guard.
-- Fire on the move: deferred ("Later").
+- Fire on the move: deferred ("Later"). **Built 2026-11-01** for the units with CA's fire whilst moving
+  (`PATCH_NOTES_20261101_THIRD_PERSON.md`), harness only.
 - F2 crash on a unit another mod swaps: needs the mod's name.
 - Cavalry weapon animations and camera spin/jumps: not reproduced.
 - Multiplayer porthole fix: harness only, no two-machine live run.

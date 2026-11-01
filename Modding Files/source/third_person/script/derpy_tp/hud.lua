@@ -8,6 +8,8 @@ local RELOAD_SCALE = 1 -- ReloadPercentMax is 0..1 (plan 2 Task 1 measures)
 -- CA's bottom band under hud_battle, its parts' tops measured 2026-10-23 (porthole highest): command mode's Vanilla style
 -- stands the panel on them
 local CA_BAND = {"porthole_parent", "battle_orders", "winds_of_magic"}
+-- CA's words for a morale state (ui_unit_statuses, CA's banner status tooltips): MoraleState 4 and 5
+local MORALE_WORDS = {[4] = "ui_unit_statuses_tooltip_shaken", [5] = "ui_unit_statuses_tooltip_wavering"}
 local BACK = {"back_plate", "back", "back_keyplate", "back_key"}
 -- CA's context constructor: in the script environment this file runs in, not in _G (measured 2026-10-19: _G.cco nil,
 -- the bare name a callable table, as CA's lib_battle_script_unit.lua uses it); taken before cco() below hides it
@@ -59,7 +61,8 @@ return function(E)
 		hp = {"hp", "hp_icon"}, winds = {"winds", "winds_icon", "winds_back", "winds_fill", "winds_frame", "winds_cost"},
 		stamina = {"stamina", "stamina_icon", "stamina_back", "stamina_fill", "stamina_frame"},
 		men = {"men", "men_icon"}, ammo = {"ammo", "ammo_back", "ammo_fill", "ammo_frame"}, mode = {"mode"}, slots = {}, reload = {},
-		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}, bars = {"bars"},
+		target = {"target_plate", "target"}, mark = {"target_arrow"}, actions = {}, bars = {"bars"}, men_bars = {"men_bars"},
+		morale = {"morale_icon", "morale_back", "morale_fill", "morale_alarm", "morale_frame", "morale_text"}, kills = {"kills_icon", "kills"},
 		hidden = {"hidden_plate", "hidden_icon", "hidden"}}
 	for _, a in ipairs(L.actions) do
 		for _, s in ipairs(ACT_PARTS) do GROUPS.actions[#GROUPS.actions + 1] = "act_" .. a .. "_" .. s end
@@ -429,25 +432,29 @@ return function(E)
 		vis("target_plate", s ~= nil) vis("target", s ~= nil)
 		if s then text("target", s) end
 	end
-	-- the arrow over the unit an armed ability would hit, tip on his position lifted L.arrow_lift m; nil hides it.
-	-- CA's WorldSpaceToScreenSpace answers screen px; 0 < z < 1 is in front of the camera, anything else projects
-	-- to nonsense (measured 2026-10-14 against a screenshot)
+	-- a world point in screen px, by CA's WorldSpaceToScreenSpace: x, y, z, z first and nil with no answer. 0 < z < 1 is
+	-- in front of the camera, anything else projects to nonsense (measured 2026-10-14 against a screenshot)
 	local function cm2(n) return math.floor(n * 100 + 0.5) / 100 end
+	local function w2s(x, y, z)
+		local at = "WorldSpaceToScreenSpace(ToVector4(" .. cm2(x) .. "," .. cm2(y) .. "," .. cm2(z) .. ",1), false, false)."
+		local sz = common.get_context_value(at .. "z")
+		if sz == nil then return nil end
+		return common.get_context_value(at .. "x"), common.get_context_value(at .. "y"), sz
+	end
+	-- the arrow over the unit an armed ability would hit, tip on his position lifted L.arrow_lift m; nil hides it
 	function H.mark(u)
 		guard("mark", function()
 			local c = part("target_arrow")
 			if not u or not c then vis("target_arrow", false) return end
 			local p = u:position()
-			local at = "WorldSpaceToScreenSpace(ToVector4(" .. cm2(p:get_x()) .. "," .. cm2(p:get_y() + L.arrow_lift) .. ","
-				.. cm2(p:get_z()) .. ",1), false, false)."
-			local z = common.get_context_value(at .. "z")
+			local sx, sy, z = w2s(p:get_x(), p:get_y() + L.arrow_lift, p:get_z())
 			if z == nil then error("the engine gave no projection") end
 			local front = z > 0 and z < 1
 			vis("target_arrow", front)
 			if not front then return end
 			local s = H.s or 1
-			local x = math.floor(common.get_context_value(at .. "x") - L.size.target_arrow[1] * s / 2)
-			local y = math.floor(common.get_context_value(at .. "y") - L.size.target_arrow[2] * s)
+			local x = math.floor(sx - L.size.target_arrow[1] * s / 2)
+			local y = math.floor(sy - L.size.target_arrow[2] * s)
 			put(c, "target_arrow.at", x * 10000 + y, function() c:MoveTo(x, y) end)
 		end)
 	end
@@ -578,6 +585,123 @@ return function(E)
 		for id, pin in pairs(pins) do if not seen[id] then put(pin, "bar." .. id, false, function(c, b) c:SetVisible(b) end) end end
 	end
 
+	-- a bar over every man of each regiment near him (a player, 2026-10-29: "kill count and Healthbar to all entity"),
+	-- beside its unit's own; a lord, hero or monster alone has that one already. No context holds a man's health
+	-- (CcoBattleEntity: IsAlive, Position, reload only), so his hit points are read off him as the man played is
+	-- (P.model_hp), and he is put on screen through this frame's view - rig's eye and look point, after the camera moved
+	-- (main.lua) - by a pinhole whose centre and scale CA's own projection gives (w2s of three points CAL_D m out, CAL_A m
+	-- apart, while the view holds still, as CA projects through the view it is drawing). Each bar wears its unit's context:
+	-- the engine colours it by side and hides it while the player cannot see the unit (ui/derpy_tp/man_bar). MEN_MAX at
+	-- most, the nearest units first; MEN_MADE made a frame at most, each kept for its man's place in his unit's list.
+	-- ponytail: a man's place in that list moves as men die, so a bar can change men; it reads the new man's health
+	local MEN_MAX, MEN_MADE, CAL_EVERY, NEAR, CAL_D, CAL_A = 160, 24, 1, 0.5, 20, 4
+	local men_pool, men_on, cal, cal_at, view_was = {}, {}, nil, -1e9, nil
+	local function view()
+		local R = E.rig
+		if not (R.ex and R.lx) then return nil end
+		local fx, fy, fz = R.lx - R.ex, R.ly - R.ey, R.lz - R.ez
+		local n, flat = math.sqrt(fx * fx + fy * fy + fz * fz), math.sqrt(fx * fx + fz * fz)
+		if n < 1e-6 or flat < 1e-6 then return nil end
+		fx, fy, fz = fx / n, fy / n, fz / n
+		local rx, rz = fz * n / flat, -fx * n / flat -- level, to his right (rig.lua's shoulder)
+		return {x = R.ex, y = R.ey, z = R.ez, fx = fx, fy = fy, fz = fz, rx = rx, rz = rz,
+			ux = fy * rz, uy = fz * rx - fx * rz, uz = -fy * rx}
+	end
+	local function still(V, W)
+		return W ~= nil and (V.x - W.x) ^ 2 + (V.y - W.y) ^ 2 + (V.z - W.z) ^ 2 < 1e-4
+			and V.fx * W.fx + V.fy * W.fy + V.fz * W.fz > 0.999999
+	end
+	local function calibrate(V)
+		local px, py, pz = V.x + V.fx * CAL_D, V.y + V.fy * CAL_D, V.z + V.fz * CAL_D
+		local cx, cy, cz = w2s(px, py, pz)
+		local x1 = w2s(px + V.rx * CAL_A, py, pz + V.rz * CAL_A)
+		local _, y2 = w2s(px + V.ux * CAL_A, py + V.uy * CAL_A, pz + V.uz * CAL_A)
+		if not (cx and cy and x1 and y2) or cz <= 0 or cz >= 1 then return end
+		local kx, ky = (x1 - cx) * CAL_D / CAL_A, (y2 - cy) * CAL_D / CAL_A
+		-- square pixels both ways, or one of the three went through another view
+		if math.abs(kx) < 100 or ky == 0 or math.abs(math.abs(kx / ky) - 1) > 0.05 then return end
+		cal = {cx = cx, cy = cy, kx = kx, ky = ky}
+	end
+	local function project(V, x, y, z)
+		local dx, dy, dz = x - V.x, y - V.y, z - V.z
+		local d = dx * V.fx + dy * V.fy + dz * V.fz
+		if d < NEAR then return nil end
+		return cal.cx + cal.kx * (dx * V.rx + dz * V.rz) / d, cal.cy + cal.ky * (dx * V.ux + dy * V.uy + dz * V.uz) / d
+	end
+	local function new_bar(holder, uid, k)
+		local made = holder:CreateComponent("derpy_tp_man_" .. uid .. "_" .. k, L.man.file)
+		if not made then error("the man bar's layout did not load: " .. L.man.file) end
+		local c = UIComponent(made)
+		c:SetContextObject(context("CcoBattleUnit", uid))
+		local fill = find_uicomponent(c, "fill")
+		if fill then fill:SetCanResizeWidth(true) fill:SetCanResizeHeight(true) end
+		c:SetVisible(false)
+		return {c = c, fill = fill}
+	end
+	local function place(b, sx, sy, frac)
+		local w, h = L.man.size[1], L.man.size[2]
+		local x, y = math.floor(sx - w / 2 + 0.5), math.floor(sy - h + 0.5)
+		if b.x ~= x or b.y ~= y then b.x, b.y = x, y b.c:MoveTo(x, y) end
+		local fw = math.max(1, math.floor(w * math.max(0, math.min(1, frac)) + 0.5))
+		if b.fill and b.w ~= fw then b.w = fw b.fill:Resize(fw, h) end
+		if not men_on[b] then men_on[b] = true b.c:SetVisible(true) end
+	end
+	function H.men()
+		guard("men_bars", function()
+			local holder, V, now = part("men_bars"), view(), os.clock()
+			if V and still(V, view_was) and now - cal_at >= CAL_EVERY then cal_at = now calibrate(V) end
+			view_was = V
+			local S, shown = E.S, {}
+			if holder and V and cal and S.man_bars and (S.bars == "always" or S.bars == "guide" and guide_was) and not F.banners
+				and E.P.features.men then
+				local sw, sh = core:get_screen_resolution()
+				local w, h = L.man.size[1], L.man.size[2]
+				local mx, mz
+				if F.model then local x, _, z = E.P.model_pos(F.model) mx, mz = x, z else local q = F.unit:position() mx, mz = q:get_x(), q:get_z() end
+				local reach = S.bars_range >= 1000 and math.huge or S.bars_range * S.bars_range
+				-- a unit's men stand around its centre: one whose centre is past the distance by a deep block may still have
+				-- men inside it
+				local pre = reach == math.huge and reach or (S.bars_range + 30) ^ 2
+				local mine, units = F.unit:unique_ui_id(), {}
+				each_unit(function(u)
+					if u:unique_ui_id() == mine or u:initial_number_of_men() < 2 or u:number_of_men_alive() < 1 then return end
+					local p = u:position()
+					local d = (p:get_x() - mx) ^ 2 + (p:get_z() - mz) ^ 2
+					if d <= pre then units[#units + 1] = {u = u, d = d} end
+				end)
+				table.sort(units, function(a, b) return a.d < b.d end)
+				local made, n = 0, 0
+				for _, e in ipairs(units) do
+					local u = e.u
+					local ms = E.P.models(u)
+					-- the count the man check asks for (platform.lua P.check_men): a list that reads otherwise is not read
+					if #ms == u:number_of_men_alive() then
+						local uid = tostring(u:unique_ui_id())
+						local pool = men_pool[uid] or {}
+						men_pool[uid] = pool
+						local body = E.D.bodies and E.D.bodies[u:type()]
+						local up = (body and body[2] or 1.8) + L.man.lift
+						for k, m in ipairs(ms) do
+							if n >= MEN_MAX then break end
+							local x, y, z = E.P.model_pos(m)
+							if (x - mx) ^ 2 + (z - mz) ^ 2 <= reach then
+								local cur, max = E.P.model_hp(m)
+								local sx, sy = project(V, x, y + up, z)
+								if sx and max > 0 and cur > 0 and sx > -w and sx < sw + w and sy > 0 and sy < sh + h then
+									local b = pool[k]
+									if not b and made < MEN_MADE then made = made + 1 b = new_bar(holder, uid, k) pool[k] = b end
+									if b then n = n + 1 shown[b] = true place(b, sx, sy, cur / max) end
+								end
+							end
+						end
+					end
+					if n >= MEN_MAX then break end
+				end
+			end
+			for b in pairs(men_on) do if not shown[b] then men_on[b] = nil b.c:SetVisible(false) end end
+		end)
+	end
+
 	function H.show(on)
 		-- a session starts whole: three part errors turned it off until the battle ended (a player, 2026-10-19: "the HUD
 		-- stayed off for the rest of the match", after a transformation)
@@ -605,6 +729,7 @@ return function(E)
 		last, dead, cco_at, bars_at = {}, {}, 0, 0
 		ui:SetVisible(true)
 		vis("bars", E.S.bars ~= false)
+		vis("men_bars", E.S.bars ~= false and E.S.man_bars == true)
 		H.target(nil) H.mark(nil)
 		H.back(E.command ~= nil and E.command.vanilla()) -- before the parts it sets aside are shown
 		H.unit() -- then: the bar centres on how many abilities he has
@@ -802,6 +927,26 @@ return function(E)
 				if not cur then cur, max = cco("HealthValue"), cco("HealthMax") end
 				text("hp", math.floor(cur) .. " / " .. math.floor(max))
 				vis("hp", true) vis("hp_icon", true)
+			end)
+			-- his morale (a player, 2026-10-29, in Russian: undead and daemons crumble "and it is not noticed at once").
+			-- MoralePercent on the bar, which runs past 1 at its best (measured 1.06-1.57 at deploy), so it reads full
+			-- until he is hurt; the figure that percent, CA's own word for MoraleState 4 and 5, and from 6 "Crumbling": a
+			-- unit that routs is let go at once (tick, "unit lost"), so one still played there is one that cannot rout.
+			-- From 4 the fill is CA's shaken red. 4 shaken and 5 wavering is the order of CA's morale colours in ui_colours
+			-- (impetuous, eager, confident, steady, shaken, wavering, broken, shattered)
+			guard("morale", function()
+				local p, st = cco("MoralePercent"), cco("MoraleState")
+				width("morale_fill", p)
+				width("morale_alarm", p)
+				local word = st >= 6 and "Crumbling" or MORALE_WORDS[st] and common.get_localised_string(MORALE_WORDS[st])
+				text("morale_text", word and word ~= "" and word or math.floor(math.min(p, 1) * 100 + 0.5) .. "%")
+				for _, id in ipairs(GROUPS.morale) do vis(id, id ~= "morale_alarm" or st >= 4) end
+			end)
+			-- his unit's kills in this battle (a player, 2026-10-29: "add kill count"): CA's count for the unit, so for one
+			-- man of a regiment it is the regiment's, as the men figure beside it is
+			guard("kills", function()
+				text("kills", tostring(u:number_of_enemies_killed()))
+				vis("kills", true) vis("kills_icon", true)
 			end)
 			if caster then
 				guard("winds", function()

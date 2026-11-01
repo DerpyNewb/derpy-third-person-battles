@@ -11,7 +11,6 @@ modules under Lua 5.1.5 against a stubbed battle (tools/third_person_harness.lua
 re-implement them. Spec: docs/superpowers/specs/2026-10-13-third-person-pack-design.md.
 Plan: docs/superpowers/plans/2026-10-13-third-person-pack-core.md.
 """
-import json
 import os
 import re
 import struct
@@ -44,6 +43,12 @@ LOC = {
     "derpy_tp_mp_needs_everyone": "Third-Person Battles: no answer from %s. In multiplayer everyone in the battle, watchers too, needs this mod and memreader Plus, on the same update. Restarting Steam gets the latest.",
     "derpy_tp_mp_no_route": "Third-Person Battles: your game's own multiplayer check never came back, so it can't start here. Please report this on the mod's page.",
     "derpy_tp_mp_no_players": "Third-Person Battles can't see who is in this battle, so it stays off in multiplayer. The script log has the details.",
+    # main.lua M.start: a spectator, or a co-op partner with no army of their own (units given to them are the other
+    # player's army); it was in the log only, and F2 seemed to do nothing (a player, 2026-10-31)
+    "derpy_tp_mp_watching": "Third-Person Battles: you have no army of your own in this battle, so there is nobody for you to play. Units another player gives you can't be played in third person.",
+    # combat.lua C.attack: a gun's click with no enemy in its range ahead did nothing and said nothing (a player, 2026-10-30:
+    # "artillery never fires")
+    "derpy_tp_no_target": "No enemy in range ahead to fire at.",
     # command mode is the lord's (spec 3.12); no key named, every key can be moved in MCT
     "derpy_tp_command_general_and_heroes": "Only your general and heroes can command the army. Turn on \"Any unit can command\" in this mod's settings to command from any unit.",
     # command mode, Vanilla style: the number keys' page, said on entering and on the page key (%s: "11-20")
@@ -114,8 +119,11 @@ def selftest(only=None):
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import gen_third_person_hud as HUDGEN
     xml, lua = HUDGEN.build()
-    bad += ["HUD: %s" % b for b in HUDGEN.check(xml, lua)]
-    for path, want in ((HUDGEN.UI_FILE, xml), (HUDGEN.LUA_FILE, lua)):
+    bar_xmls, man_xml = HUDGEN.bars(), HUDGEN.build_man_bar()
+    bad += ["HUD: %s" % b for b in HUDGEN.check_all(xml, lua, bar_xmls, man_xml)]
+    generated = [(HUDGEN.UI_FILE, xml), (HUDGEN.LUA_FILE, lua), (HUDGEN.MAN_FILE, man_xml)]
+    generated += [(HUDGEN.BAR_FILE % n, b) for n, b in enumerate(bar_xmls, 1)]
+    for path, want in generated:
         if not os.path.isfile(path) or open(path, encoding="utf-8").read() != want:
             bad.append("HUD: %s is stale - run py tools/gen_third_person_hud.py" % os.path.relpath(path, ROOT))
     tools = os.path.join(ROOT, "tools")
@@ -267,6 +275,25 @@ def check_data():
     got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
     if "nil" in got or len(got) != 4 or [round(abs(float(v)), 1) for v in got] != [0.0, 3.6, 5.2, 1.1]:
         bad.append("data.lua impacts: Dragon Guard 457 %s, river troll 455 %s - run --gen" % (got[:2], got[2:]))
+    # the swings in the air and from the saddle (read 2026-11-01): Be'lakor's FLY_ATTACK_1 4 m ahead; the Pegasus Knights'
+    # rider has RIDER_FLY_ATTACK ones
+    probe = ('local d = dofile([[%s]]) local f = ((d.impacts_fly or {})["wh3_main_dae_cha_be_lakor_0"] or {})[1] or {} '
+             'print(f[2], (d.impacts_rider_fly or {})["wh_main_brt_cav_pegasus_knights"] ~= nil)' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["4", "true"]:
+        bad.append("data.lua impacts_fly, impacts_rider_fly: Be'lakor, Pegasus Knights %s - run --gen" % got)
+    # fire on the move (combat.lua): Kislev's Horse Archers carry CA's fire whilst moving, the Jade crossbowmen do not;
+    # Skink Skirmishers shoot MOVING_FIRE_FORWARD_LEVEL 0.5 s in, 2 m ahead, and MOVING_FIRE_LEFT_LEVEL 1.9 m to the left;
+    # the horse archers' RIDER_FIRE_LEFT_LEVEL 2.2 s in
+    probe = ('local d = dofile([[%s]]) local m, f = d.fire_moves or {}, d.fires_moving or {} '
+             'local s, h = f["wh2_main_lzd_inf_skink_skirmishers_0"] or {}, f["wh3_main_ksl_cav_horse_archers_0"] or {} '
+             'local a, b, c = (s[1570] or {})[1] or {}, (s[1572] or {})[1] or {}, (h[2108] or {})[1] or {} '
+             'print(m["wh3_main_ksl_cav_horse_archers_0"], m["wh3_main_cth_inf_jade_warrior_crossbowmen_1"], a[1], a[4], b[2], c[1])'
+             % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["true", "nil", "0.5", "1.991", "-1.891", "2.234"]:
+        bad.append("data.lua fire_moves, fires_moving: horse archers, crossbowmen, skirmishers' two clips, horse archers' "
+                   "left %s - run --gen" % got)
     return bad
 
 def exe_stamp():
@@ -384,9 +411,11 @@ def gen():
             pass
     TF = third_person_fires
     raises, runs, charges, blanks, dulls, impacts = {}, {}, {}, {}, {}, {}
+    impacts_fly, impacts_rider, impacts_rider_fly, movers, fires_moving = {}, {}, {}, set(), {}
     fires, fires_low, fires_high = TF.build((TF.FIRE, TF.GRENADIER, TF.RIDER_FIRE), (TF.FIRE_LOW,), (TF.FIRE_HIGH,), raises=raises,
                                             runs=runs, charges=charges, blanks=blanks, dulls=dulls,
-                                            impacts=impacts)
+                                            impacts=impacts, impacts_fly=impacts_fly, impacts_rider=impacts_rider,
+                                            impacts_rider_fly=impacts_rider_fly, movers=movers, moving=fires_moving)
     lines = ["-- GENERATED by tools/build_third_person.py --gen from db.pack, exe build 0x%08x. Do not edit." % exe_stamp(),
              "-- shots: land unit key (what unit:type() returns) -> {projectile key, base_reload_time, projectiles per shot,",
              "--   the weapon's fire sound event if it has one}",
@@ -407,7 +436,12 @@ def gen():
              "--   (played by the script, it hits nothing; combat.lua swings the others where the cave cannot strike)",
              "-- impacts: land unit key -> ATTACK_1 .. 10 (slot - 453) -> {x right, z ahead}, false for none: where that",
              "--   slot's blow lands, m from his animroot (its first clip's first IMPACT_POS, off the body that plays it);",
-             "--   combat.lua strikes the enemy there",
+             "--   combat.lua strikes the enemy there; impacts_fly: FLY_ATTACK_1 .. 10 (slot - 493) off the same body;",
+             "--   impacts_rider, impacts_rider_fly: RIDER_ATTACK_1 .. 10 (slot - 1900), RIDER_FLY_ATTACK_1 .. 10 (slot - 1940)",
+             "--   off his own bin",
+             "-- fire_moves: land unit keys of the missile units with CA's fire whilst moving (mounted_fire_move)",
+             "-- fires_moving: such a unit -> its moving fire slots (MOVING_FIRE_ and RIDER_FIRE_ FORWARD, LEFT, RIGHT,",
+             "--   BACK LEVEL) -> each shot that clip spawns, as fires (combat.lua shoots one on the move)",
              "-- bodies: land unit key -> {radius, height} of each man in m, off battle_entities (a rider: his mount's height",
              "--   and half his own); none: a man's 0.5 by 1.8 (combat.lua stops the aim at the first enemy it passes through)",
              "-- chariots: land unit keys of the war machines drawn by beasts that shoot nothing (main.lua plays one alone)",
@@ -441,11 +475,20 @@ def gen():
     lines += ["\t},", "\tdulls = {"]
     for k in sorted(dulls):
         lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("%d" % s for s in dulls[k])))
-    lines += ["\t},", "\timpacts = {"]
-    for k in sorted(impacts):
-        got = impacts[k]  # by position, ATTACK_1 first: a slot's key printed on every entry was a third of the table
-        lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("{%g, %g}" % (got[n][0] + 0, got[n][1] + 0) if n in got else "false"
-                                                         for n in range(454, max(got) + 1))))
+    for name, table, first in (("impacts", impacts, 454), ("impacts_fly", impacts_fly, 494),
+                               ("impacts_rider", impacts_rider, 1901), ("impacts_rider_fly", impacts_rider_fly, 1941)):
+        lines += ["\t},", "\t%s = {" % name]
+        for k in sorted(table):
+            got = table[k]  # by position, the first slot first: a slot's key printed on every entry was a third of the table
+            lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("{%g, %g}" % (got[n][0] + 0, got[n][1] + 0) if n in got else "false"
+                                                             for n in range(first, max(got) + 1))))
+    lines += ["\t},", "\tfire_moves = {"]
+    for k in sorted(movers):
+        lines.append('\t\t["%s"] = true,' % k)
+    lines += ["\t},", "\tfires_moving = {"]
+    for k in sorted(fires_moving):
+        lines.append('\t\t["%s"] = {%s},' % (k, ", ".join("[%d] = {%s}" % (s, ", ".join(
+            "{%s}" % ", ".join("%g" % v for v in e) for e in fires_moving[k][s])) for s in sorted(fires_moving[k]))))
     lines += ["\t},", "\tspeeds = {"]
     for k in sorted(speeds):
         lines.append('\t\t["%s"] = %g,' % (k, speeds[k]))
@@ -471,9 +514,10 @@ def gen():
     with open(DATA, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
     print("wrote %s: %d unit types, %d abilities, %d fire clips, %d raises, %d charge attacks, %d charges, %d with blank "
-          "slots, %d with dull swings, %d with impact points, %d bodies" % (DATA, len(shots), len(kinds), len(fires), len(raises),
-                                                     len(runs), len(charges), len(blanks), len(dulls), len(impacts),
-                                                     len(bodies)))
+          "slots, %d with dull swings, %d with impact points (%d flying, %d riders, %d riders flying), %d bodies, %d fire "
+          "on the move (%d with its clips)" % (DATA, len(shots), len(kinds), len(fires), len(raises), len(runs), len(charges),
+                                               len(blanks), len(dulls), len(impacts), len(impacts_fly), len(impacts_rider),
+                                               len(impacts_rider_fly), len(bodies), len(movers), len(fires_moving)))
 
 
 def check_loc():
@@ -746,12 +790,13 @@ def write_stat_tsvs(td):
     return out, loc
 
 
-def import_stat_tables(_call, key, td):
+def import_stat_tables(key, td):
     """Put the stat abilities' tables into the open pack `key`; returns their loc rows for the pack's one loc file."""
+    from rpfm_client import call, db
     out, loc = write_stat_tsvs(td)
     for table, ver, path, tsv, _n in out:
-        _call("new_packed_file", {"pack_key": key, "path": path, "new_file": json.dumps({"DB": [FRAG, table, ver]})})
-        _call("import_tsv", {"pack_key": key, "table_path": path, "tsv_path": tsv})
+        call("create_file", {"pack": key, "path": path, "kind": db(table, ver)})
+        call("import_tsv", {"pack": key, "path": path, "tsv_path": tsv})
     return loc
 
 
@@ -760,66 +805,62 @@ def pack():
     import datetime
     import shutil
     sys.path.insert(0, os.path.join(ROOT, "tools"))
-    from check_skill_trees import _rpc, _call
+    from rpfm_client import call, ensure_game, new_pack
     if not selftest():
         raise SystemExit("selftest failed - not packing")
-    _rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
-                        "clientInfo": {"name": "build_third_person", "version": "1"}})
-    _rpc("notifications/initialized", notify=True)
-    _call("set_game_selected", {"game_name": "warhammer_3", "rebuild_dependencies": False})
+    ensure_game()
     if os.path.exists(PACK):
         backup = os.path.join(ROOT, "Modding Files", "Backup",
                               "derpy_third_person_%s.pack" % datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
         shutil.copy2(PACK, backup)
         print("backed up to %s" % backup)
         os.remove(PACK)
-    key = _call("new_pack", {})["String"]
-    _call("set_pack_file_type", {"pack_key": key, "pack_file_type": '"Mod"'})
+    key = new_pack()
     files = pack_files()
-    _call("add_packed_files", {"pack_key": key, "source_paths": [f for f, _ in files],
-                               "destination_paths": json.dumps([{"File": rel} for _, rel in files])})
+    call("add_files_from_disk", {"pack": key, "paths": [f for f, _ in files],
+                                 "pack_paths": [rel for _, rel in files]})
     with tempfile.TemporaryDirectory() as td:
-        loc = dict(LOC, **dict(import_stat_tables(_call, key, td)))
+        loc = dict(LOC, **dict(import_stat_tables(key, td)))
         tsv = os.path.join(td, "loc.tsv")
         with open(tsv, "w", encoding="utf-8", newline="") as f:
             f.write("key\ttext\ttooltip\n#Loc;1;text/db/%s.loc\n" % FRAG)
             for k in sorted(loc):
                 f.write("%s\t%s\tfalse\n" % (k, loc[k]))
         loc_path = "text/db/%s.loc" % FRAG
-        _call("new_packed_file", {"pack_key": key, "path": loc_path, "new_file": json.dumps({"Loc": FRAG})})
-        _call("import_tsv", {"pack_key": key, "table_path": loc_path, "tsv_path": tsv})
-    _call("save_pack_as", {"pack_key": key, "path": PACK})
+        call("create_file", {"pack": key, "path": loc_path, "kind": {"type": "loc"}})
+        call("import_tsv", {"pack": key, "path": loc_path, "tsv_path": tsv})
+    call("save_pack", {"pack": key, "path": PACK})
     print("saved %s" % PACK)
-    return verify(_call)
+    # closed first, so verify() reads the saved file and not the pack still in memory
+    call("close_pack", {"pack": key})
+    return verify()
 
 
-def verify(_call):
+def verify():
     """Re-open the SAVED pack: every Lua file byte-identical to the source, the loc with every row, each stat table
     with every row."""
-    key = _call("open_packfiles", {"paths": [PACK]})["StringContainerInfo"][0]
+    from rpfm_client import call, open_pack
+    key = open_pack(PACK)
     bad = []
     files = pack_files()
     loc_path = "text/db/%s.loc" % FRAG
     tables, stat_loc = stat_rows()
     all_loc = dict(LOC, **dict(stat_loc))
     with tempfile.TemporaryDirectory() as td:
-        _call("extract_packed_files", {"pack_key": key,
-                                       "source_paths": json.dumps({"PackFile": [{"File": rel} for _, rel in files]}),
-                                       "destination_path": td, "export_as_tsv": False})
+        call("extract_files", {"source": {"pack": key}, "paths": [rel for _, rel in files],
+                               "destination": td, "as_tsv": False})
         for full, rel in files:
             got = os.path.join(td, *rel.split("/"))
             if not os.path.isfile(got) or open(got, "rb").read() != open(full, "rb").read():
                 bad.append("%s did not come back byte for byte" % rel)
-        _call("extract_packed_files", {"pack_key": key, "source_paths": json.dumps({"PackFile": [{"File": loc_path}]}),
-                                       "destination_path": td, "export_as_tsv": True})
+        call("extract_files", {"source": {"pack": key}, "paths": [loc_path], "destination": td, "as_tsv": True})
         got = os.path.join(td, *loc_path.split("/")) + ".tsv"
         rows = open(got, encoding="utf-8").read().splitlines()[2:] if os.path.isfile(got) else []
         if sorted(r.split("\t")[0] for r in rows) != sorted(all_loc):
             bad.append("the loc came back with %d rows, not %d" % (len(rows), len(all_loc)))
         for table, (_ver, want) in sorted(tables.items()):
             path = "db/%s/%s" % (table, FRAG)
-            _call("extract_packed_files", {"pack_key": key, "source_paths": json.dumps({"PackFile": [{"File": path}]}),
-                                           "destination_path": td, "export_as_tsv": True})
+            call("extract_files", {"source": {"pack": key}, "paths": [path], "destination": td, "as_tsv": True})
             got = os.path.join(td, *path.split("/")) + ".tsv"
             lines = open(got, encoding="utf-8").read().splitlines() if os.path.isfile(got) else []
             head = lines[0].split("\t") if lines else []

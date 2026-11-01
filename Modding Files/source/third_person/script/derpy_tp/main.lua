@@ -44,6 +44,20 @@ return function(E)
 		local card = find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id()))
 		if card then bm:clear_selection() card:SimulateLClick() end
 	end
+	-- his unit back as the one selected, for the frame (tick). In multiplayer that is a card click, and CA plays its click
+	-- sound for each: forced every frame, it clicked a frame at a time whenever the attack's own click reached CA's
+	-- interface, which takes it there with no cinematic UI to swallow it (a player, 2026-10-31: "rapidly makes the clicking
+	-- noise"). There it waits while he looks around, where CA's portrait is hidden (hud below) and nothing reads the
+	-- selection, and a click waits RESELECT_GAP real s for the next; whatever needs it selected asks first (fly)
+	local RESELECT_GAP = 0.5
+	local function reselect(u, now)
+		if P.features.net then
+			if F.dragging or now - (F.reselect_at or -1e9) < RESELECT_GAP then return end
+			F.reselect_at = now
+		end
+		bm:clear_selection()
+		E.select(u)
+	end
 	-- this machine's army. CA's get_player_army() is the alliance's first (lib_battle_manager.lua), the partner's when two
 	-- players share a side and this machine's is the second (a player's report, 2026-10-23: F2 played his partner's
 	-- Neferata and the battle desynced); item(local_army()) is CA's own route (battle.html, local_army)
@@ -267,6 +281,12 @@ return function(E)
 		if not w then return end
 		if F.unit:is_currently_flying() == w.up or now >= w.till then F.fly_want = nil return end
 		if now < (w.next or 0) or E.hud.value("CanToggleFlying") ~= true or E.hud.value("IsFlying") == w.up then return end
+		-- the button flies the selected unit, and multiplayer leaves the selection alone while he looks around (reselect)
+		if P.features.net and not (bm:num_units_selected() == 1 and selected(F.unit)) then
+			E.select(F.unit)
+			w.next = now + FLY_GAP
+			return
+		end
 		toggle_flying()
 		w.next = now + FLY_GAP
 	end
@@ -344,7 +364,7 @@ return function(E)
 		if free ~= (F.free_orders or false) then F.free_orders = free bm:disable_orders(not free) end
 		if vanilla then -- nothing forced
 		elseif free then if selected(unit) then bm:clear_selection() end
-		elseif bm:num_units_selected() ~= 1 or not selected(unit) then bm:clear_selection() E.select(unit) end
+		elseif bm:num_units_selected() ~= 1 or not selected(unit) then reselect(unit, now) end
 		if F.model and (unit:number_of_men_alive() < 2 or not P.alive(unit, F.model)) then
 			-- he died, or he is the last man: the next front-centre man, or the whole unit; a crewman's mate on the same
 			-- chariot first, so the camera stays on the chariot played (F.body: read while he lived, not off a dead man)
@@ -408,6 +428,7 @@ return function(E)
 			if F.dragging then P.hide_cursor() end -- every frame: the game's middle-button release shows it (platform.lua)
 			kf = (P.held(S.keys.forward) and 1 or 0) - (P.held(S.keys.back) and 1 or 0)
 			kr = (P.held(S.keys.right) and 1 or 0) - (P.held(S.keys.left) and 1 or 0)
+			F.moving = kf ~= 0 or kr ~= 0 -- a shot on the move (combat.lua)
 			if F.command then
 				-- the clicks and number keys are command mode's: he neither fights nor casts, and he walks on
 				if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) end
@@ -431,8 +452,9 @@ return function(E)
 				elseif F.swallow then
 					F.swallow = held or nil -- the click that cast is no shot: fighting waits for the button to come up
 				else
-					-- a move key ends a clicked ground-fire shot, as it drops one man's: it holds his walk, and waits out a reload
-					if F.firing and not held and (kf ~= 0 or kr ~= 0) then E.combat.stop_fire() end
+					-- a move key ends a clicked ground-fire shot, as it drops one man's: it holds his walk, and waits out a reload.
+					-- Held too for a unit that fires on the move: it walks on and fires there (combat.lua C.ground)
+					if F.firing and (not held or E.combat.fire_moves()) and (kf ~= 0 or kr ~= 0) then E.combat.stop_fire() end
 					E.combat.attack(gnow, F.dragging and clicked, F.dragging and held)
 				end
 				-- the next page of the ability bar (the author, 2026-10-20: "pressing t will switch the hotbar to spells");
@@ -451,7 +473,7 @@ return function(E)
 			-- in command mode")
 			zoom(dt)
 		else
-			F.dragging = false
+			F.dragging, F.moving = false, false
 			cursor(true)
 			if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) end
 		end
@@ -462,7 +484,8 @@ return function(E)
 			-- shouldnt be"; 2026-10-14: "absolute control and no auto attack"). In multiplayer the guard is a state on every
 			-- machine: P.guard sends it once, P.unguard takes it off by the id it went with, alive or dead: here when the
 			-- body changes (he died and the next man is played) or goes (a unit of one's own attack orders), and at the stop
-			local guard = F.model or single and not F.native_attack and not F.driving and not F.firing and single or nil
+			-- and none while he fires on the move: the game picks what he shoots (combat.lua C.ground)
+			local guard = F.model or single and not F.native_attack and not F.driving and not F.firing and not F.move_fire and single or nil
 			if F.guarded and P.features.net and not (guard and P.same(guard, F.guarded)) then P.unguard() F.guarded = nil end
 			if guard then P.guard(guard) F.guarded = guard end
 			-- and none of its swings start on him (P.disarm): his own, and an attack order on a unit of one, only
@@ -488,7 +511,8 @@ return function(E)
 			E.combat.invincible(single, gnow, kf == 0 and kr == 0)
 			fly(gnow)
 			if F.shot and (kf ~= 0 or kr ~= 0) then E.combat.drop(gnow, true) end
-			if F.shot then P.face(F.model, E.move.turn(F.model, E.rig.yaw, E.move.ACTION_TURN))
+			-- a shot on the move: he walks on under its clip (combat.lua man_shot)
+			if F.shot and not F.shot.moving then P.face(F.model, E.move.turn(F.model, E.rig.yaw, E.move.ACTION_TURN))
 			elseif E.combat.locked(gnow) and not F.lock.runs then
 				-- a swing or cheer: until the engine reports its clip (0.19-0.31 s) and he has turned to the crosshair, as a clip
 				-- under way still turns him; then the clip turns him (round 25)
@@ -526,6 +550,7 @@ return function(E)
 		local ex, ey, ez, lx, ly, lz = E.rig.update(now, dt, x, y, z, F.ranged and not F.command, unit:is_in_melee(),
 			cam:position():get_y(), height, not F.ranged and not F.armed)
 		cam:move_to(v(ex, ey, ez), v(lx, ly, lz), 0, false, -1, false)
+		E.hud.men() -- after the camera: a bar over each man is put where this frame's view shows him
 		F.frames = F.frames + 1
 	end
 
@@ -534,20 +559,29 @@ return function(E)
 	-- deactivate f2 when changing ammo"; measured: Deithland's mortar was back 0.2 s after the cast, under a ui id of
 	-- its own). Waited for in battle time, a wind-up included (CA's dragon forms wind up 5 s), and for its unit card: it
 	-- came a frame after the unit, and taken over before it the HUD had no context (portrait and slots off for good)
-	local SWAP_WAIT = 10
-	function M.follow()
+	-- old: the caster, for an ability abilities.lua was not sure of: still there SUMMON_WAIT s after the new unit came, it
+	-- was a summon, and he is played on
+	local SWAP_WAIT, SUMMON_WAIT = 10, 1
+	function M.follow(old)
 		local army, before = E.army(), {}
 		for i = 1, army:units():count() do before[army:units():item(i):unique_ui_id()] = true end
-		swap = {before = before, till = bm:time_elapsed_ms() / 1000 + SWAP_WAIT}
+		swap = {before = before, till = bm:time_elapsed_ms() / 1000 + SWAP_WAIT, old = old and old:unique_ui_id()}
 	end
 	local function follow_swap(gnow)
 		if gnow > swap.till then swap = nil return end
-		local army = E.army()
+		local army, new, old = E.army(), nil, nil
 		for i = 1, army:units():count() do
 			local u = army:units():item(i)
-			if not swap.before[u:unique_ui_id()] and u:number_of_men_alive() > 0
-				and find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id())) then M.start(u) return end
+			if u:number_of_men_alive() > 0 then
+				if not swap.before[u:unique_ui_id()]
+					and find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id())) then new = new or u end
+				if u:unique_ui_id() == swap.old then old = u end
+			end
 		end
+		if not new then return end
+		if not old then M.start(new) return end
+		swap.came = swap.came or gnow
+		if gnow - swap.came >= SUMMON_WAIT then M.start(old) end
 	end
 
 	-- a press before every player's HELLO (Ruling 26) is kept, F.asked its model s: third person starts by itself once the
@@ -584,6 +618,9 @@ return function(E)
 			local ok, watching = pcall(function() return bm:is_spectator() end)
 			if not ok or watching or P.net_me and P.net_me.watching then
 				E.once("spectator", "multiplayer: a spectator or a partner with units given to them plays no army, so third person stays off")
+				-- and on screen, at every press: in the log alone, F2 did nothing a player could see (a player, 2026-10-31:
+				-- "my friends who also have the mod cant press f2")
+				E.say("derpy_tp_mp_watching")
 				return
 			end
 		end
@@ -654,6 +691,7 @@ return function(E)
 		F.ranged = E.can_shoot()
 		-- a reload under way when he was last let go still counts (ready_by, by unit)
 		F.firing, F.want_shot, F.shot, F.next_swing, F.swings, F.shot_n = false, false, nil, 0, 0, 0
+		F.moving, F.move_fire = false, nil
 		F.ready_at = ready_by[unit:unique_ui_id()] or 0
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
@@ -768,6 +806,7 @@ return function(E)
 			F.held_fire = false
 			try(function() F.uc:fire_at_will(F.fire_was) F.uc:release_control() end)
 		end
+		F.move_fire = nil -- its fire at will is the player's again, above
 		if F.melee_on then F.melee_on = false try(function() F.uc:melee(false) F.uc:release_control() end) end
 		for _, sc in ipairs(F.shortcuts or {}) do try(function() bm:disable_shortcut(sc, false) end) end
 		F.shortcuts = nil

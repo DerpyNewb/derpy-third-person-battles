@@ -51,6 +51,16 @@ BIN = "animations/database/battle/bin/"
 # IMPACT_POS alone - a player, 2026-10-24: "didnt manage to kill a single unit"). Read 2026-10-25: of 3,819 units with
 # attack clips, 2,676 have a splash on every one, 729 on some, 414 on none
 ATTACKS = tuple(range(454, 464))
+# FLY_ATTACK_1-10 (off the body that flies), RIDER_ATTACK_1-10 and RIDER_FLY_ATTACK_1-10 (off the rider's own bin): the
+# swings combat.lua plays in the air and on a rider with no mount of his own, each with its own IMPACT_POS. Read
+# 2026-11-01: 580, 711 and 15 land units have one (a blow without one landed 2.5 m ahead)
+FLY_ATTACKS, RIDER_ATTACKS, RIDER_FLY_ATTACKS = tuple(range(494, 504)), tuple(range(1901, 1911)), tuple(range(1941, 1951))
+# fire on the move: MOVING_FIRE_FORWARD_LEVEL, _LEFT_, _RIGHT_, _BACKWARD_LEVEL, then a rider's RIDER_FIRE_FORWARD_, _LEFT_,
+# _RIGHT_, _BACK_LEVEL (9.0 ids). Read 2026-11-01: of 870 missile units 348 carry CA's fire whilst moving (the
+# mounted_fire_move attribute); 139 of them have the first, 180 the rider's. 58 more have a MOVING_FIRE slot without the
+# attribute, some of it the standing fire clip under that slot (the sorcerer-prophet set), so the attribute gates it
+MOVING_FIRES = (1570, 1572, 1573, 1574, 2105, 2108, 2111, 2114)
+FIRE_MOVE = "mounted_fire_move"
 SPLASH = b"\x0d\x00SPLASH_ATTACK"
 CA_ANIM = ("anim2.pack", "anim.pack", "anim_3.pack")
 # CA's own packs in data/: everything but these prefixes is a mod
@@ -207,9 +217,9 @@ def dull_slots(files, man_animation):
     return sorted(out) or None
 
 
-def impact_slots(files, man_animation):
-    """His bin's ATTACK_1-10 slots -> where the blow lands, (x right, z ahead) in m from his animroot: the first IMPACT_POS
-    of the slot's first clip that has one. The engine launches a swing once that point reaches its target's edge
+def impact_slots(files, man_animation, slots=ATTACKS):
+    """His bin's ATTACK_1-10 slots (or slots) -> where the blow lands, (x right, z ahead) in m from his animroot: the first
+    IMPACT_POS of the slot's first clip that has one. The engine launches a swing once that point reaches its target's edge
     (exe+325fca4) and lands the blow at its time (docs/BATTLE_ENGINE_RE.md section 12); combat.lua picks the man a blow
     lands on by it. Most land 1.6-3.6 m ahead, a giant's or a troll's up to 7 m out and to the side (read 2026-10-29).
     ponytail: the slot's first clip only, the engine picks among them. None when no slot has one."""
@@ -222,7 +232,7 @@ def impact_slots(files, man_animation):
         return None
     out = {}
     for r in rows:
-        if r["slot"] in ATTACKS and r["slot"] not in out:
+        if r["slot"] in slots and r["slot"] not in out:
             for _anim, meta, _snd in r["anims"]:
                 m = meta and files.get(meta)
                 p = [e for e in (fire_pos(m, b"IMPACT_POS") if m else ()) if len(e) == 4]
@@ -245,6 +255,20 @@ def lands(packs, table="land_units"):
     return out
 
 
+def fire_moves(packs, units):
+    """The keys of units (land unit key -> row) that carry CA's fire whilst moving: their attribute_group holds
+    mounted_fire_move in unit_attributes_to_groups_junctions, the mods' rows beside CA's. Its key column is the
+    attribute, so lands() cannot read it."""
+    groups = set()
+    for p in packs + [DB_PACK]:
+        try:
+            for _p, _v, rows in load(p, "unit_attributes_to_groups_junctions_tables"):
+                groups.update(r["attribute_group"] for r in rows if r["attribute"] == FIRE_MOVE)
+        except Exception:  # a pack with no such table, or a table version RPFM's schema does not know
+            pass
+    return {k for k, r in units.items() if r.get("attribute_group") in groups}
+
+
 def times_of(files, man_animation, slots=(FIRE, GRENADIER, RIDER_FIRE)):
     """The FIRE_POS events of the first of slots his bin has a row for."""
     b = files.get(BIN + man_animation + ".bin")
@@ -262,21 +286,26 @@ def times_of(files, man_animation, slots=(FIRE, GRENADIER, RIDER_FIRE)):
     return None
 
 
-def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None, impacts=None):
+def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None, impacts=None, impacts_fly=None,
+          impacts_rider=None, impacts_rider_fly=None, movers=None, moving=None):
     """land unit key -> FIRE_POS times, for every unit with a missile weapon whose fire clip carries any. specs: the
     slot lists to read, each in order of preference (default FIRE_LEVEL, else GRENADIER, else RIDER_FIRE); one dict per spec, or the
     one dict when given none or one. raises: a dict to fill with each such unit's raise_lengths. runs: one to fill with
     every land unit's longest charge attack, s. charges: one to fill with every land unit's (CHARGE, FLY_CHARGE) lengths,
     s, the longest of each, 0 for none; blanks: one with its blank_slots; dulls: one with its dull_slots; impacts: one
-    with its impact_slots. All of these off the body combat.lua plays them on: his mount's bin (mounts.animation) when
-    he rides one, else his own."""
+    with its impact_slots; impacts_fly: its FLY_ATTACK ones. All of these off the body combat.lua plays them on: his
+    mount's bin (mounts.animation) when he rides one, else his own. impacts_rider, impacts_rider_fly: the RIDER_ATTACK and
+    RIDER_FLY_ATTACK ones, off his own bin. movers: a set to fill with the missile units that fire whilst moving
+    (fire_moves); moving: a dict with each one's MOVING_FIRES slot -> its FIRE_POS events, off his own bin."""
     specs = specs or ((FIRE, GRENADIER, RIDER_FIRE),)
     mods = mod_packs()
     files = Files(mods + [os.path.join(DATA, n) for n in CA_ANIM])
-    bodied = charges is not None or blanks is not None or dulls is not None or impacts is not None
+    bodied = charges is not None or blanks is not None or dulls is not None or impacts is not None or impacts_fly is not None
     mounts = lands(mods, "mounts") if bodied else {}
     outs = [{} for _ in specs]
-    for key, r in lands(mods).items():
+    units = lands(mods)
+    moves = fire_moves(mods, units) if movers is not None or moving is not None else set()
+    for key, r in units.items():
         if runs is not None and r.get("man_animation"):
             t = raise_lengths(files, r["man_animation"], RUNS, max)
             if t:
@@ -294,10 +323,13 @@ def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None,
             t = dull_slots(files, body)
             if t:
                 dulls[key] = t
-        if impacts is not None and body:
-            t = impact_slots(files, body)
-            if t:
-                impacts[key] = t
+        for table, anim, slots in ((impacts, body, ATTACKS), (impacts_fly, body, FLY_ATTACKS),
+                                   (impacts_rider, r.get("man_animation"), RIDER_ATTACKS),
+                                   (impacts_rider_fly, r.get("man_animation"), RIDER_FLY_ATTACKS)):
+            if table is not None and anim:
+                t = impact_slots(files, anim, slots)
+                if t:
+                    table[key] = t
         if r.get("primary_missile_weapon") and r.get("man_animation"):
             for out, slots in zip(outs, specs):
                 t = times_of(files, r["man_animation"], slots)
@@ -307,6 +339,13 @@ def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None,
                 t = raise_lengths(files, r["man_animation"])
                 if t:
                     raises[key] = t
+            if key in moves:
+                if movers is not None:
+                    movers.add(key)
+                if moving is not None:
+                    got = {s: t for s in MOVING_FIRES for t in [times_of(files, r["man_animation"], (s,))] if t}
+                    if got:
+                        moving[key] = got
     return outs if len(specs) > 1 else outs[0]
 
 
@@ -356,6 +395,10 @@ def _selftest():
     try:
         got = impact_slots(f, "b")
         assert got == {454: (0.2, 2.8), 455: (-5.4, -0.1)}, "x right and z ahead, 0.1 m, per ATTACK slot: %s" % got
+        # FLY_ATTACK_1 (494) is read only when asked for, and ATTACK_1 then is not
+        RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [i1]}, {"slot": 494, "anims": [i2]}])
+        got = impact_slots(f, "b", FLY_ATTACKS)
+        assert got == {494: (-5.4, -0.1)}, "the FLY_ATTACK slot alone: %s" % got
         RA.read_bin = lambda b: (None, [{"slot": 454, "anims": [dud]}])
         assert impact_slots(f, "b") is None, "no IMPACT_POS anywhere: none"
     finally:

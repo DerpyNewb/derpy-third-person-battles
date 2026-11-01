@@ -121,8 +121,10 @@ return function(E)
 			if F.lead and now - F.lead_end >= LEAD_BACK then F.lead, lead = nil, STEER_LEAD end
 			-- A clip whose shot was dropped (a step out of a reload, the mode key) stays latched when the walk replaces
 			-- its command, and he slides in its pose; WALK_1 with mask 0 ends it, the same frame (measured 2026-10-14,
-			-- probes/zz_tp_unclip.lua). Spaced so a clip the engine keeps reporting is not queued every frame.
-			if P.anim_slot(m) and not F.charging and not F.lock and now >= (F.unlatch_at or 0) and P.has_slot(m, WALK_1) then
+			-- probes/zz_tp_unclip.lua). Spaced so a clip the engine keeps reporting is not queued every frame. Not under a
+			-- shot on the move: its clip is meant to run under the walk (combat.lua man_shot)
+			if P.anim_slot(m) and not F.charging and not F.lock and not (F.shot and F.shot.moving)
+				and now >= (F.unlatch_at or 0) and P.has_slot(m, WALK_1) then
 				P.play(m, WALK_1, 0)
 				F.unlatch_at = now + UNLATCH_GAP
 			end

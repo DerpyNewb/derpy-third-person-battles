@@ -35,6 +35,12 @@ HUD = {
     "row_icon": 20, "fig": 84,
     "magic": "#41E1E1FF",              # CA's ui_colours "magic", 65 225 225: the winds bar's fill
     "stamina": "#A0FF37FF",            # CA's ui_colours "fatigue_fresh", 160 255 55: the stamina bar's fill
+    # his own morale (a player, 2026-10-29: undead and daemons crumble "and it is not noticed at once"): the unit bars'
+    # strip colour, CA's ui_colours "yellow" (BAR["morale_fill"])
+    "morale": "#FFB900FF",
+    # over it from MoraleState 4 (shaken), the state the unit bars' morale icon shows from: CA's ui_colours "morale_shaken",
+    # 255 45 45, the colour CA gives shaken and wavering
+    "morale_alarm": "#FF2D2DFF",
     "gap": 6, "pad": 8,                # portrait to plate; plate border to its text
     "bar_h": 19, "fill_in": (3, 4),    # bar_back height; the fill's inset inside bar_frame (x, y)
     "slot": 69, "icon": 59, "slot_gap": 8, "slots": 10,
@@ -102,6 +108,9 @@ BAR = {
     # the two icons left of the bars, CA's own, drawn 18 (CA: 24 in its tooltip, 18 on its banner), 2 px apart. The
     # morale icon shows from state 4 (CA's tooltip tints 4 orange, 5 red, then the rout and shattered icons)
     "icon": 18, "icon_gap": 2, "morale_from": 4,
+    # a bar over each man (a player, 2026-10-29: "Healthbar to all entity"): the unit bar's well and fill at 24x4, its
+    # bottom "man_lift" m over his head. hud.lua moves it there each frame, as no context holds a man's health
+    "man": (24, 4), "man_lift": 0.4,
 }
 # CA's unit tooltip morale icon (ui3.pack special_unit_tooltip.twui.xml icon_leadership, read 2026-10-22): a state per
 # MoraleState, (name, art, tint, offset)
@@ -131,6 +140,8 @@ ART = {
     "winds_fill": "ui/skins/default/army_schem_str_bar_fill.png",  # CA's grey bar fill, tinted HUD["magic"]
     "icon_men": "ui/skins/default/icon_entity_small.png",
     "icon_hp": "ui/skins/default/icon_stat_health.png",
+    "icon_morale": "ui/skins/default/icon_stat_morale.png",
+    "icon_kills": "ui/skins/default/icon_kills.png",
     "icon_winds": "ui/skins/default/icon_magic_pool.png",
     "icon_stamina": "ui/battle ui/ability_icons/fatigue_restore.png",  # CA's tired-and-fresh legs
     "plate": "ui/skins/default/tooltip_frame.png",
@@ -178,13 +189,16 @@ def _parts():
     bx = ix + ri + 4                     # a bar row: icon, bar, figure
     bw = iw - (ri + 4) - 6 - fig
     sy = ph - pad - bh                   # stamina on the plate's floor (the author, 2026-10-16: "add stamina bar")
-    hy = sy - 4 - bh                     # health above it
+    oy = sy - 4 - bh                     # his morale above it
+    hy = oy - 4 - bh                     # health above that
     wy = hy - 4 - bh                     # a caster's winds above it
     my = wy - 4 - 18                     # men above that
     ny = my - 22                         # name above that
     # first, so every part after it draws over the unit bars made in it (hud.lua); at the screen's corner, where the
     # engine's own placing of each bar starts
     P.append(("bars", "screen", 0, 0, 1, 1, {}))
+    # the bars over each man (hud.lua H.men), over the unit bars and under the rest
+    P.append(("men_bars", "screen", 0, 0, 1, 1, {}))
     P.append(("portrait", "left", 0, 0, pw, ph, {"image": ART["card"]}))
     # the plate a caster's four rows sit on, and the one for the other three (hud.lua shows one, lifts LIFTED for it)
     P.append(("plate_left", "left", cx, ny - pad, col, ph - ny + pad, {"image": ART["plate"], "imagemargin": 8}))
@@ -193,17 +207,25 @@ def _parts():
     P.append(("name", "left", ix, ny, iw, 22, {"text": " ", "fontcat": f["name"][0], "size": f["name"][1]}))
     hw, hh = H["hidden"], H["text_plate_h"]
     hi = H["hidden_icon"]
-    hy0 = -(hh + H["gap"])               # over the portrait, its left edge on his
+    # over the portrait, its left edge on his, and over a caster's plate where it rises above him (the morale row, 2026-10-31)
+    hy0 = min(0, ny - pad) - (hh + H["gap"])
     P.append(("hidden_plate", "left", 0, hy0, hw, hh, {"image": ART["plate"], "imagemargin": 8}))
     P.append(("hidden_icon", "left", 4, hy0 + (hh - hi) // 2, hi, hi, {"image": ART["hidden"]}))
     P.append(("hidden", "left", 4 + hi + 4, hy0, hw - hi - 8 - pad, hh, {"text": " ", "fontcat": f["hidden"][0],
                                                                          "size": f["hidden"][1]}))
+    # the men row: his men, and at its right end in the figures' column his unit's kills (a player, 2026-10-29: "add kill
+    # count"), CA's kills icon before them
+    kx = ix + iw - fig - 4 - ri
     P.append(("men_icon", "left", ix, my - 1, ri, ri, {"image": ART["icon_men"]}))
-    P.append(("men", "left", bx, my, iw - (ri + 4), 18, {"text": " ", "fontcat": f["men"][0], "size": f["men"][1]}))
+    P.append(("men", "left", bx, my, kx - 4 - bx, 18, {"text": " ", "fontcat": f["men"][0], "size": f["men"][1]}))
+    P.append(("kills_icon", "left", kx, my - 1, ri, ri, {"image": ART["icon_kills"]}))
+    P.append(("kills", "left", ix + iw - fig, my, fig, 18, {"text": " ", "fontcat": f["men"][0], "size": f["men"][1],
+                                                           "align": "Right"}))
     for bar, y, fill, fig_id, tint in (("winds", wy, "winds_fill", "winds", H["magic"]),
                                        ("health", hy, "bar_fill", "hp", None),
+                                       ("morale", oy, "winds_fill", "morale_text", H["morale"]),
                                        ("stamina", sy, "winds_fill", "stamina", H["stamina"])):
-        P.append((fig_id + "_icon", "left", ix, y + (bh - ri) // 2, ri, ri, {"image": ART["icon_" + bar.replace("health", "hp")]}))
+        P.append((bar.replace("health", "hp") + "_icon", "left", ix, y + (bh - ri) // 2, ri, ri, {"image": ART["icon_" + bar.replace("health", "hp")]}))
         P.append((bar + "_back", "left", bx, y, bw, bh, {"image": ART["bar_back"], "imagemargin": 6}))
         if bar == "winds":  # under the fill: the fill shrinks to what a cast would leave, this shows the rest
             P.append(("winds_cost", "left", bx + fx, y + fy, bw - 2 * fx, bh - 2 * fy,
@@ -212,6 +234,9 @@ def _parts():
         if tint:
             kw["colour_img"] = tint
         P.append((bar + "_fill", "left", bx + fx, y + fy, bw - 2 * fx, bh - 2 * fy, kw))
+        if bar == "morale":
+            P.append(("morale_alarm", "left", bx + fx, y + fy, bw - 2 * fx, bh - 2 * fy,
+                      {"image": ART[fill], "colour_img": H["morale_alarm"]}))
         P.append((bar + "_frame", "left", bx, y, bw, bh, {"image": ART["bar_frame"], "imagemargin": 6}))
         P.append((fig_id, "left", ix + iw - fig, y, fig, bh, {"text": " ", "fontcat": f["men"][0],
                                                                "size": f["men"][1], "align": "Right"}))
@@ -328,7 +353,7 @@ def _lift():
     return HUD["bar_h"] + 4
 
 
-LIFTED = ("name", "men_icon", "men")
+LIFTED = ("name", "men_icon", "men", "kills_icon", "kills")
 CLICKABLE = {"back_plate"}  # the only part that takes the mouse: the way back out of command mode (hud.lua H.back)
 
 
@@ -406,6 +431,61 @@ def build_bar(n):
                      % BAR["lifts"][n - 1])
 
 
+MAN_FILE = os.path.join(SRC, "ui", "derpy_tp", "man_bar.twui.xml")
+
+
+def build_man_bar():
+    """The bar over one man: derpy_tp_man_bar (hud.lua moves, shows and hides it) > gate (the engine hides it while the
+    player cannot see the unit) > base (the unit bar's well) > fill (coloured by side; hud.lua sizes it to his health, which
+    no context holds). Children of a component made at run time land at its corner, so all four share one box. hud.lua
+    gives the top the man's unit's context."""
+    w, h = BAR["man"]
+    unit = "CcoBattleUnit"
+    root = EM.C("root", 1, 1)
+    top = root.add(EM.C("derpy_tp_man_bar", w, h))
+    gate = top.add(EM.C("gate", w, h, callbacks=[("ContextVisibilitySetter", unit, "IsVisible")]))
+    base = gate.add(EM.C("base", w, h, layers=[
+        {"path": ART["bar"], "offset": (-1, -1), "dw": 2, "dh": 2, "margin": 1, "colour": BAR["base"], "dock": None},
+        {"path": ART["bar"], "offset": (0, 0), "dw": 0, "dh": 0, "margin": 1, "colour": BAR["well"], "dock": None}]))
+    base.add(EM.C("fill", w, h, image=ART["bar"], imagemargin=1, colour_img=BAR["fill"], callbacks=[
+        ("ContextColourSetter", unit, "AllianceColour")]))
+    EM.assign(root, "D7C0")
+    return EM.layout(root, "Third-Person Battles bar over one man - GENERATED by tools/gen_third_person_hud.py")
+
+
+def check_man_bar(xml):
+    """The man bar against what hud.lua and the player need: CA's art, paired GUIDs, nothing that takes the mouse, the
+    shape hud.lua reaches into, no callback on the part hud.lua shows and hides, hidden while the unit is unseen, coloured
+    by side, and pinned by nothing (hud.lua places it: a world-space callback would fight the MoveTo)."""
+    bad = []
+    have = EM._game_assets()
+    for p in sorted(set(re.findall(r'imagepath="([^"]+)"', xml))):
+        if p not in have:
+            bad.append("man bar: no such art in CA's ui packs: %s" % p)
+    hier = xml.split("<hierarchy>")[1].split("</hierarchy>")[0]
+    comps = xml.split("<components>")[1]
+    for gid in sorted(set(re.findall(r'<[\w]+ this="([^"]+)"', hier))
+                      ^ set(re.findall(r'\n\t\t<[\w]+\n\t\t\tthis="([^"]+)"', comps))):
+        bad.append("man bar: guid %s is in one of hierarchy/components only" % gid)
+    if 'interactive="true"' in xml:
+        bad.append("man bar: an interactive component would take the mouse off the battle")
+    shape = re.sub(r'\s*this="[^"]+"', "", hier)
+    if not re.search(r"<root>\s*<derpy_tp_man_bar>\s*<gate>\s*<base>\s*<fill/>\s*</base>\s*</gate>\s*"
+                     r"</derpy_tp_man_bar>\s*</root>", shape):
+        bad.append("man bar: not root > derpy_tp_man_bar > gate > base > fill")
+    if "callback_with_context" in _comp(xml, "derpy_tp_man_bar"):
+        bad.append("man bar: a callback on the component hud.lua shows and hides")
+    if "ContextWorldSpaceComponent" in xml:
+        bad.append("man bar: pinned by the engine as well as placed by hud.lua")
+    if not _calls(_comp(xml, "gate"), "ContextVisibilitySetter", "IsVisible"):
+        bad.append("man bar: a man of a unit the player cannot see would show his bar")
+    if not _calls(_comp(xml, "fill"), "ContextColourSetter", "AllianceColour"):
+        bad.append("man bar: the fill is not coloured by side")
+    if _box(xml, "fill") != BAR["man"]:
+        bad.append("man bar: the fill is not BAR['man'] wide and high, which hud.lua sizes from")
+    return bad
+
+
 def _lua(v):
     if isinstance(v, str):
         return '"%s"' % v
@@ -443,6 +523,8 @@ def build():
                  _lua(g["toggle"]), _lua(g["screen"]), _lua(g["back"])),
              '\tbar = {file = "ui/derpy_tp/bar_", lifts = %s, clear = %s}, -- the unit bars: file .. n for lift n, m' % (
                  _lua(BAR["lifts"]), _lua(BAR["clear"])),
+             '\tman = {file = "ui/derpy_tp/man_bar", size = %s, lift = %s}, -- the bar over each man: px, m over his head' % (
+                 _lua(BAR["man"]), _lua(BAR["man_lift"])),
              "\tactions = %s, -- in order; hud.lua packs the shown ones against the right edge" % _lua(HUD["actions"]),
              "\taction_pitch = %d, -- one button and its gap" % (HUD["slot"] + HUD["slot_gap"]),
              "\tstack = %d, -- the actions' gap above the right plate" % HUD["stack"],
@@ -452,8 +534,9 @@ def build():
              "\tring = %s, -- radians, each half ring (L1, L2) from empty to full" % _lua(HUD["ring"]),
              "\tart = {melee = %s, ranged = %s, hidden = %s, unspottable = %s}," % (
                  _lua(ART["melee"]), _lua(ART["ranged"]), _lua(ART["hidden"]), _lua(ART["unspottable"])),
-             "\tfill = {health_fill = %d, ammo_fill = %d, winds_fill = %d, stamina_fill = %d, winds_cost = %d}," % (
-                 width["health_fill"], width["ammo_fill"], width["winds_fill"], width["stamina_fill"], width["winds_cost"]),
+             "\tfill = {health_fill = %d, ammo_fill = %d, winds_fill = %d, stamina_fill = %d, winds_cost = %d, morale_fill = %d, morale_alarm = %d}," % (
+                 width["health_fill"], width["ammo_fill"], width["winds_fill"], width["stamina_fill"], width["winds_cost"],
+                 width["morale_fill"], width["morale_alarm"]),
              "\tlift = %d, -- design px the rows above a caster's winds bar drop for any other unit" % _lift(),
              "\tlifted = {%s}," % ", ".join("%s = true" % k for k in LIFTED),
              "\tat = {"]
@@ -622,16 +705,25 @@ def _in(xml, cid, old, new):
     return xml.replace(block, block.replace(old, new), 1)
 
 
-def check_all(xml, lua, bar_xmls):
+def _ids(xml):
+    return set(re.findall(r'<\w+\s[^>]*?\bid="([^"]+)"', xml)) - {"root"}
+
+
+def check_all(xml, lua, bar_xmls, man_xml):
     bad = check(xml, lua)
     for n, b in enumerate(bar_xmls, 1):
         bad += check_bar(b, n)
-    return bad
+    # the bars are made inside the HUD and hud.lua finds its parts with find_uicomponent, which searches every descendant:
+    # a panel id one of them shares can resolve to the bar (the morale figure did, 2026-10-31)
+    for n, b in enumerate(bar_xmls + [man_xml], 1):
+        for cid in sorted(_ids(xml) & _ids(b)):
+            bad.append("%s is a panel id and an id in made file %d: hud.lua's lookup can land on the bar" % (cid, n))
+    return bad + check_man_bar(man_xml)
 
 
 def selftest():
     xml, lua = build()
-    bad = check_all(xml, lua, bars())
+    bad = check_all(xml, lua, bars(), build_man_bar())
     if bad:
         print("the clean build has findings:\n  " + "\n  ".join(bad))
         return False
@@ -694,6 +786,34 @@ def selftest():
             ok = False
         else:
             print("caught: %s" % what)
+    m = build_man_bar()
+    man_breaks = [
+        ("a man bar on art no ui pack has", m.replace("bar_white.png", "bar_whit.png", 1), "no such art"),
+        ("a man bar shown for a unit he cannot see", m.replace('"IsVisible"', '"IsVisibel"', 1), "cannot see"),
+        ("a man bar in one colour", m.replace('"AllianceColour"', '"AllianceColor"', 1), "coloured by side"),
+        ("a man bar's fill outside its base", re.sub(r"(<fill this=\"[^\"]+\"/>)\s*</base>", r"</base>\1", m, count=1),
+         "not root"),
+        ("a man bar that takes the mouse", m.replace('name="standard"', 'name="standard"\n\t\t\t\t\tinteractive="true"', 1),
+         "interactive"),
+        ("a man bar's gate on the part hud.lua hides",
+         _in(m, "derpy_tp_man_bar", "\t\t\t<states>", re.search(r"\t\t\t<callbackwithcontextlist>.*?</callbackwithcontextlist>\n",
+                                                                 _comp(m, "gate"), re.S).group(0) + "\t\t\t<states>"),
+         "shows and hides"),
+        ("a man bar's fill another size", _in(m, "fill", 'width="24"', 'width="40"'), "BAR['man']"),
+    ]
+    for what, x, want in man_breaks:
+        got = check_man_bar(x)
+        if not any(want in g for g in got):
+            print("NOT CAUGHT: %s (got %s)" % (what, got))
+            ok = False
+        else:
+            print("caught: %s" % what)
+    got = check_all(xml.replace('id="morale_text"', 'id="morale"', 1), lua, bars(), m)
+    if not any("made file" in g for g in got):
+        print("NOT CAUGHT: a panel id a unit bar shares (got %s)" % got)
+        ok = False
+    else:
+        print("caught: a panel id a unit bar shares")
     return ok
 
 
@@ -702,7 +822,8 @@ def main(argv):
         return 0 if selftest() else 1
     xml, lua = build()
     bar_xmls = bars()
-    bad = check_all(xml, lua, bar_xmls)
+    man_xml = build_man_bar()
+    bad = check_all(xml, lua, bar_xmls, man_xml)
     for b in bad:
         print("FINDING: %s" % b)
     if bad:
@@ -718,7 +839,9 @@ def main(argv):
     for n, b in enumerate(bar_xmls, 1):
         with open(BAR_FILE % n, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(b)
-    print("wrote %s, %s and %d unit bars" % (UI_FILE, LUA_FILE, len(bar_xmls)))
+    with open(MAN_FILE, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(man_xml)
+    print("wrote %s, %s, %d unit bars and the man bar" % (UI_FILE, LUA_FILE, len(bar_xmls)))
     return 0
 
 

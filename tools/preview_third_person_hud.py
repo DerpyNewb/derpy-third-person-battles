@@ -165,12 +165,15 @@ def render_bars(width):
     """The unit bar (ui/derpy_tp/bar_1, as shipped) for each side at full, two-thirds and a quarter health with the
     loss behind it, the morale strip under it and the morale and effect icons beside it, over the battle screenshot, at
     the size the engine draws it on this screen. Each pin's box stands its bottom centre on the unit's point, as the
-    engine places it (measured 2026-10-19), and draws what it carries at its own corner."""
+    engine places it (measured 2026-10-19), and draws what it carries at its own corner. Under them, six men's bars per
+    side (ui/derpy_tp/man_bar), each standing on its man's head as hud.lua H.men moves it, at falling health."""
     from PIL import Image, ImageDraw
     model, rendering = PG._studio()
     xml = io.open(GEN.BAR_FILE % 1, encoding="utf-8").read()
     doc = model.Document(xml)
     named = dict((c.get("id", c.tag), c) for c in doc.components)
+    man = model.Document(io.open(GEN.MAN_FILE, encoding="utf-8").read())
+    man_named = dict((c.get("id", c.tag), c) for c in man.components)
     icons = [s[1] for s in GEN.MORALE_STATES] + [s[1] for s in GEN.EFFECT_STATES]
     _n, missing = PG.extract_art("hud", extra=[GEN.ART["bar"]] + icons, folder=FOLDER)
     if missing:
@@ -196,15 +199,15 @@ def render_bars(width):
                     px[i, j] = (r * want[0] // 255, g * want[1] // 255, b * want[2] // 255, a)
         canvas.alpha_composite(img, (int(x + offset[0] * scale), int(y + offset[1] * scale)))
 
-    def layer(comp, x, y, frac, colour=None):
-        st = doc.state(comp)
+    def layer(comp, x, y, frac, colour=None, d=doc):
+        st = d.state(comp)
         box = comp.child("componentimages")
         paths = dict((n.get("this"), n.get("imagepath")) for n in box.children) if box is not None else {}
         for n in st.child("imagemetrics").children:
             ox, oy = (float(v) for v in n.get("offset", "0,0").split(","))
             w = max(1, int(float(n.get("width")) * frac * scale + 0.5))
             h = max(1, int(float(n.get("height")) * scale + 0.5))
-            img = rendering.raster(_asset(paths[n.get("componentimage")]), w, h, n)
+            img = rendering.raster(_asset(paths[n.get("componentimage")]), w, h, n).copy()  # raster caches: tint a copy
             if colour:  # bar_white under the authored colour, re-tinted by its shading to the side's
                 was = int(n.get("colour")[3:5], 16) or 1
                 want = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
@@ -233,6 +236,11 @@ def render_bars(width):
                 if name == effect:
                     icon(path, None, offset, *corner("pin_effects", cx, cy))
         draw.text(((760 + col * 160) * scale, 390 * scale), side, fill=TEXT, font=_font(int(14 * scale)))
+        mw, mh = GEN.BAR["man"]
+        for i, hp in enumerate((1.0, 1.0, 0.8, 0.55, 0.3, 0.1)):
+            x, y = (752 + col * 160 + i * 20 - mw / 2) * scale, (640 + (i % 2) * 8 - mh) * scale  # a man's head
+            layer(man_named["base"], x, y, 1, d=man)
+            layer(man_named["fill"], x, y, hp, colour, d=man)
     out = os.path.join(PG.CACHE, "tp_bars_%d.png" % width)
     canvas.convert("RGB").save(out)
     return out

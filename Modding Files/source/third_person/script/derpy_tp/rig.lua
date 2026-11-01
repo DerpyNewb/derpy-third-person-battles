@@ -19,6 +19,12 @@ local CLEAR = 1.6
 -- second, only once he has moved MOVED m or the camera turned TURNED rad since the last lift: trying the roof again
 -- from the same place would pop the view over it every time
 local LIFT_TOL, BOOM_MIN, BOOM_IN, BOOM_OUT, MOVED, TURNED = 0.3, 0.1, 3, 0.5, 1, 0.17
+-- s the eye eases in to where the ground lets it stand, and back out (a player, 2026-10-31: "when I have to fight a
+-- battle uphill the camera just spazzes out"). Put at once on the outermost clear tenth of the boom, it jumped up to
+-- 4.25 m in one frame walking over 3 m hills, 20 times a minute (measured offline: the 2026-10-31 reports' rig_hills.lua;
+-- these eases, 0.56 m at the worst, bumps on the hills too). In fast, so a hill does not bury the view; out slowly, so a
+-- frame's clearance cannot throw it back out. Easing in, the ground under it lifts it
+local FIT_IN, FIT_OUT = 0.1, 0.5
 -- first person (the author, 2026-10-17: "first person camera"): the eye at FP_EYE of his height and FP_AHEAD m ahead of
 -- his face, so it is not inside his head; FP_LAG s behind his position samples, one of their steps (a man's position
 -- changed every 0.14-0.24 s, measured 2026-10-17, probes/zz_tp_fp.lua: any less and the eye stops between steps), where
@@ -43,7 +49,7 @@ return function(E)
 		R.samples, R.sx, R.sy, R.sz = {{now, x, y, z}}, x, y, z
 		R.yaw, R.pitch, R.zoom, R.ots, R.close, R.centre = yaw, 0, zoom, ranged and 1 or 0, 0, ranged and 0 or 1
 		R.want_yaw, R.want_pitch, R.want_zoom = yaw, 0, zoom
-		R.ey, R.ey1, R.ey2, R.boom, R.cap = nil, nil, nil, 1, nil
+		R.ey, R.ey1, R.ey2, R.boom, R.cap, R.fit = nil, nil, nil, 1, nil, nil
 		R.cmd, R.cmd_pitch, R.cmd_zoom, R.want_cmd_zoom = 0, nil, 1, 1
 		-- no eye until this session's first frame: the aim's "no eye yet" reads R.ex, and the last session's x with this
 		-- one's cleared height threw on fire held as F2 went on (2026-10-17)
@@ -116,16 +122,23 @@ return function(E)
 	end
 
 	-- the engine's altitude floor is lowered while on (main.lua: it lifted the eye with the terrain, measured
-	-- 2026-10-15), so the eye keeps out of the ground here: it comes in along the boom from his head, not up. The fourth
-	-- return is the tenth of the boom it stopped at: 1, nothing behind his head cleared
+	-- 2026-10-15), so the eye keeps out of the ground here: it comes in along the boom from his head, not up. How far out
+	-- along the boom it can stand, of the whole boom, and the tenth that is in: 1, nothing behind his head cleared
 	local function clear(zm, ex, ey, ez)
 		local px, py, pz = R.sx, R.sy + LOOK_H * zm, R.sz
-		for i = 10, 1, -1 do
-			local t = i / 10 * R.boom
-			local x, y, z = px + (ex - px) * t, py + (ey - py) * t, pz + (ez - pz) * t
-			local g = bm:get_terrain_height(x, z) + CLEAR
-			if y >= g or i == 1 then return x, math.max(y, g), z, i end
+		local function clears(t)
+			return py + (ey - py) * t >= bm:get_terrain_height(px + (ex - px) * t, pz + (ez - pz) * t) + CLEAR
 		end
+		for i = 10, 2, -1 do
+			local t = i / 10 * R.boom
+			if clears(t) then
+				-- on to within a centimetre or so of where the ground cuts in: a whole tenth at a time stepped the eye
+				local out = i < 10 and (i + 1) / 10 * R.boom
+				if out then for _ = 1, 6 do local mid = (t + out) / 2 if clears(mid) then t = mid else out = mid end end end
+				return t, i
+			end
+		end
+		return R.boom / 10, 1
 	end
 
 	-- the eye can stay behind him at this zoom, where he stands now: false where the ground brings it in to his head
@@ -133,7 +146,7 @@ return function(E)
 	-- ground 0.4-0.7 m up behind him)
 	function R.fits(zoom)
 		local ex, ey, ez = behind(zoom)
-		local _, _, _, i = clear(zoom, ex, ey, ez)
+		local _, i = clear(zoom, ex, ey, ez)
 		return i > 1
 	end
 
@@ -200,7 +213,13 @@ return function(E)
 				R.boom = math.min(R.cap and R.cap[1] or 1, R.boom + BOOM_OUT * dt)
 			end
 		end
-		ex, ey, ez = clear(R.zoom, ex, ey, ez)
+		local want = clear(R.zoom, ex, ey, ez)
+		local fit = R.fit or want
+		fit = fit + (want - fit) * (1 - math.exp(-dt / (want < fit and FIT_IN or FIT_OUT)))
+		R.fit = fit
+		local px, py, pz = R.sx, R.sy + LOOK_H * R.zoom, R.sz
+		ex, ey, ez = px + (ex - px) * fit, py + (ey - py) * fit, pz + (ez - pz) * fit
+		ey = math.max(ey, bm:get_terrain_height(ex, ez) + CLEAR)
 		R.ey2, R.ey1 = R.ey1, R.ey
 		R.ex, R.ey, R.ez, R.lx, R.ly, R.lz = ex, ey, ez, lx, ly, lz
 		return ex, ey, ez, lx, ly, lz
