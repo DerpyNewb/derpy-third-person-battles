@@ -10,7 +10,7 @@
     py tools/exe_re.py stores <disp>          every mov dword ptr [reg+disp], imm32, with the value: who writes a field
     py tools/exe_re.py writes <disp>          every instruction that writes [reg+disp] from any source (a register too)
     py tools/exe_re.py vtmatch <vt> <rva>     the vtable holding the pointer at rva that lines up best with vtable vt
-    py tools/exe_re.py --selftest             each command against a fact measured on build 6acec6f4
+    py tools/exe_re.py --selftest             each command against a fact measured on build 6ae2a00b (6acec6f4's moved by tools/exe_migrate.py)
 
 The exe's section names are disguised on this build (the code is ".udata" at RVA 0x1000, vtables sit in ".xcode",
 ".text" is a stub), so the code section is found as the one holding a known function. No RTTI: vtables run into each
@@ -18,6 +18,7 @@ other, and a scan for where one starts is a guess - vtmatch aligns against a kno
 equal the live ones (checked 2026-10-16), so this answers the same questions as reading the running game, safely.
 What each finding means and how it was confirmed live: docs/BATTLE_ENGINE_RE.md. Needs capstone and numpy.
 """
+import os
 import re
 import struct
 import sys
@@ -25,9 +26,12 @@ import sys
 import capstone
 import numpy as np
 
-EXE = r"F:\SteamLibrary\steamapps\common\Total War WARHAMMER III\Warhammer3.exe"
+EXE = os.environ.get("WH3_EXE", r"F:\SteamLibrary\steamapps\common\Total War WARHAMMER III\Warhammer3.exe")
+# WH3_EXE may name a DumpImage.java dump of an older build (Modding Files/Backup/exe_snapshots/image_<build>.bin):
+# laid out by RVA, so a section's file offset is its RVA and the header at 0 is the PE header
+IMAGE = EXE.lower().endswith(".bin")
 BASE = 0x140000000
-KNOWN_CODE = 0x306edd4  # walk_stop on 6acec6f4: the section holding it is the code
+KNOWN_CODE = 0x3076310  # walk_stop on 6ae2a00b (6acec6f4: 0x306edd4): the section holding it is the code
 _pe = None
 _secs = None
 
@@ -44,7 +48,7 @@ def pe():
             s = peo + 24 + opt + 40 * i
             name = _pe[s:s + 8].rstrip(b"\0").decode()
             vsz, va, rsz, rptr = struct.unpack_from("<IIII", _pe, s + 8)
-            _secs.append((name, va, vsz, rptr, rsz))
+            _secs.append((name, va, vsz, va, vsz) if IMAGE else (name, va, vsz, rptr, rsz))
     return _pe
 
 
@@ -262,22 +266,23 @@ def vtmatch(known, rva, n=400):
 
 
 def selftest():
-    r = refs(0x306edf8)
-    assert any(k == "call" and a == 0x306edec for k, a, _ in r), "walk_stop's call at exe+306edec not found: %r" % r
-    assert dis(0x306edd4, 1), "no disassembly"
-    assert 0x3915ec8 in ptrs(0x311bd24), "the subclass's clip virtual at exe+3915ec8"
-    assert any(a == 0x2f7809a for _, a, _ in slotcalls(0x4a8)), "the clip action's call through slot 0x4a8"
-    assert (0x306e986, 1) in [(a, v) for a, v, _ in stores(0x324)], "the order starter writing 1 to +0x324"
-    assert (0x306f093, 18) in [(a, v) for a, v, _ in stores(0x324)], "the stop writing 18 to +0x324"
-    top = vtmatch(0x3912950, 0x3915ec8)[0]
-    assert top[1] == 0x3915a20 and top[2] == 149 and top[3] == 0x306e850, "the subclass vtable: %r" % (top,)
+    r = refs(0x3076334)
+    assert any(k == "call" and a == 0x3076328 for k, a, _ in r), "walk_stop's call at exe+3076328 not found: %r" % r
+    assert dis(0x3076310, 1), "no disassembly"
+    assert 0x3921628 in ptrs(0x312329c), "the subclass's clip virtual at exe+3921628"
+    assert any(a == 0x2f7f4da for _, a, _ in slotcalls(0x4a8)), "the clip action's call through slot 0x4a8"
+    assert (0x3075ec2, 1) in [(a, v) for a, v, _ in stores(0x324)], "the order starter writing 1 to +0x324"
+    assert (0x30765cf, 18) in [(a, v) for a, v, _ in stores(0x324)], "the stop writing 18 to +0x324"
+    # on 6acec6f4 this vtable ranked first; on 6ae2a00b a 348-slot table outranks it (190 to 141), so the top three
+    top = [(t[1], t[2], t[3]) for t in vtmatch(0x391e300, 0x3921628)[:3]]
+    assert (0x3921180, 149, 0x3075d8c) in top, "the subclass vtable: %r" % (top,)
     # the CC walk gave 2fd97cc here (2026-10-20); .pdata holds the true start
-    assert fstart(0x2fda558) == 0x2fda19c and pdata(0x2fda558) == (0x2fda19c, 0x2fda624), "pdata: %r" % (pdata(0x2fda558),)
+    assert fstart(0x2fe1a00) == 0x2fe1644 and pdata(0x2fe1a00) == (0x2fe1644, 0x2fe1acc), "pdata: %r" % (pdata(0x2fe1a00),)
     w = writes(0xb08)
-    hit = [t for a, t, f in w if a == 0x3251dde and f == 0x3251af8]
-    assert hit and "r14" in hit[0], "the pending-hit arm's mov [r14+0xb08] in exe+3251af8: %r" % hit
-    assert not any(a == 0x3251ddf for a, _, _ in w), "the REX-less mis-decode one byte on"
-    print("ok: refs, dis, ptrs, slotcalls, stores, writes, pdata and vtmatch each found what build 6acec6f4 holds")
+    hit = [t for a, t, f in w if a == 0x325959e and f == 0x32592b8]
+    assert hit and "r14" in hit[0], "the pending-hit arm's mov [r14+0xb08] in exe+32592b8: %r" % hit
+    assert not any(a == 0x325959f for a, _, _ in w), "the REX-less mis-decode one byte on"
+    print("ok: refs, dis, ptrs, slotcalls, stores, writes, pdata and vtmatch each found what build 6ae2a00b holds")
     return 0
 
 

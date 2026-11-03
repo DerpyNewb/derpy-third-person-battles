@@ -72,6 +72,10 @@ HUD = {
     # be found for the unit and to switch back to 3rd person mode"): its words on a plate, the command key beside it
     "back": 200,
     "back_lit": "#FFF8D730",  # its hover: a wash of the text colour over the plate, as CA's text buttons lighten
+    # the number key over each of CA's unit cards in that style (the author, 2026-11-02: "the number label on units when
+    # in command mode"): the slots' key lozenge and font, wide enough for one key name; hud.lua widens it for a longer
+    # name. One page of cards, as the number keys pick (command.lua)
+    "card_key": (26, 18), "cards": 10,
     # the hidden mark over the portrait (the 2026-10-20 design, Part 4): CA's banner status icon on a plate, and the word;
     # wide enough for "Unspottable"
     "hidden": 140, "hidden_icon": 24,
@@ -326,6 +330,13 @@ def _parts():
     P.append(("back_keyplate", "back", bw + H["gap"], ky, kw_, kh, {"image": ART["key"]}))
     P.append(("back_key", "back", bw + H["gap"], ky, kw_, kh, {"text": " ", "fontcat": f["key"][0], "size": f["key"][1],
                                                                "align": "Center"}))
+    # one lozenge per card of the page, moved onto its card by hud.lua (H.cards), never by H.place
+    cw_, ch_ = H["card_key"]
+    for n in range(1, H["cards"] + 1):
+        s = "card_%d_" % n
+        P.append((s + "keyplate", "cards", 0, 0, cw_, ch_, {"image": ART["key"]}))
+        P.append((s + "key", "cards", 0, 0, cw_, ch_, {"text": " ", "fontcat": f["key"][0], "size": f["key"][1],
+                                                       "align": "Center"}))
     rw, rh = H["right"]
     md = H["mode"]
     P.append(("plate_right", "right", 0, 0, rw, rh, {"image": ART["plate"], "imagemargin": 8}))
@@ -365,7 +376,7 @@ def _groups():
             "right": H["right"], "centre": (H["target"], H["text_plate_h"]),
             "actions": (len(H["actions"]) * (sl + H["slot_gap"]) - H["slot_gap"], H["key_y"] + H["key"][1]),
             "toggle": (2 * sl + H["slot_gap"], H["key_y"] + H["key"][1]), "screen": (1, 1),
-            "back": (H["back"] + H["gap"] + H["key"][0], H["text_plate_h"])}
+            "back": (H["back"] + H["gap"] + H["key"][0], H["text_plate_h"]), "cards": H["card_key"]}
 
 
 PINS = ("pin", "pin_morale", "pin_state", "pin_effects")
@@ -518,6 +529,7 @@ def build():
              "\tmargin = %d," % HUD["margin"],
              '\tprobe = "slot_1_frame", -- the part whose drawn size against its design size gives the UI scale',
              "\tslots = %d," % HUD["slots"],
+             "\tcards = %d, -- command mode's card numbers: one page" % HUD["cards"],
              "\tgroups = {left = %s, bar = %s, right = %s, centre = %s, actions = %s, toggle = %s, screen = %s, back = %s}," % (
                  _lua(g["left"]), _lua(g["bar"]), _lua(g["right"]), _lua(g["centre"]), _lua(g["actions"]),
                  _lua(g["toggle"]), _lua(g["screen"]), _lua(g["back"])),

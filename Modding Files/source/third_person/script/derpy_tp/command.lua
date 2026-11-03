@@ -6,8 +6,14 @@ return function(E)
 	local F = E.F
 	local C = {}
 
-	-- the groups, in Bannerlord's order (spec 3.5); 6 is the characters but the one played: his heroes, or a hero's general
-	C.NAMES = {"Infantry", "Ranged", "Cavalry", "Monsters", "Artillery", "Heroes"}
+	-- the groups, in Bannerlord's order (spec 3.5); 6 is the characters but the one played: his heroes, or a hero's general.
+	-- 0, everyone. Loc rows (E.loc), read when one is picked
+	function C.name(n)
+		return ({[0] = E.loc("derpy_tp_ui_group_all", "All"), E.loc("derpy_tp_ui_group_infantry", "Infantry"),
+			E.loc("derpy_tp_ui_group_ranged", "Ranged"), E.loc("derpy_tp_ui_group_cavalry", "Cavalry"),
+			E.loc("derpy_tp_ui_group_monsters", "Monsters"), E.loc("derpy_tp_ui_group_artillery", "Artillery"),
+			E.loc("derpy_tp_ui_group_heroes", "Heroes")})[n]
+	end
 	-- by the category on the unit's card (data.lua castes, main_units.caste); a unit --gen never saw goes by CA's getters,
 	-- which follow land_units.category: that files 218 of 271 monsters as infantry (read 2026-10-23)
 	local CAVALRY = {melee_cavalry = true, missile_cavalry = true, monstrous_cavalry = true, chariot = true}
@@ -36,7 +42,7 @@ return function(E)
 			end
 		end
 		c.picked, c.n, c.v = picked, n, c.v + 1
-		E.hud.target((n == 0 and "All" or C.NAMES[n]) .. ": " .. (count > 0 and count or "none"))
+		E.hud.target(C.name(n) .. ": " .. (count > 0 and count or E.loc("derpy_tp_ui_group_none", "none")))
 	end
 
 	-- current_battle_speed reads the speed of the model's last tick, 0.65 s behind the call at a quarter (measured
@@ -120,9 +126,10 @@ return function(E)
 	function C.vanilla() return F.command ~= nil and F.command.vanilla == true end
 
 	-- the cards in the order the player's panel shows them, his own left out (vanilla spec 4.3). The panel is the filter:
-	-- it holds the cards he commands, his other armies' and summons' too. A dead unit keeps its card, so its number
+	-- it holds the cards he commands, his other armies' and summons' too. A dead unit keeps its card, so its number.
+	-- And each card's component, in the same order
 	local function cards()
-		local by_id, list = {}, {}
+		local by_id, list, comps = {}, {}, {}
 		local armies = bm:get_player_alliance():armies()
 		for a = 1, armies:count() do
 			local us = armies:item(a):units()
@@ -133,12 +140,26 @@ return function(E)
 			for i = 0, c:ChildCount() - 1 do
 				local k = UIComponent(c:Find(i))
 				local u = by_id[k:Id()]
-				if u then list[#list + 1] = u else walk(k) end -- a card is not walked into
+				if u then list[#list + 1], comps[#comps + 1] = u, k else walk(k) end -- a card is not walked into
 			end
 		end
 		local panel = find_uicomponent(core:get_ui_root(), "cards_panel")
 		if panel then walk(panel) end
-		return list
+		return list, comps
+	end
+	-- the number keys over the page's cards (hud.lua H.cards): read again every LABELS_EVERY real s, as cards come and go,
+	-- and at once on a page
+	local LABELS_EVERY, labels_at = 0.2, -1e9
+	local function labels(now)
+		if now - labels_at < LABELS_EVERY then return end
+		labels_at = now
+		local _, comps = cards()
+		local list = {}
+		for n = 1, 10 do
+			local k, name = comps[F.command.page * 10 + n], E.S.names["cmd_unit_" .. n]
+			if k and name then list[n] = {k, name} end
+		end
+		E.hud.cards(list)
 	end
 	local function say_page(n)
 		local p = F.command.page * 10
@@ -150,7 +171,7 @@ return function(E)
 		local c = F.command
 		if P.pressed(S.keys.cmd_page) then
 			local n = #cards()
-			if n > 10 then c.page = (c.page + 1) % math.ceil(n / 10) say_page(n) end
+			if n > 10 then c.page = (c.page + 1) % math.ceil(n / 10) say_page(n) labels_at = -1e9 end
 		end
 		for n = 1, 10 do
 			if P.pressed(S.keys["cmd_unit_" .. n]) then
@@ -186,7 +207,7 @@ return function(E)
 		-- give back: entered paused, it leaves paused (vanilla spec 4.6)
 		c.was = speed_now()
 		if not bm:is_multiplayer() and S.command_speed ~= 1 and c.was and c.was > 0 then set_speed(S.command_speed) end
-		if not c.vanilla then E.hud.target("Pick units: 1 to 6, 0 for all") return end
+		if not c.vanilla then E.hud.target(E.loc("derpy_tp_ui_pick_units", "Pick units: 1 to 6, 0 for all")) return end
 		-- the selection is the player's from here (spec 4.1); CA's whole HUD comes back with the pack's panel standing on it
 		-- and the way back over its bar (the author, 2026-10-23, live), the radar back in CA's own holder first (spec 4.8)
 		bm:clear_selection()
@@ -205,6 +226,7 @@ return function(E)
 		local b = own_banner()
 		if b then c.banner = b:Visible() b:SetVisible(false) end
 		c.page = 0
+		labels_at = -1e9
 		local n = #cards()
 		if n > 0 then say_page(n) end
 	end
@@ -441,6 +463,7 @@ return function(E)
 				F.uc:release_control()
 			end
 		end
+		if C.vanilla() then labels(now) end -- paused and with the mouse freed too: CA's cards show there
 		if not keys then return end
 		local S, P = E.S, E.P
 		time_keys(P, S, now)

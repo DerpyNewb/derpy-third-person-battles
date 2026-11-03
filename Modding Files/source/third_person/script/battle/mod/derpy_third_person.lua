@@ -25,6 +25,13 @@ local ok, err = pcall(function()
 		bm:remove_real_callback("derpy_tp_say")
 		bm:real_callback(function() bm:hide_subtitles() end, 6000, "derpy_tp_say")
 	end
+	-- words the HUD shows: the pack's loc row for key, so a translation pack can replace them (a translator, 2026-11-01:
+	-- they were plain strings here). english is that row's text - build_third_person.py writes the loc from these calls,
+	-- so key and english must be literals - and what shows if the loc does not answer
+	function E.loc(key, english)
+		local s = common.get_localised_string(key)
+		return s ~= "" and s or english
+	end
 	-- at load the loading screen is up and would hide a message: say it once the battle shows
 	local function when_shown(fn)
 		local done = false

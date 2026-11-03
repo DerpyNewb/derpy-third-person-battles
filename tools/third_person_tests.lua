@@ -1239,12 +1239,13 @@ T.the_cave_logs_a_blocked_blow_and_one_it_never_armed = function()
 end
 
 T.no_blow_is_struck_for_a_whole_unit_in_multiplayer_or_without_the_cave = function()
-	-- a unit played whole: every man swings, the engine's melee fights between swings
+	-- a unit played whole: CA's attack order (2026-11-02), the engine's melee does the fighting
 	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true}}},
 		enemies = {{x = 40, z = 2.5, men = 21}}, features = STRIKES, mct = {combat_one_man = false}}) -- a man ahead of each of his
 	H.select(H.units[2]) H.tap("F2") H.step(0.6)
 	H.tap("Left mouse") H.step(0.5)
-	check(H.count("play") > 1 and H.count("strike") == 0, "a whole unit's swing strikes nothing: " .. H.count("play"))
+	check(H.count("uc:attack_unit") == 1 and H.count("play") == 0 and H.count("strike") == 0,
+		"a whole unit's click is CA's order: no clip, no blow: " .. H.count("play"))
 	-- multiplayer: the roll is not the same on every machine
 	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
 	H.P.features.net = true
@@ -1330,12 +1331,11 @@ T.mounted_swings_use_rider_slots = function()
 end
 
 T.flying_mount_swings_use_airborne_rider_slots = function()
-	local u = playing({type = "wh_test_fly_mount", men = 2, flying = true, slots = {[454] = true, [1901] = true, [1941] = true}})
-	for i, m in ipairs(u._models) do m.mount = {id = 990 + i, slots = {[454] = true, [494] = true}} end
-	H.E.F.model = nil
+	local u = playing({type = "wh_test_fly_mount", men = 1, flying = true, slots = {[454] = true, [1901] = true, [1941] = true}})
+	u._models[1].mount = {id = 991, slots = {[454] = true, [494] = true}}
 	H.tap("Left mouse")
 	local p = H.all("play")
-	check(#p == 2 and p[1][2] == 991 and p[2][2] == 992 and p[1][3] == 494 and p[2][3] == 494, "each rider is driven by its mount's airborne attack")
+	check(#p == 1 and p[1][2] == 991 and p[1][3] == 494, "the rider is driven by his mount's airborne attack")
 	H.units[2]._flying = false past_swing_gap() H.tap("Left mouse")
 	check(H.last("play")[3] == 454, "landing switches back to a ground mount attack")
 end
@@ -2496,13 +2496,14 @@ end
 
 -- after the turn order a regiment played whole waits for, his lock has no clip to watch: it was read as reported
 -- (nil == nil) and ended the moment the clip was sent, and the next click or the sprint's charge clip cut it (measured
--- live 2026-10-18; the author: "pressing charge attack as well repeats the charge animation randomly")
+-- live 2026-10-18; the author: "pressing charge attack as well repeats the charge animation randomly"). The jump: since
+-- 2026-11-02 the click is CA's attack order for a regiment played whole
 T.a_swing_after_a_turn_order_keeps_its_lock_until_its_clip_plays = function()
 	whole_on({type = "wh_test_melee", men = 21, enemies = {{x = 3, z = 3, men = 10}}}) H.step(0.6)
 	set_view(H.E.rig.yaw + 2) H.step(1 / 60)
 	H.report_ms = 500 -- reported 0.5 s after it is sent
-	H.tap("Left mouse") H.step(0.5)
-	check(H.count("uc:goto_location_angle_width") == 1 and H.count("play") >= 1, "turned, then the swing")
+	H.tap("E") H.step(0.5)
+	check(H.count("uc:goto_location_angle_width") == 1 and H.count("play") >= 1, "turned, then the jump")
 	check(H.E.F.lock ~= nil, "still his while the clip is not reported")
 	H.step(0.45) -- sent 0.35 s after the click, reported 0.5 s after that
 	check(H.E.F.lock ~= nil and H.E.F.lock.seen, "reported, his until it ends")
@@ -2868,7 +2869,8 @@ end
 -- N.throw: the registry lookup throws; N.csite: the bytes at the carrier cave's site; N.jump: the byte at the gate's
 -- branch (N.gate() reads it back); N.net_rules: stands in for M.net_rules, which install_net calls right after the gate's
 -- check; N.single: a single-player build of the same image; N.refuse: the patch refuses to write that byte at the branch
--- (0x52 the gate in, 0x5c out), as a failed protect or another tool's patch would
+-- (0x52 the gate in, 0x5c out), as a failed protect or another tool's patch would; N.stamp: the image's build, with
+-- N.rows(BUILDS) standing a row in for it (the fake's addresses are 6acec6f4's)
 local function net_platform(N)
 	N = N or {}
 	H.fresh()
@@ -2877,7 +2879,8 @@ local function net_platform(N)
 	local M = assert(loadfile("/script/derpy_tp/platform"))()
 	H.real_platform = false
 	if N.net_rules then M.net_rules = N.net_rules end
-	local mr, put, BASE = fake_image(0x6acec6f4)
+	if N.rows then N.rows(M.BUILDS) end
+	local mr, put, BASE = fake_image(N.stamp or 0x6acec6f4)
 	mr.int32 = mr.uint8
 	local G, B, Q, E0 = BASE + 0x5000000, BASE + 0x5100000, BASE + 0x5200000, BASE + 0x5300000
 	put(BASE + 0x4480da0, G, 8) put(G + 0x468, B, 8) put(B + 0x644e8, Q, 8)
@@ -2946,6 +2949,26 @@ local function net_platform(N)
 end
 local function same(want, got, what)
 	for o, val in pairs(want) do check(got[o] == val, what .. " +" .. o .. ": " .. tostring(got[o]) .. ", not " .. tostring(val)) end
+end
+
+-- the multiplayer route goes with the row's queued-command fields, not one build's stamp: it was a literal 6acec6f4 test,
+-- which left 9.0.5's 6ae2a00b row single player only (2026-11-03). Without the fields it is refused and says so
+T.platform_net_route_follows_the_row_not_the_stamp = function()
+	local function as_new(drop)
+		return function(B)
+			local r = {}
+			for k, v in pairs(B["6acec6f4"]) do r[k] = v end
+			if drop then r.g_move = nil end
+			B["6ae2a00b"] = r
+		end
+	end
+	local N = net_platform({stamp = 0x6ae2a00b, rows = as_new(false)})
+	check(N.P.build == "6ae2a00b", "the image's build: " .. tostring(N.P.build))
+	check(N.P.features.net, "net mode on a row with the fields: " .. table.concat(N.P.problems, "; "))
+	N = net_platform({stamp = 0x6ae2a00b, rows = as_new(true)})
+	check(not N.P.features.net, "no net mode on a row without them")
+	check(table.concat(N.P.problems, "; "):find("no multiplayer route on build 6ae2a00b", 1, true),
+		"says why: " .. table.concat(N.P.problems, "; "))
 end
 
 -- the real platform's MOVE, HALT, FOLLOW and carrier, record by record against the recipe in MP_FEASIBILITY_20261021_THIRD_PERSON.md
@@ -6568,7 +6591,9 @@ T.with_alt_the_guide_key_the_games_alt_shortcuts_on_its_keys_are_off = function(
 	local s = shortcuts()
 	check(s.toggle_music == true and s.battle_land_spell_1 == true and s.battle_land_spell_6 == true
 		and s.button_group_management_6 == true, "Alt+M, Alt+1-6 and Alt+0 off")
-	check(s.toggle_sfx == nil and s.toggle_ui_with_borders == nil, "Alt+X and Alt+K: X and K are none of its keys")
+	-- X plays the man to his left (2026-11-02): held with Alt, it would switch the game's sound off
+	check(s.toggle_sfx == true, "Alt+X off: X is the switch key")
+	check(s.toggle_ui_with_borders == nil, "Alt+K: K is none of its keys")
 	H.tap("F2")
 	s = shortcuts()
 	check(s.toggle_music == false and s.battle_land_spell_1 == false, "back at the end")
@@ -7419,9 +7444,14 @@ T.a_whole_unit_turn_just_after_stopping_is_not_dropped = function()
 	whole_on({type = "wh_test_melee", men = 21, enemies = {{x = 3, z = 3, men = 10}}}) H.step(0.6)
 	H.down("W") H.step(0.6) H.up("W")
 	set_view(H.E.rig.yaw + 2) H.step(1 / 60)
-	H.tap("Left mouse") H.step(1.5)
+	H.tap("E") H.step(1.5)
 	none_dropped("uc:goto_location_angle_width", 1)
-	check(H.count("play") >= 1, "then the swing")
+	check(H.count("play") >= 1, "then the jump")
+	-- and the click's attack order (2026-11-02) just after a walk's halt
+	whole_on({type = "wh_test_melee", men = 21, enemies = {{x = 3, z = 3, men = 10}}}) H.step(0.6)
+	H.down("W") H.step(0.6) H.up("W") H.step(1 / 60)
+	H.tap("Left mouse") H.step(1)
+	none_dropped("uc:attack_unit", 1)
 end
 
 -- an order waiting for its gap when third person ends is not sent in the next session
@@ -10747,6 +10777,201 @@ T.a_modded_ability_that_brings_a_unit_goes_off_as_a_transformation = function()
 	ok, err = pcall(function() check(H.E.F.on, "a known ability that brings a unit: third person stays on") end)
 	undo()
 	assert(ok, err)
+end
+
+
+-- the author, 2026-11-02: "entity switching on a regiment using available keys". C plays the man to his right, X the man
+-- to his left; the one let go is held where he stands and his swings are given back, as at the end
+local function since(n, name, id)
+	for i = n + 1, #H.calls do local c = H.calls[i] if c[1] == name and c[2] == id then return c end end
+end
+T.the_switch_keys_play_the_man_beside_him = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40})
+	local man = H.E.F.model
+	check(man == u._models[11], "the front-centre man first")
+	local n = #H.calls
+	H.tap("C")
+	check(H.E.F.model == u._models[12], "C: the man to his right, " .. tostring(H.E.F.model and H.E.F.model.id))
+	local h = since(n, "hold", man.id)
+	check(h and near(h[3], man.x) and near(h[4], man.z), "the one let go is held where he stands")
+	check(since(n, "arm", man.id), "and his own swings are given back")
+	check(since(n, "disarm", u._models[12].id), "the new one is disarmed")
+	check(H.count("uc:goto_location") == 0 and H.count("uc:halt") == 0, "the regiment gets no order")
+	H.tap("X") H.tap("X")
+	check(H.E.F.model == u._models[10], "X twice: back past him to the man on his left")
+end
+
+-- right and left of the view, not of the regiment: the camera turned round, C goes the other way along the rank
+T.the_switch_keys_follow_the_view = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40})
+	set_view(math.pi)
+	H.tap("C")
+	check(H.E.F.model == u._models[10], "facing back: C is the man at lower x, " .. tostring(H.E.F.model.id))
+end
+
+-- his own rank first: a man a step back and a step aside counts for three steps aside
+T.the_switch_keys_keep_to_his_rank = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40})
+	u._models[12].z = u._z - 1
+	H.tap("C")
+	check(H.E.F.model == u._models[13], "the next man in his rank, not the one behind: " .. tostring(H.E.F.model.id))
+end
+
+-- nobody further that way: the far end of the regiment, so the keys go round it
+T.the_switch_keys_go_round_the_regiment = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40})
+	for _ = 1, 10 do H.tap("C") end
+	check(H.E.F.model == u._models[21], "the right end")
+	H.tap("C")
+	check(H.E.F.model == u._models[1], "C at the right end: the left end, " .. tostring(H.E.F.model.id))
+	H.tap("X")
+	check(H.E.F.model == u._models[21], "and X goes back round")
+	u._models[20].hp = 0
+	H.tap("X")
+	check(H.E.F.model == u._models[19], "a dead man is passed over")
+end
+
+-- command mode keeps its keys, and a unit of one has nobody beside him
+T.the_switch_keys_only_play_a_man_of_a_regiment = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, mct = {command_any_unit = true}})
+	H.select(H.units[2])
+	H.tap("F2") H.step(0.1)
+	local u = H.units[2]
+	H.tap("Q") H.step(0.1)
+	check(H.E.F.command, "in command mode")
+	H.tap("C")
+	check(H.E.F.model == u._models[11], "no switch in command mode")
+	H.fresh() H.tap("F2") H.step(0.1)
+	H.tap("C") H.tap("X")
+	check(H.E.F.on and H.E.F.model == nil, "a unit of one plays on")
+end
+
+-- a shot of his under way is dropped and its reload counts: the next man cannot fire at once
+T.the_switch_keys_keep_the_reload = function()
+	local u = crossbowmen()
+	H.tap("Left mouse")
+	for _ = 1, 100 do if H.count("launch") > 0 then break end H.step(0.1) end
+	check(H.count("launch") == 1, "his shot left")
+	H.tap("C")
+	check(H.E.F.model == u._models[12] and H.E.F.shot == nil, "the next man, the shot dropped")
+	check(H.E.F.ready_at and H.E.F.ready_at > H.model_ms() / 1000, "the reload still counts")
+end
+
+-- X raises CA's camera and C tilts it (default_keys.xml, read 2026-11-02): off while third person is on
+T.the_games_x_and_c_shortcuts_are_off_while_on = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	local s = shortcuts()
+	check(s.cam_up == true and s.rot_d == true, "cam_up and rot_d off")
+	H.tap("F2")
+	s = shortcuts()
+	check(s.cam_up == false and s.rot_d == false, "back at the end")
+end
+
+-- last in the key list: a player who gave C to another action keeps it, and the switch is unbound
+T.settings_an_earlier_action_keeps_the_switch_key = function()
+	local S = settings_with({key_jump = "C"})
+	check(S.keys.jump == 0x43, "jump on C")
+	check(S.keys.man_right == nil and S.keys.man_left == 0x58, "the right switch unbound, the left on X")
+	local c = S.conflicts[1]
+	check(c and c.action == "man_right" and c.taken_by == "jump", "reported")
+end
+
+
+-- a translation pack replaces the HUD's words through their loc rows (a translator, 2026-11-01: they were plain strings in
+-- the Lua). The harness answers no loc, so every other test reads the English each call falls back to
+T.the_huds_words_come_from_their_loc_rows = function()
+	vanilla_battle()
+	H.loc.derpy_tp_ui_back = "Retour"
+	H.tap("Q") H.step(0.1)
+	check(hud_part("back").text == "Retour", "the way back: " .. tostring(hud_part("back").text))
+	command_battle()
+	H.loc.derpy_tp_ui_group_infantry, H.loc.derpy_tp_ui_group_none = "Pieds", "aucun"
+	H.tap("Q") H.step(0.1)
+	H.tap("1") H.step(0.1)
+	check(hud_part("target").text:match("^Pieds: "), "a group's name: " .. tostring(hud_part("target").text))
+	H.tap("5") H.step(0.1)
+	check(hud_part("target").text:match(": aucun$"), "and none: " .. tostring(hud_part("target").text))
+end
+
+-- command mode's Vanilla style: each card of the page carries its number key, in the card's top-right corner level with
+-- CA's rank badge (the author, 2026-11-02: "the number label on units when in command mode"). His own card has none: no
+-- key picks him
+local function lay_cards()
+	for i, c in ipairs(find_uicomponent(H.root, "cards_panel").kids) do c.x, c.y, c.w, c.h = 600 + 70 * i, 900, 60, 130 end
+	return find_uicomponent(H.root, "cards_panel").kids
+end
+T.vanilla_command_mode_numbers_the_cards = function()
+	vanilla_battle()
+	local cards = lay_cards()
+	H.tap("Q") H.step(0.3)
+	for n = 1, 3 do
+		local key, plate, card = hud_part("card_" .. n .. "_key"), hud_part("card_" .. n .. "_keyplate"), cards[n + 1]
+		check(key:Visible() and plate:Visible() and key.text == tostring(n), "card " .. n .. ": " .. tostring(key.text))
+		check(near(plate.x + plate.w, card.x + card.w - 1, 1) and near(plate.y + plate.h / 2, card.y + 33, 1),
+			"in its card's top-right corner, level with the rank badge: " .. plate.x .. "," .. plate.y)
+	end
+	check(not hud_part("card_4_key"):Visible(), "three cards: no fourth number")
+	cards[3].x = 1000 H.step(0.3)
+	check(near(hud_part("card_2_keyplate").x + 26, 1059, 1), "a card that moves takes its number along")
+	H.tap("Q") H.step(0.1)
+	check(not hud_part("card_1_key"):Visible() and not hud_part("card_1_keyplate"):Visible(), "leaving hides them")
+	-- the Bannerlord style hides CA's cards, and numbers none
+	command_battle()
+	lay_cards()
+	H.tap("Q") H.step(0.3)
+	check(not hud_part("card_1_key"):Visible(), "the Bannerlord style: none")
+end
+
+-- a key name wider than the lozenge widens it to the left, and never off its card: cards touch
+T.a_long_card_key_widens_its_lozenge = function()
+	vanilla_battle({key_cmd_unit_1 = "Numpad 1"})
+	local cards = lay_cards()
+	H.tap("Q") H.step(0.3)
+	local plate, key = hud_part("card_1_keyplate"), hud_part("card_1_key")
+	check(key.text == "Numpad 1" and plate.w > 26 and key.w == plate.w, "widened: " .. tostring(plate.w))
+	check(near(plate.x, math.max(cards[2].x, cards[2].x + 59 - plate.w), 1), "widened to the left, not off its card: " .. plate.x)
+	H.E.S.names.cmd_unit_1 = "A name far wider than any card" H.step(0.3)
+	check(plate.w > 60 and near(plate.x, cards[2].x, 1), "wider than the card: on its left edge, not over its neighbour: "
+		.. plate.x .. ", " .. plate.w)
+end
+
+-- a regiment played whole attacks by CA's own order, on the enemy ahead, as its volley does (the author, 2026-11-02:
+-- "it should use vanilla attacking targetting, same as shooting use vanilla shoot the regiment"); the pack's clips on its
+-- men dealt no damage
+local function regiment_whole(enemies)
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, enemies = enemies,
+		mct = {combat_one_man = false}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	return H.units[2]
+end
+T.a_regiment_played_whole_attacks_by_cas_order = function()
+	regiment_whole({{men = 10, x = 40, z = 30}})
+	check(H.E.F.model == nil, "played whole")
+	H.tap("Left mouse") H.step(0.6)
+	local a = H.last("uc:attack_unit")
+	check(a and a[3] == H.enemies[1], "CA's attack order on the enemy ahead")
+	check(H.count("play") == 0, "no clip played on its men")
+	H.tap("Left mouse") H.step(0.6)
+	H.tap("Right mouse") H.step(0.6)
+	check(H.count("uc:attack_unit") == 1, "not sent again on the unit it is attacking, by either button")
+	H.down("W") H.step(0.6) H.up("W") H.step(0.6)
+	H.tap("Left mouse") H.step(0.6)
+	check(H.count("uc:attack_unit") == 2, "a walk let it go: the next click orders again")
+end
+
+-- nobody ahead: no order, and it says so
+T.a_regiment_played_whole_with_no_enemy_ahead_says_so = function()
+	regiment_whole({{men = 10, x = 40, z = -60}})
+	H.tap("Left mouse") H.step(0.6)
+	check(H.count("uc:attack_unit") == 0 and H.last("subtitle")[2] == "derpy_tp_no_enemy", "no order, the message")
+end
+
+-- one man of a regiment still swings alone, his regiment given no order (the author's 2026-10-15 rule)
+T.one_man_of_a_regiment_still_swings_alone = function()
+	local u = playing({type = "wh_test_melee", men = 21, x = 40, slots = {[42] = true, [454] = true}}, {{men = 10, x = 40, z = 30}})
+	H.tap("Left mouse") H.step(0.6)
+	check(H.count("uc:attack_unit") == 0 and H.last("play") and H.last("play")[2] == H.E.F.model.id, "his clip, no order")
+	check(u._models[11] == H.E.F.model, "still him")
 end
 
 return T

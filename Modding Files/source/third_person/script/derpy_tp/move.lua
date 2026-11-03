@@ -41,6 +41,29 @@ return function(E)
 		return best
 	end
 
+	-- the man beside m in his regiment (the author, 2026-11-02: "entity switching on a regiment"): dir 1 to the right of the
+	-- view, -1 to the left. The nearest that way, a step forward or back counting SIDE_DEPTH times a step aside, so his own
+	-- rank comes first; none that way, the far end of the regiment the other way, his rank first, so the keys go round it.
+	-- nil: nobody else alive
+	local SIDE_DEPTH, SIDE_MIN = 2, 0.3 -- m: closer aside than SIDE_MIN is behind or ahead of him, not beside
+	function M.beside(unit, m, dir)
+		local rx, rz = math.cos(E.rig.yaw) * dir, -math.sin(E.rig.yaw) * dir
+		local fx, fz = math.sin(E.rig.yaw), math.cos(E.rig.yaw)
+		local x0, _, z0 = P.model_pos(m)
+		local near, near_score, far, far_score
+		for _, o in ipairs(P.models(unit)) do
+			if not P.same(o, m) and P.model_hp(o) > 0 then
+				local x, _, z = P.model_pos(o)
+				local side, depth = (x - x0) * rx + (z - z0) * rz, math.abs((x - x0) * fx + (z - z0) * fz)
+				local score = side + depth * SIDE_DEPTH
+				if side > SIDE_MIN then
+					if not near_score or score < near_score then near, near_score = o, score end
+				elseif not far_score or score < far_score then far, far_score = o, score end
+			end
+		end
+		return near or far
+	end
+
 	-- his heading toward want, this frame's step of the set turn rate from the one he has, never there in one write (the author, 2026-10-21: "the instant turning to the cameras
 	-- direction rather than smoothly"). rate: times S.turn_rate; an action's turn is ACTION_TURN, so a swing faces the
 	-- crosshair before its clip turns him itself (0.19-0.31 s after the send, combat.lua). F.dt is the frame's real time

@@ -346,6 +346,37 @@ return function(E)
 		end
 	end
 
+	-- the man played is m now (the last died, or the switch keys), nil for the regiment played whole: what was the last
+	-- one's alone goes, and what he can do is read off the new one
+	local function take(unit, m)
+		F.model, F.man_hold, F.shot, F.lock, F.swung = m, nil, nil, nil, nil
+		F.strike, F.blow = nil, nil -- his swing's blow went with him
+		F.body = F.model and P.mount(F.model)
+		F.reload_slot = F.model and P.reload_slot(F.model)
+		-- played whole from here: it holds its fire until third person ends
+		hold_fire(unit)
+		F.fire_slot = F.model and fire_clip(F.model)
+		F.solo = F.model ~= nil and E.D.shots[F.utype] ~= nil and P.features.anim and F.fire_slot ~= nil
+		capabilities(F.model or P.models(unit)[1])
+		-- a next man who cannot shoot alone is played in melee, as at the start
+		F.cannot_shoot = F.model ~= nil and not F.solo and unit:missile_range() > 0
+		if F.cannot_shoot then F.ranged = false end
+	end
+
+	-- the switch keys (keys.lua man_left, man_right): the man beside him plays instead (move.lua M.beside). He is let go as
+	-- at the end - stopped where he stands, his own swings given back - and his regiment orders him again; a shot of his
+	-- under way is dropped, its reload kept
+	local function switch(unit, dir, now)
+		local m = E.move.beside(unit, F.model, dir)
+		if not m then return end
+		E.combat.drop(now)
+		E.move.halt()
+		if F.disarmed then P.arm(F.disarmed) F.disarmed = nil end
+		F.pending, F.lead, F.face_yaw = nil, nil, nil
+		take(unit, m)
+		E.log("switched " .. (dir > 0 and "right" or "left"))
+	end
+
 	-- now, dt: real time for the camera; gnow: model time for what acts; paused: nothing acts
 	local function tick(now, dt, gnow, paused)
 		local S, unit = E.S, F.unit
@@ -368,18 +399,7 @@ return function(E)
 		if F.model and (unit:number_of_men_alive() < 2 or not P.alive(unit, F.model)) then
 			-- he died, or he is the last man: the next front-centre man, or the whole unit; a crewman's mate on the same
 			-- chariot first, so the camera stays on the chariot played (F.body: read while he lived, not off a dead man)
-			F.model, F.man_hold, F.shot, F.lock, F.swung = E.move.front_man(unit, F.body), nil, nil, nil, nil
-			F.strike, F.blow = nil, nil -- his swing's blow went with him
-			F.body = F.model and P.mount(F.model)
-			F.reload_slot = F.model and P.reload_slot(F.model)
-			-- played whole from here: it holds its fire until third person ends
-			hold_fire(unit)
-			F.fire_slot = F.model and fire_clip(F.model)
-			F.solo = F.model ~= nil and E.D.shots[F.utype] ~= nil and P.features.anim and F.fire_slot ~= nil
-			capabilities(F.model or P.models(unit)[1])
-			-- a next man who cannot shoot alone is played in melee, as at the start
-			F.cannot_shoot = F.model ~= nil and not F.solo and unit:missile_range() > 0
-			if F.cannot_shoot then F.ranged = false end
+			take(unit, E.move.front_man(unit, F.body))
 		end
 		-- the game's melee mode follows his: the melee weapon drawn in melee, the missile weapon in ranged (the author,
 		-- 2026-10-15: "should walk and idle with melee weapons if melee mode, and vice versa for ranged"). It is the whole
@@ -447,6 +467,9 @@ return function(E)
 				F.running = F.sprinting or not F.walking
 				if P.pressed(S.keys.jump) and F.dragging and not F.armed then E.combat.jump(gnow) end
 				if P.pressed(S.keys.cheer) and F.dragging and not F.armed then E.combat.cheer(gnow) end
+				-- one man of a regiment only: a unit played whole or a unit of one has nobody beside him
+				if P.pressed(S.keys.man_right) and F.dragging and F.model then switch(unit, 1, gnow) end
+				if P.pressed(S.keys.man_left) and F.dragging and F.model then switch(unit, -1, gnow) end
 				if F.armed then
 					if F.dragging and clicked then E.abilities.fire() F.swallow = true end
 				elseif F.swallow then

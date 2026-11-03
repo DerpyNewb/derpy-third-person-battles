@@ -290,15 +290,35 @@
 				<back this="D7A00352-D000-4000-B000000000000352"/>
 				<back_keyplate this="D7A00355-D000-4000-B000000000000355"/>
 				<back_key this="D7A00358-D000-4000-B000000000000358"/>
-				<plate_right this="D7A0035B-D000-4000-B00000000000035B"/>
-				<mode this="D7A0035E-D000-4000-B00000000000035E"/>
-				<ammo this="D7A00361-D000-4000-B000000000000361"/>
-				<ammo_back this="D7A00364-D000-4000-B000000000000364"/>
-				<ammo_fill this="D7A00367-D000-4000-B000000000000367"/>
-				<ammo_frame this="D7A0036A-D000-4000-B00000000000036A"/>
-				<target_plate this="D7A0036D-D000-4000-B00000000000036D"/>
-				<target this="D7A00370-D000-4000-B000000000000370"/>
-				<target_arrow this="D7A00373-D000-4000-B000000000000373"/>
+				<card_1_keyplate this="D7A0035B-D000-4000-B00000000000035B"/>
+				<card_1_key this="D7A0035E-D000-4000-B00000000000035E"/>
+				<card_2_keyplate this="D7A00361-D000-4000-B000000000000361"/>
+				<card_2_key this="D7A00364-D000-4000-B000000000000364"/>
+				<card_3_keyplate this="D7A00367-D000-4000-B000000000000367"/>
+				<card_3_key this="D7A0036A-D000-4000-B00000000000036A"/>
+				<card_4_keyplate this="D7A0036D-D000-4000-B00000000000036D"/>
+				<card_4_key this="D7A00370-D000-4000-B000000000000370"/>
+				<card_5_keyplate this="D7A00373-D000-4000-B000000000000373"/>
+				<card_5_key this="D7A00376-D000-4000-B000000000000376"/>
+				<card_6_keyplate this="D7A00379-D000-4000-B000000000000379"/>
+				<card_6_key this="D7A0037C-D000-4000-B00000000000037C"/>
+				<card_7_keyplate this="D7A0037F-D000-4000-B00000000000037F"/>
+				<card_7_key this="D7A00382-D000-4000-B000000000000382"/>
+				<card_8_keyplate this="D7A00385-D000-4000-B000000000000385"/>
+				<card_8_key this="D7A00388-D000-4000-B000000000000388"/>
+				<card_9_keyplate this="D7A0038B-D000-4000-B00000000000038B"/>
+				<card_9_key this="D7A0038E-D000-4000-B00000000000038E"/>
+				<card_10_keyplate this="D7A00391-D000-4000-B000000000000391"/>
+				<card_10_key this="D7A00394-D000-4000-B000000000000394"/>
+				<plate_right this="D7A00397-D000-4000-B000000000000397"/>
+				<mode this="D7A0039A-D000-4000-B00000000000039A"/>
+				<ammo this="D7A0039D-D000-4000-B00000000000039D"/>
+				<ammo_back this="D7A003A0-D000-4000-B0000000000003A0"/>
+				<ammo_fill this="D7A003A3-D000-4000-B0000000000003A3"/>
+				<ammo_frame this="D7A003A6-D000-4000-B0000000000003A6"/>
+				<target_plate this="D7A003A9-D000-4000-B0000000000003A9"/>
+				<target this="D7A003AC-D000-4000-B0000000000003AC"/>
+				<target_arrow this="D7A003AF-D000-4000-B0000000000003AF"/>
 			</derpy_tp_hud>
 		</root>
 	</hierarchy>
@@ -9373,9 +9393,9 @@
 				</standard>
 			</states>
 		</back_key>
-		<plate_right
+		<card_1_keyplate
 			this="D7A0035B-D000-4000-B00000000000035B"
-			id="plate_right"
+			id="card_1_keyplate"
 			tooltipslocalised="true"
 			uniqueguid="D7A0035B-D000-4000-B00000000000035B"
 			currentstate="D7A0035C-D000-4000-B00000000000035C"
@@ -9384,20 +9404,620 @@
 				<component_image
 					this="D7A0035B-D001-4000-B00000000000035B"
 					uniqueguid="D7A0035B-D001-4000-B00000000000035B"
-					imagepath="ui/skins/default/tooltip_frame.png"/>
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
 			</componentimages>
 			<states>
 				<standard
 					this="D7A0035C-D000-4000-B00000000000035C"
 					name="standard"
-					width="170"
-					height="64"
+					width="26"
+					height="18"
 					uniqueguid="D7A0035C-D000-4000-B00000000000035C">
 					<imagemetrics>
 						<image
 							this="D7A0035B-D002-4000-B00000000000035B"
 							uniqueguid="D7A0035B-D002-4000-B00000000000035B"
 							componentimage="D7A0035B-D001-4000-B00000000000035B"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_1_keyplate>
+		<card_1_key
+			this="D7A0035E-D000-4000-B00000000000035E"
+			id="card_1_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A0035E-D000-4000-B00000000000035E"
+			currentstate="D7A0035F-D000-4000-B00000000000035F"
+			defaultstate="D7A0035F-D000-4000-B00000000000035F">
+			<states>
+				<standard
+					this="D7A0035F-D000-4000-B00000000000035F"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0035F-D000-4000-B00000000000035F">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_1_key>
+		<card_2_keyplate
+			this="D7A00361-D000-4000-B000000000000361"
+			id="card_2_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A00361-D000-4000-B000000000000361"
+			currentstate="D7A00362-D000-4000-B000000000000362"
+			defaultstate="D7A00362-D000-4000-B000000000000362">
+			<componentimages>
+				<component_image
+					this="D7A00361-D001-4000-B000000000000361"
+					uniqueguid="D7A00361-D001-4000-B000000000000361"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00362-D000-4000-B000000000000362"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00362-D000-4000-B000000000000362">
+					<imagemetrics>
+						<image
+							this="D7A00361-D002-4000-B000000000000361"
+							uniqueguid="D7A00361-D002-4000-B000000000000361"
+							componentimage="D7A00361-D001-4000-B000000000000361"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_2_keyplate>
+		<card_2_key
+			this="D7A00364-D000-4000-B000000000000364"
+			id="card_2_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A00364-D000-4000-B000000000000364"
+			currentstate="D7A00365-D000-4000-B000000000000365"
+			defaultstate="D7A00365-D000-4000-B000000000000365">
+			<states>
+				<standard
+					this="D7A00365-D000-4000-B000000000000365"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00365-D000-4000-B000000000000365">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_2_key>
+		<card_3_keyplate
+			this="D7A00367-D000-4000-B000000000000367"
+			id="card_3_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A00367-D000-4000-B000000000000367"
+			currentstate="D7A00368-D000-4000-B000000000000368"
+			defaultstate="D7A00368-D000-4000-B000000000000368">
+			<componentimages>
+				<component_image
+					this="D7A00367-D001-4000-B000000000000367"
+					uniqueguid="D7A00367-D001-4000-B000000000000367"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00368-D000-4000-B000000000000368"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00368-D000-4000-B000000000000368">
+					<imagemetrics>
+						<image
+							this="D7A00367-D002-4000-B000000000000367"
+							uniqueguid="D7A00367-D002-4000-B000000000000367"
+							componentimage="D7A00367-D001-4000-B000000000000367"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_3_keyplate>
+		<card_3_key
+			this="D7A0036A-D000-4000-B00000000000036A"
+			id="card_3_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A0036A-D000-4000-B00000000000036A"
+			currentstate="D7A0036B-D000-4000-B00000000000036B"
+			defaultstate="D7A0036B-D000-4000-B00000000000036B">
+			<states>
+				<standard
+					this="D7A0036B-D000-4000-B00000000000036B"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0036B-D000-4000-B00000000000036B">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_3_key>
+		<card_4_keyplate
+			this="D7A0036D-D000-4000-B00000000000036D"
+			id="card_4_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A0036D-D000-4000-B00000000000036D"
+			currentstate="D7A0036E-D000-4000-B00000000000036E"
+			defaultstate="D7A0036E-D000-4000-B00000000000036E">
+			<componentimages>
+				<component_image
+					this="D7A0036D-D001-4000-B00000000000036D"
+					uniqueguid="D7A0036D-D001-4000-B00000000000036D"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A0036E-D000-4000-B00000000000036E"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0036E-D000-4000-B00000000000036E">
+					<imagemetrics>
+						<image
+							this="D7A0036D-D002-4000-B00000000000036D"
+							uniqueguid="D7A0036D-D002-4000-B00000000000036D"
+							componentimage="D7A0036D-D001-4000-B00000000000036D"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_4_keyplate>
+		<card_4_key
+			this="D7A00370-D000-4000-B000000000000370"
+			id="card_4_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A00370-D000-4000-B000000000000370"
+			currentstate="D7A00371-D000-4000-B000000000000371"
+			defaultstate="D7A00371-D000-4000-B000000000000371">
+			<states>
+				<standard
+					this="D7A00371-D000-4000-B000000000000371"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00371-D000-4000-B000000000000371">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_4_key>
+		<card_5_keyplate
+			this="D7A00373-D000-4000-B000000000000373"
+			id="card_5_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A00373-D000-4000-B000000000000373"
+			currentstate="D7A00374-D000-4000-B000000000000374"
+			defaultstate="D7A00374-D000-4000-B000000000000374">
+			<componentimages>
+				<component_image
+					this="D7A00373-D001-4000-B000000000000373"
+					uniqueguid="D7A00373-D001-4000-B000000000000373"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00374-D000-4000-B000000000000374"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00374-D000-4000-B000000000000374">
+					<imagemetrics>
+						<image
+							this="D7A00373-D002-4000-B000000000000373"
+							uniqueguid="D7A00373-D002-4000-B000000000000373"
+							componentimage="D7A00373-D001-4000-B000000000000373"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_5_keyplate>
+		<card_5_key
+			this="D7A00376-D000-4000-B000000000000376"
+			id="card_5_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A00376-D000-4000-B000000000000376"
+			currentstate="D7A00377-D000-4000-B000000000000377"
+			defaultstate="D7A00377-D000-4000-B000000000000377">
+			<states>
+				<standard
+					this="D7A00377-D000-4000-B000000000000377"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00377-D000-4000-B000000000000377">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_5_key>
+		<card_6_keyplate
+			this="D7A00379-D000-4000-B000000000000379"
+			id="card_6_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A00379-D000-4000-B000000000000379"
+			currentstate="D7A0037A-D000-4000-B00000000000037A"
+			defaultstate="D7A0037A-D000-4000-B00000000000037A">
+			<componentimages>
+				<component_image
+					this="D7A00379-D001-4000-B000000000000379"
+					uniqueguid="D7A00379-D001-4000-B000000000000379"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A0037A-D000-4000-B00000000000037A"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0037A-D000-4000-B00000000000037A">
+					<imagemetrics>
+						<image
+							this="D7A00379-D002-4000-B000000000000379"
+							uniqueguid="D7A00379-D002-4000-B000000000000379"
+							componentimage="D7A00379-D001-4000-B000000000000379"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_6_keyplate>
+		<card_6_key
+			this="D7A0037C-D000-4000-B00000000000037C"
+			id="card_6_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A0037C-D000-4000-B00000000000037C"
+			currentstate="D7A0037D-D000-4000-B00000000000037D"
+			defaultstate="D7A0037D-D000-4000-B00000000000037D">
+			<states>
+				<standard
+					this="D7A0037D-D000-4000-B00000000000037D"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0037D-D000-4000-B00000000000037D">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_6_key>
+		<card_7_keyplate
+			this="D7A0037F-D000-4000-B00000000000037F"
+			id="card_7_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A0037F-D000-4000-B00000000000037F"
+			currentstate="D7A00380-D000-4000-B000000000000380"
+			defaultstate="D7A00380-D000-4000-B000000000000380">
+			<componentimages>
+				<component_image
+					this="D7A0037F-D001-4000-B00000000000037F"
+					uniqueguid="D7A0037F-D001-4000-B00000000000037F"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00380-D000-4000-B000000000000380"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00380-D000-4000-B000000000000380">
+					<imagemetrics>
+						<image
+							this="D7A0037F-D002-4000-B00000000000037F"
+							uniqueguid="D7A0037F-D002-4000-B00000000000037F"
+							componentimage="D7A0037F-D001-4000-B00000000000037F"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_7_keyplate>
+		<card_7_key
+			this="D7A00382-D000-4000-B000000000000382"
+			id="card_7_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A00382-D000-4000-B000000000000382"
+			currentstate="D7A00383-D000-4000-B000000000000383"
+			defaultstate="D7A00383-D000-4000-B000000000000383">
+			<states>
+				<standard
+					this="D7A00383-D000-4000-B000000000000383"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00383-D000-4000-B000000000000383">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_7_key>
+		<card_8_keyplate
+			this="D7A00385-D000-4000-B000000000000385"
+			id="card_8_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A00385-D000-4000-B000000000000385"
+			currentstate="D7A00386-D000-4000-B000000000000386"
+			defaultstate="D7A00386-D000-4000-B000000000000386">
+			<componentimages>
+				<component_image
+					this="D7A00385-D001-4000-B000000000000385"
+					uniqueguid="D7A00385-D001-4000-B000000000000385"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00386-D000-4000-B000000000000386"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00386-D000-4000-B000000000000386">
+					<imagemetrics>
+						<image
+							this="D7A00385-D002-4000-B000000000000385"
+							uniqueguid="D7A00385-D002-4000-B000000000000385"
+							componentimage="D7A00385-D001-4000-B000000000000385"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_8_keyplate>
+		<card_8_key
+			this="D7A00388-D000-4000-B000000000000388"
+			id="card_8_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A00388-D000-4000-B000000000000388"
+			currentstate="D7A00389-D000-4000-B000000000000389"
+			defaultstate="D7A00389-D000-4000-B000000000000389">
+			<states>
+				<standard
+					this="D7A00389-D000-4000-B000000000000389"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00389-D000-4000-B000000000000389">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_8_key>
+		<card_9_keyplate
+			this="D7A0038B-D000-4000-B00000000000038B"
+			id="card_9_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A0038B-D000-4000-B00000000000038B"
+			currentstate="D7A0038C-D000-4000-B00000000000038C"
+			defaultstate="D7A0038C-D000-4000-B00000000000038C">
+			<componentimages>
+				<component_image
+					this="D7A0038B-D001-4000-B00000000000038B"
+					uniqueguid="D7A0038B-D001-4000-B00000000000038B"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A0038C-D000-4000-B00000000000038C"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0038C-D000-4000-B00000000000038C">
+					<imagemetrics>
+						<image
+							this="D7A0038B-D002-4000-B00000000000038B"
+							uniqueguid="D7A0038B-D002-4000-B00000000000038B"
+							componentimage="D7A0038B-D001-4000-B00000000000038B"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_9_keyplate>
+		<card_9_key
+			this="D7A0038E-D000-4000-B00000000000038E"
+			id="card_9_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A0038E-D000-4000-B00000000000038E"
+			currentstate="D7A0038F-D000-4000-B00000000000038F"
+			defaultstate="D7A0038F-D000-4000-B00000000000038F">
+			<states>
+				<standard
+					this="D7A0038F-D000-4000-B00000000000038F"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A0038F-D000-4000-B00000000000038F">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_9_key>
+		<card_10_keyplate
+			this="D7A00391-D000-4000-B000000000000391"
+			id="card_10_keyplate"
+			tooltipslocalised="true"
+			uniqueguid="D7A00391-D000-4000-B000000000000391"
+			currentstate="D7A00392-D000-4000-B000000000000392"
+			defaultstate="D7A00392-D000-4000-B000000000000392">
+			<componentimages>
+				<component_image
+					this="D7A00391-D001-4000-B000000000000391"
+					uniqueguid="D7A00391-D001-4000-B000000000000391"
+					imagepath="ui/skins/default/number_frame_lozenge_18px.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00392-D000-4000-B000000000000392"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00392-D000-4000-B000000000000392">
+					<imagemetrics>
+						<image
+							this="D7A00391-D002-4000-B000000000000391"
+							uniqueguid="D7A00391-D002-4000-B000000000000391"
+							componentimage="D7A00391-D001-4000-B000000000000391"
+							offset="0.00,0.00"
+							width="26"
+							height="18"
+							margin="0.00,0.00,0.00,0.00"/>
+					</imagemetrics>
+				</standard>
+			</states>
+		</card_10_keyplate>
+		<card_10_key
+			this="D7A00394-D000-4000-B000000000000394"
+			id="card_10_key"
+			tooltipslocalised="true"
+			uniqueguid="D7A00394-D000-4000-B000000000000394"
+			currentstate="D7A00395-D000-4000-B000000000000395"
+			defaultstate="D7A00395-D000-4000-B000000000000395">
+			<states>
+				<standard
+					this="D7A00395-D000-4000-B000000000000395"
+					name="standard"
+					width="26"
+					height="18"
+					uniqueguid="D7A00395-D000-4000-B000000000000395">
+					<component_text
+						texthalign="Center"
+						textvalign="Center"
+						textxoffset="4.00,0.00"
+						textyoffset="8.00,0.00"
+						texthbehaviour="Never split"
+						font_m_size="12"
+						font_m_colour="#FFF8D7FF"
+						font_m_leading="3"
+						fontcat_name="body_12"/>
+				</standard>
+			</states>
+		</card_10_key>
+		<plate_right
+			this="D7A00397-D000-4000-B000000000000397"
+			id="plate_right"
+			tooltipslocalised="true"
+			uniqueguid="D7A00397-D000-4000-B000000000000397"
+			currentstate="D7A00398-D000-4000-B000000000000398"
+			defaultstate="D7A00398-D000-4000-B000000000000398">
+			<componentimages>
+				<component_image
+					this="D7A00397-D001-4000-B000000000000397"
+					uniqueguid="D7A00397-D001-4000-B000000000000397"
+					imagepath="ui/skins/default/tooltip_frame.png"/>
+			</componentimages>
+			<states>
+				<standard
+					this="D7A00398-D000-4000-B000000000000398"
+					name="standard"
+					width="170"
+					height="64"
+					uniqueguid="D7A00398-D000-4000-B000000000000398">
+					<imagemetrics>
+						<image
+							this="D7A00397-D002-4000-B000000000000397"
+							uniqueguid="D7A00397-D002-4000-B000000000000397"
+							componentimage="D7A00397-D001-4000-B000000000000397"
 							offset="0.00,0.00"
 							width="170"
 							height="64"
@@ -9407,30 +10027,30 @@
 			</states>
 		</plate_right>
 		<mode
-			this="D7A0035E-D000-4000-B00000000000035E"
+			this="D7A0039A-D000-4000-B00000000000039A"
 			id="mode"
 			tooltipslocalised="true"
-			uniqueguid="D7A0035E-D000-4000-B00000000000035E"
-			currentstate="D7A0035F-D000-4000-B00000000000035F"
-			defaultstate="D7A0035F-D000-4000-B00000000000035F">
+			uniqueguid="D7A0039A-D000-4000-B00000000000039A"
+			currentstate="D7A0039B-D000-4000-B00000000000039B"
+			defaultstate="D7A0039B-D000-4000-B00000000000039B">
 			<componentimages>
 				<component_image
-					this="D7A0035E-D001-4000-B00000000000035E"
-					uniqueguid="D7A0035E-D001-4000-B00000000000035E"
+					this="D7A0039A-D001-4000-B00000000000039A"
+					uniqueguid="D7A0039A-D001-4000-B00000000000039A"
 					imagepath="ui/skins/default/icon_status_melee.png"/>
 			</componentimages>
 			<states>
 				<standard
-					this="D7A0035F-D000-4000-B00000000000035F"
+					this="D7A0039B-D000-4000-B00000000000039B"
 					name="standard"
 					width="22"
 					height="22"
-					uniqueguid="D7A0035F-D000-4000-B00000000000035F">
+					uniqueguid="D7A0039B-D000-4000-B00000000000039B">
 					<imagemetrics>
 						<image
-							this="D7A0035E-D002-4000-B00000000000035E"
-							uniqueguid="D7A0035E-D002-4000-B00000000000035E"
-							componentimage="D7A0035E-D001-4000-B00000000000035E"
+							this="D7A0039A-D002-4000-B00000000000039A"
+							uniqueguid="D7A0039A-D002-4000-B00000000000039A"
+							componentimage="D7A0039A-D001-4000-B00000000000039A"
 							offset="0.00,0.00"
 							width="22"
 							height="22"
@@ -9440,19 +10060,19 @@
 			</states>
 		</mode>
 		<ammo
-			this="D7A00361-D000-4000-B000000000000361"
+			this="D7A0039D-D000-4000-B00000000000039D"
 			id="ammo"
 			tooltipslocalised="true"
-			uniqueguid="D7A00361-D000-4000-B000000000000361"
-			currentstate="D7A00362-D000-4000-B000000000000362"
-			defaultstate="D7A00362-D000-4000-B000000000000362">
+			uniqueguid="D7A0039D-D000-4000-B00000000000039D"
+			currentstate="D7A0039E-D000-4000-B00000000000039E"
+			defaultstate="D7A0039E-D000-4000-B00000000000039E">
 			<states>
 				<standard
-					this="D7A00362-D000-4000-B000000000000362"
+					this="D7A0039E-D000-4000-B00000000000039E"
 					name="standard"
 					width="122"
 					height="26"
-					uniqueguid="D7A00362-D000-4000-B000000000000362">
+					uniqueguid="D7A0039E-D000-4000-B00000000000039E">
 					<component_text
 						texthalign="Right"
 						textvalign="Center"
@@ -9467,30 +10087,30 @@
 			</states>
 		</ammo>
 		<ammo_back
-			this="D7A00364-D000-4000-B000000000000364"
+			this="D7A003A0-D000-4000-B0000000000003A0"
 			id="ammo_back"
 			tooltipslocalised="true"
-			uniqueguid="D7A00364-D000-4000-B000000000000364"
-			currentstate="D7A00365-D000-4000-B000000000000365"
-			defaultstate="D7A00365-D000-4000-B000000000000365">
+			uniqueguid="D7A003A0-D000-4000-B0000000000003A0"
+			currentstate="D7A003A1-D000-4000-B0000000000003A1"
+			defaultstate="D7A003A1-D000-4000-B0000000000003A1">
 			<componentimages>
 				<component_image
-					this="D7A00364-D001-4000-B000000000000364"
-					uniqueguid="D7A00364-D001-4000-B000000000000364"
+					this="D7A003A0-D001-4000-B0000000000003A0"
+					uniqueguid="D7A003A0-D001-4000-B0000000000003A0"
 					imagepath="ui/skins/default/bar_back.png"/>
 			</componentimages>
 			<states>
 				<standard
-					this="D7A00365-D000-4000-B000000000000365"
+					this="D7A003A1-D000-4000-B0000000000003A1"
 					name="standard"
 					width="154"
 					height="19"
-					uniqueguid="D7A00365-D000-4000-B000000000000365">
+					uniqueguid="D7A003A1-D000-4000-B0000000000003A1">
 					<imagemetrics>
 						<image
-							this="D7A00364-D002-4000-B000000000000364"
-							uniqueguid="D7A00364-D002-4000-B000000000000364"
-							componentimage="D7A00364-D001-4000-B000000000000364"
+							this="D7A003A0-D002-4000-B0000000000003A0"
+							uniqueguid="D7A003A0-D002-4000-B0000000000003A0"
+							componentimage="D7A003A0-D001-4000-B0000000000003A0"
 							offset="0.00,0.00"
 							width="154"
 							height="19"
@@ -9500,30 +10120,30 @@
 			</states>
 		</ammo_back>
 		<ammo_fill
-			this="D7A00367-D000-4000-B000000000000367"
+			this="D7A003A3-D000-4000-B0000000000003A3"
 			id="ammo_fill"
 			tooltipslocalised="true"
-			uniqueguid="D7A00367-D000-4000-B000000000000367"
-			currentstate="D7A00368-D000-4000-B000000000000368"
-			defaultstate="D7A00368-D000-4000-B000000000000368">
+			uniqueguid="D7A003A3-D000-4000-B0000000000003A3"
+			currentstate="D7A003A4-D000-4000-B0000000000003A4"
+			defaultstate="D7A003A4-D000-4000-B0000000000003A4">
 			<componentimages>
 				<component_image
-					this="D7A00367-D001-4000-B000000000000367"
-					uniqueguid="D7A00367-D001-4000-B000000000000367"
+					this="D7A003A3-D001-4000-B0000000000003A3"
+					uniqueguid="D7A003A3-D001-4000-B0000000000003A3"
 					imagepath="ui/skins/default/ammo_bar.png"/>
 			</componentimages>
 			<states>
 				<standard
-					this="D7A00368-D000-4000-B000000000000368"
+					this="D7A003A4-D000-4000-B0000000000003A4"
 					name="standard"
 					width="148"
 					height="11"
-					uniqueguid="D7A00368-D000-4000-B000000000000368">
+					uniqueguid="D7A003A4-D000-4000-B0000000000003A4">
 					<imagemetrics>
 						<image
-							this="D7A00367-D002-4000-B000000000000367"
-							uniqueguid="D7A00367-D002-4000-B000000000000367"
-							componentimage="D7A00367-D001-4000-B000000000000367"
+							this="D7A003A3-D002-4000-B0000000000003A3"
+							uniqueguid="D7A003A3-D002-4000-B0000000000003A3"
+							componentimage="D7A003A3-D001-4000-B0000000000003A3"
 							offset="0.00,0.00"
 							width="148"
 							height="11"
@@ -9533,30 +10153,30 @@
 			</states>
 		</ammo_fill>
 		<ammo_frame
-			this="D7A0036A-D000-4000-B00000000000036A"
+			this="D7A003A6-D000-4000-B0000000000003A6"
 			id="ammo_frame"
 			tooltipslocalised="true"
-			uniqueguid="D7A0036A-D000-4000-B00000000000036A"
-			currentstate="D7A0036B-D000-4000-B00000000000036B"
-			defaultstate="D7A0036B-D000-4000-B00000000000036B">
+			uniqueguid="D7A003A6-D000-4000-B0000000000003A6"
+			currentstate="D7A003A7-D000-4000-B0000000000003A7"
+			defaultstate="D7A003A7-D000-4000-B0000000000003A7">
 			<componentimages>
 				<component_image
-					this="D7A0036A-D001-4000-B00000000000036A"
-					uniqueguid="D7A0036A-D001-4000-B00000000000036A"
+					this="D7A003A6-D001-4000-B0000000000003A6"
+					uniqueguid="D7A003A6-D001-4000-B0000000000003A6"
 					imagepath="ui/skins/default/bar_frame.png"/>
 			</componentimages>
 			<states>
 				<standard
-					this="D7A0036B-D000-4000-B00000000000036B"
+					this="D7A003A7-D000-4000-B0000000000003A7"
 					name="standard"
 					width="154"
 					height="19"
-					uniqueguid="D7A0036B-D000-4000-B00000000000036B">
+					uniqueguid="D7A003A7-D000-4000-B0000000000003A7">
 					<imagemetrics>
 						<image
-							this="D7A0036A-D002-4000-B00000000000036A"
-							uniqueguid="D7A0036A-D002-4000-B00000000000036A"
-							componentimage="D7A0036A-D001-4000-B00000000000036A"
+							this="D7A003A6-D002-4000-B0000000000003A6"
+							uniqueguid="D7A003A6-D002-4000-B0000000000003A6"
+							componentimage="D7A003A6-D001-4000-B0000000000003A6"
 							offset="0.00,0.00"
 							width="154"
 							height="19"
@@ -9566,30 +10186,30 @@
 			</states>
 		</ammo_frame>
 		<target_plate
-			this="D7A0036D-D000-4000-B00000000000036D"
+			this="D7A003A9-D000-4000-B0000000000003A9"
 			id="target_plate"
 			tooltipslocalised="true"
-			uniqueguid="D7A0036D-D000-4000-B00000000000036D"
-			currentstate="D7A0036E-D000-4000-B00000000000036E"
-			defaultstate="D7A0036E-D000-4000-B00000000000036E">
+			uniqueguid="D7A003A9-D000-4000-B0000000000003A9"
+			currentstate="D7A003AA-D000-4000-B0000000000003AA"
+			defaultstate="D7A003AA-D000-4000-B0000000000003AA">
 			<componentimages>
 				<component_image
-					this="D7A0036D-D001-4000-B00000000000036D"
-					uniqueguid="D7A0036D-D001-4000-B00000000000036D"
+					this="D7A003A9-D001-4000-B0000000000003A9"
+					uniqueguid="D7A003A9-D001-4000-B0000000000003A9"
 					imagepath="ui/skins/default/tooltip_frame.png"/>
 			</componentimages>
 			<states>
 				<standard
-					this="D7A0036E-D000-4000-B00000000000036E"
+					this="D7A003AA-D000-4000-B0000000000003AA"
 					name="standard"
 					width="320"
 					height="32"
-					uniqueguid="D7A0036E-D000-4000-B00000000000036E">
+					uniqueguid="D7A003AA-D000-4000-B0000000000003AA">
 					<imagemetrics>
 						<image
-							this="D7A0036D-D002-4000-B00000000000036D"
-							uniqueguid="D7A0036D-D002-4000-B00000000000036D"
-							componentimage="D7A0036D-D001-4000-B00000000000036D"
+							this="D7A003A9-D002-4000-B0000000000003A9"
+							uniqueguid="D7A003A9-D002-4000-B0000000000003A9"
+							componentimage="D7A003A9-D001-4000-B0000000000003A9"
 							offset="0.00,0.00"
 							width="320"
 							height="32"
@@ -9599,19 +10219,19 @@
 			</states>
 		</target_plate>
 		<target
-			this="D7A00370-D000-4000-B000000000000370"
+			this="D7A003AC-D000-4000-B0000000000003AC"
 			id="target"
 			tooltipslocalised="true"
-			uniqueguid="D7A00370-D000-4000-B000000000000370"
-			currentstate="D7A00371-D000-4000-B000000000000371"
-			defaultstate="D7A00371-D000-4000-B000000000000371">
+			uniqueguid="D7A003AC-D000-4000-B0000000000003AC"
+			currentstate="D7A003AD-D000-4000-B0000000000003AD"
+			defaultstate="D7A003AD-D000-4000-B0000000000003AD">
 			<states>
 				<standard
-					this="D7A00371-D000-4000-B000000000000371"
+					this="D7A003AD-D000-4000-B0000000000003AD"
 					name="standard"
 					width="304"
 					height="32"
-					uniqueguid="D7A00371-D000-4000-B000000000000371">
+					uniqueguid="D7A003AD-D000-4000-B0000000000003AD">
 					<component_text
 						texthalign="Center"
 						textvalign="Center"
@@ -9626,30 +10246,30 @@
 			</states>
 		</target>
 		<target_arrow
-			this="D7A00373-D000-4000-B000000000000373"
+			this="D7A003AF-D000-4000-B0000000000003AF"
 			id="target_arrow"
 			tooltipslocalised="true"
-			uniqueguid="D7A00373-D000-4000-B000000000000373"
-			currentstate="D7A00374-D000-4000-B000000000000374"
-			defaultstate="D7A00374-D000-4000-B000000000000374">
+			uniqueguid="D7A003AF-D000-4000-B0000000000003AF"
+			currentstate="D7A003B0-D000-4000-B0000000000003B0"
+			defaultstate="D7A003B0-D000-4000-B0000000000003B0">
 			<componentimages>
 				<component_image
-					this="D7A00373-D001-4000-B000000000000373"
-					uniqueguid="D7A00373-D001-4000-B000000000000373"
+					this="D7A003AF-D001-4000-B0000000000003AF"
+					uniqueguid="D7A003AF-D001-4000-B0000000000003AF"
 					imagepath="ui/skins/default/arrow_event_target_down.png"/>
 			</componentimages>
 			<states>
 				<standard
-					this="D7A00374-D000-4000-B000000000000374"
+					this="D7A003B0-D000-4000-B0000000000003B0"
 					name="standard"
 					width="52"
 					height="40"
-					uniqueguid="D7A00374-D000-4000-B000000000000374">
+					uniqueguid="D7A003B0-D000-4000-B0000000000003B0">
 					<imagemetrics>
 						<image
-							this="D7A00373-D002-4000-B000000000000373"
-							uniqueguid="D7A00373-D002-4000-B000000000000373"
-							componentimage="D7A00373-D001-4000-B000000000000373"
+							this="D7A003AF-D002-4000-B0000000000003AF"
+							uniqueguid="D7A003AF-D002-4000-B0000000000003AF"
+							componentimage="D7A003AF-D001-4000-B0000000000003AF"
 							offset="0.00,0.00"
 							width="52"
 							height="40"

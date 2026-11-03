@@ -73,6 +73,11 @@ return function(E)
 			GROUPS.slots[#GROUPS.slots + 1] = "slot_" .. n .. "_" .. s
 		end
 	end
+	GROUPS.cards = {}
+	for n = 1, L.cards do
+		GROUPS.cards[#GROUPS.cards + 1] = "card_" .. n .. "_keyplate"
+		GROUPS.cards[#GROUPS.cards + 1] = "card_" .. n .. "_key"
+	end
 
 	local function fail(name, err)
 		dead[name] = true
@@ -188,7 +193,8 @@ return function(E)
 			if not caster and L.lifted[id] then dy = dy + L.lift end -- no winds row: the rows above it drop into its place
 			if at[1] == "actions" then dx = dx + ((act_at[id:match("^act_(%a+)_")] or 1) - 1) * L.action_pitch end
 			if tab_dw and id == "tab_plate" then dx = -tab_w elseif tab_dw and id == "tab" then dx = -tab_w + L.pad end
-			if c then c:MoveTo(math.floor(o[at[1]][1] + dx * s), math.floor(o[at[1]][2] + dy * s)) end
+			-- the card numbers stand on CA's cards (H.cards)
+			if c and at[1] ~= "cards" then c:MoveTo(math.floor(o[at[1]][1] + dx * s), math.floor(o[at[1]][2] + dy * s)) end
 		end
 		H.s = s
 	end
@@ -254,7 +260,8 @@ return function(E)
 		end
 		kinds[3], army_n = army_entries()
 		pages = {}
-		for k, name in ipairs({"Abilities", "Spells", "Army abilities"}) do
+		for k, name in ipairs({E.loc("derpy_tp_ui_page_abilities", "Abilities"), E.loc("derpy_tp_ui_page_spells", "Spells"),
+			E.loc("derpy_tp_ui_page_army", "Army abilities")}) do
 			for p = 1, math.ceil(#kinds[k] / L.slots) do
 				local slots = {}
 				for j = (p - 1) * L.slots + 1, math.min(p * L.slots, #kinds[k]) do slots[#slots + 1] = kinds[k][j] end
@@ -731,6 +738,7 @@ return function(E)
 		vis("bars", E.S.bars ~= false)
 		vis("men_bars", E.S.bars ~= false and E.S.man_bars == true)
 		H.target(nil) H.mark(nil)
+		H.cards(nil) -- shown on CA's cards by command mode (command.lua), drawn at the panel's corner till then
 		H.back(E.command ~= nil and E.command.vanilla()) -- before the parts it sets aside are shown
 		H.unit() -- then: the bar centres on how many abilities he has
 		H.place()
@@ -756,7 +764,41 @@ return function(E)
 		-- hidden, it takes no click either: a hidden interactive component is a dead zone where it last stood, over CA's
 		-- cards once the mode is left (the final review, 2026-10-23; seen live at y 755 of 900)
 		put(part("back_plate"), "back_plate.click", on == true, function(c, x) c:SetInteractive(x) end)
-		if on then text("back", "Back to third person") text("back_key", E.S.names.command or "") end
+		if on then text("back", E.loc("derpy_tp_ui_back", "Back to third person")) text("back_key", E.S.names.command or "")
+		else H.cards(nil) end
+	end
+
+	-- command mode's Vanilla style: the number key on each card of the page (the author, 2026-11-02: "the number label on
+	-- units when in command mode"). list: {[n] = {card, key name}} for the page's cards, nil for none. In the card's
+	-- top-right corner, level with CA's rank badge in its top-left: CA draws the status icons just above the card, the
+	-- health bar along its top and the category badge at its foot (the battle card's tree, read in game 2026-11-02; CARD_*
+	-- are offsets on its 60 x 130). A name wider than the lozenge widens it to the left, never off the card: cards touch
+	local CARD_W, CARD_H, CARD_INSET, CARD_ROW = 60, 130, 1, 33
+	function H.cards(list)
+		guard("cards", function()
+			local s = H.s or scale()
+			local pw, ph = L.size.card_1_keyplate[1], L.size.card_1_keyplate[2]
+			for n = 1, L.cards do
+				local e, ids = list and list[n], {"card_" .. n .. "_keyplate", "card_" .. n .. "_key"}
+				if e then
+					text(ids[2], e[2])
+					local w = math.floor(math.max(pw, math.ceil(part(ids[2]):TextDimensionsForText(e[2]) / s) + 8) * s + 0.5)
+					local h = math.floor(ph * s + 0.5)
+					local x, y = e[1]:Position()
+					local cw, ch = e[1]:Dimensions()
+					local left = math.max(x, x + cw - w - math.floor(CARD_INSET * cw / CARD_W + 0.5))
+					local at = math.floor(left) .. "," .. math.floor(y + ch * CARD_ROW / CARD_H - h / 2)
+					for _, id in ipairs(ids) do
+						put(part(id), id .. ".w", w, function(c, v) c:SetCanResizeWidth(true) c:SetCanResizeHeight(true) c:Resize(v, h) end)
+						put(part(id), id .. ".at", at, function(c, v)
+							local px, py = v:match("^(-?%d+),(-?%d+)$")
+							c:MoveTo(tonumber(px), tonumber(py))
+						end)
+					end
+				end
+				vis(ids[1], e ~= nil) vis(ids[2], e ~= nil)
+			end
+		end)
 	end
 	-- CA runs a listener unguarded in the released game (lib_core.lua event_unprotected_callback): the click only asks,
 	-- and the tick leaves the mode inside its guard (main.lua)
@@ -917,7 +959,7 @@ return function(E)
 				local hidden = unspottable or cco("IsHidden") == true or u:is_hidden()
 				for _, id in ipairs(GROUPS.hidden) do vis(id, hidden) end
 				if hidden then
-					text("hidden", unspottable and "Unspottable" or "Hidden")
+					text("hidden", unspottable and E.loc("derpy_tp_ui_unspottable", "Unspottable") or E.loc("derpy_tp_ui_hidden", "Hidden"))
 					img("hidden_icon", unspottable and L.art.unspottable or L.art.hidden)
 				end
 			end)
@@ -938,7 +980,7 @@ return function(E)
 				local p, st = cco("MoralePercent"), cco("MoraleState")
 				width("morale_fill", p)
 				width("morale_alarm", p)
-				local word = st >= 6 and "Crumbling" or MORALE_WORDS[st] and common.get_localised_string(MORALE_WORDS[st])
+				local word = st >= 6 and E.loc("derpy_tp_ui_crumbling", "Crumbling") or MORALE_WORDS[st] and common.get_localised_string(MORALE_WORDS[st])
 				text("morale_text", word and word ~= "" and word or math.floor(math.min(p, 1) * 100 + 0.5) .. "%")
 				for _, id in ipairs(GROUPS.morale) do vis(id, id ~= "morale_alarm" or st >= 4) end
 			end)

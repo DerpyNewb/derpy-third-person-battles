@@ -209,8 +209,8 @@ return function(E)
 	-- the overcast's winds go with the winds' reason, for the bar to preview (hud.lua H.refuse)
 	local function refuse(n)
 		local c, w = E.D.overcasts and E.D.overcasts[E.hud.key(n)], E.hud.winds()
-		if c and w and w < c then E.hud.refuse(n, "Not enough winds to overcast", c)
-		else E.hud.refuse(n, "Cannot overcast now") end
+		if c and w and w < c then E.hud.refuse(n, E.loc("derpy_tp_ui_overcast_winds", "Not enough winds to overcast"), c)
+		else E.hud.refuse(n, E.loc("derpy_tp_ui_overcast_now", "Cannot overcast now")) end
 	end
 	-- the engine's answer does not count the winds: an 8-wind overcast with 6 in the pool read true, and the click cast
 	-- nothing and spent nothing (measured 2026-10-20)
@@ -269,20 +269,26 @@ return function(E)
 			a.label_at = now
 			a.unit = nil
 			local s
-			if a.kind == "self" then s = "On himself"
-			elseif a.kind == "none" then s = "Click to cast"
+			local himself = E.loc("derpy_tp_ui_target_self", "On himself")
+			if a.kind == "self" then s = himself
+			elseif a.kind == "none" then s = E.loc("derpy_tp_ui_target_cast", "Click to cast")
 			elseif a.kind == "ground" then
 				local x, _, z = E.combat.aim_point(a.range)
 				local q = F.unit:position()
-				s = x and ("Ground, " .. math.floor(math.sqrt((x - q:get_x()) ^ 2 + (z - q:get_z()) ^ 2) + 0.5) .. " m")
-					or "No ground in sight"
+				-- %s: metres to the point
+				s = x and (E.loc("derpy_tp_ui_target_ground", "Ground, %s m"):gsub("%%s",
+					tostring(math.floor(math.sqrt((x - q:get_x()) ^ 2 + (z - q:get_z()) ^ 2) + 0.5))))
+					or E.loc("derpy_tp_ui_target_no_ground", "No ground in sight")
 			else
 				local far
 				a.unit, far = nearest_to_ray(a.kind == "enemy", a.range, a.key)
 				local lords = E.D.targets and E.D.targets[a.key] == "com"
 				s = a.unit and E.hud.unit_name(a.unit)
-					or (a.kind ~= "enemy" and (may_target(a.key, F.unit) and "On himself" or "No ally in sight"))
-					or (far and "Out of range") or (lords and "No lord or hero in sight") or "No enemy in sight"
+					or (a.kind ~= "enemy" and (may_target(a.key, F.unit) and himself
+						or E.loc("derpy_tp_ui_target_no_ally", "No ally in sight")))
+					or (far and E.loc("derpy_tp_ui_target_far", "Out of range"))
+					or (lords and E.loc("derpy_tp_ui_target_no_lord", "No lord or hero in sight"))
+					or E.loc("derpy_tp_ui_target_no_enemy", "No enemy in sight")
 			end
 			E.hud.target(s)
 		end

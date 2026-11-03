@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-11-03
+
+Workshop manifest 3181060629449301078 (build `45a97df2`).
+
+- Game patch 9.0.5 (exe build `6ae2a00b`). With no address row for it, the mod played every regiment whole. All 32
+  addresses in `platform.lua` were carried from the previous build's code: masked byte signatures for code, and the
+  instructions that reference them for data and vtables. Every function the mod hooks or calls is byte-identical apart
+  from its RIP-relative operands, so the field offsets inside them did not move.
+- Multiplayer was gated on the previous build's stamp, so it stayed off on 9.0.5. It now follows the row: any build
+  whose row carries the queued-command addresses.
+- `data.lua` regenerated for 9.0.5's database: the Stormfiend Windlaunchers' reload, the Ratling Cannons' shot speed,
+  and the Necromancer on Nightmare's new key.
+- Seen working in game on 9.0.5 before the upload: the build known, the battle and model-list checks on every unit, one
+  entity walking alone, switching, melee blows, a shot and its reload, a lord as a unit of one, the gate and camera
+  floor patched. Not seen: multiplayer.
+
+## 2026-11-02
+
+Workshop manifest 6519745943830383711 (build `0595ecdc`).
+
+- Switch which entity of your regiment you play with X (left) and C (right), right and left of the view. The one let go
+  is held where he stands, and a shot's reload carries over. The game's own X and C camera keys are off while third
+  person is on.
+- In command mode (vanilla style), each unit card shows the number key that selects it.
+- The HUD's words are loc rows (`derpy_tp_ui_*`), so a translation pack can translate them.
+- A regiment played whole attacks by the game's own order, on the enemy unit under the crosshair or nearest the aim,
+  and deals damage. With no enemy ahead it says so.
+
 ## 2026-11-01
 
 Workshop manifest 6262936272307300740 (build `441a78a2`). It carries the 2026-10-31 build too, which was never uploaded

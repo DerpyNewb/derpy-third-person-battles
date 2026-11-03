@@ -22,7 +22,17 @@ GHIDRA = r"C:\tools\ghidra_12.1.4_PUBLIC\support\analyzeHeadless.bat"
 JAVA = r"C:\tools\jdk-21"
 EXE = r"F:\SteamLibrary\steamapps\common\Total War WARHAMMER III\Warhammer3.exe"
 PROJECT_DIR = os.path.join(ROOT, "ghidra_cache")
-PROJECT = "wh3_6acec6f4"  # the exe build the project was imported from; re-import after a game patch
+import struct
+
+
+def _stamp():
+    d = open(EXE, "rb").read(0x400)
+    return "%08x" % struct.unpack_from("<I", d, struct.unpack_from("<I", d, 0x3c)[0] + 8)[0]
+
+
+PROJECT = "wh3_" + os.environ.get("WH3_BUILD", _stamp())  # one project per exe build: --import after a game patch
+# makes the new one and keeps the old, which WH3_BUILD=<stamp> selects for a decompile of the pre-patch code, and
+# whose bytes tools/ghidra/DumpImage.java turns into the snapshot tools/exe_migrate.py diffs against
 SCRIPTS = os.path.join(ROOT, "tools", "ghidra")
 
 

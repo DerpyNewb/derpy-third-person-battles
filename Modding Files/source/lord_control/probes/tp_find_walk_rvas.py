@@ -8,7 +8,7 @@ previous build recorded (docs/sessions/HANDOFF_20261013_THIRD_PERSON_STEERING_CO
   walk_speed      called with [model+0x2e8] and the run flag by the engine's other walk wrapper
   walk_stop       walk_start - 0xb80: reads model+0x318, calls walk_start's destroy
 ANCHORS are the previous build's: after a successful run, replace them with the row it printed and the RVAs it names.
-Found 2026-10-16 for 6acec6f4 from 6ac6d907's anchors. Needs capstone.
+Found 2026-10-16 for 6acec6f4 from 6ac6d907's anchors; 6ae2a00b's anchors set 2026-11-03. Needs capstone.
 """
 import bisect
 import struct
@@ -17,9 +17,10 @@ import sys
 import capstone
 
 EXE = r"F:\SteamLibrary\steamapps\common\Total War WARHAMMER III\Warhammer3.exe"
-# 6acec6f4 (2026-10-16): vtables, their slot +0x10 functions and those functions' callees, the walk constructor
-ANCHORS = dict(walk_a=0x3919350, slot_a=0x3264b70, callee_a=0x325b008, walk_b=0x3ae2400, slot_b=0x3262850,
-               callee_b=0x325ae78, ctor=0x324df58, walk_start=0x306f954)
+# 6ae2a00b (9.0.5, 2026-11-03): vtables, their slot +0x10 functions and those functions' callees, the walk constructor.
+# This script found nothing from 6acec6f4's anchors on that patch; these were carried by masked signatures instead
+ANCHORS = dict(walk_a=0x39242f8, slot_a=0x326c3c4, callee_a=0x326285c, walk_b=0x3aed8c8, slot_b=0x326a0a4,
+               callee_b=0x32626cc, ctor=0x3255718, walk_start=0x3076e90)
 CODE_HI = 0x33a7000
 
 B = open(EXE, "rb").read()

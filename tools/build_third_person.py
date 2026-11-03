@@ -49,6 +49,8 @@ LOC = {
     # combat.lua C.attack: a gun's click with no enemy in its range ahead did nothing and said nothing (a player, 2026-10-30:
     # "artillery never fires")
     "derpy_tp_no_target": "No enemy in range ahead to fire at.",
+    # combat.lua C.melee: a regiment played whole attacks by CA's order, and a click with no enemy ahead sends none
+    "derpy_tp_no_enemy": "No enemy ahead to attack.",
     # command mode is the lord's (spec 3.12); no key named, every key can be moved in MCT
     "derpy_tp_command_general_and_heroes": "Only your general and heroes can command the army. Turn on \"Any unit can command\" in this mod's settings to command from any unit.",
     # command mode, Vanilla style: the number keys' page, said on entering and on the page key (%s: "11-20")
@@ -520,14 +522,34 @@ def gen():
                                                len(impacts_rider_fly), len(bodies), len(movers), len(fires_moving)))
 
 
+# the HUD's words (a translator, 2026-11-01: plain strings in the Lua, out of a translation pack's reach): every
+# E.loc("key", "english") call is a loc row, its text the english the call falls back to. Literals only, so they can be read
+LOC_CALL = re.compile(r'E\.loc\("(derpy_tp_ui_[a-z0-9_]+)", "([^"\\]*)"\)')
+
+
+def hud_words():
+    """({key: english} from every E.loc call in the Lua, [what is wrong with them])."""
+    words, bad = {}, []
+    for full, rel in lua_files():
+        text = open(full, encoding="utf-8").read()
+        calls = LOC_CALL.findall(text)
+        if text.count("E.loc(") - text.count("function E.loc(") != len(calls):
+            bad.append("%s: an E.loc call whose key or text is not a literal" % rel)
+        for k, english in calls:
+            if words.setdefault(k, english) != english:
+                bad.append("%s: %s is %r here and %r elsewhere" % (rel, k, english, words[k]))
+    bad += ["%s is both an E.say message and a HUD word" % k for k in sorted(set(words) & set(LOC))]
+    return words, bad
+
+
 def check_loc():
-    """Every E.say key in the Lua has a loc row, and every loc row is said somewhere."""
+    """Every E.say key in the Lua has a loc row, every loc row is said somewhere, and the HUD's E.loc words agree."""
     used = set()
     for full, _rel in lua_files():
         used |= set(re.findall(r'say\("(derpy_tp_[a-z_]+)"[,)]', open(full, encoding="utf-8").read()))
     bad = ["E.say('%s') has no loc row" % k for k in sorted(used - set(LOC))]
     bad += ["loc row %s is never said" % k for k in sorted(set(LOC) - used)]
-    return bad
+    return bad + hud_words()[1]
 
 
 def small_data(text, keep):
@@ -821,6 +843,7 @@ def pack():
                                  "pack_paths": [rel for _, rel in files]})
     with tempfile.TemporaryDirectory() as td:
         loc = dict(LOC, **dict(import_stat_tables(key, td)))
+        loc.update(hud_words()[0])
         tsv = os.path.join(td, "loc.tsv")
         with open(tsv, "w", encoding="utf-8", newline="") as f:
             f.write("key\ttext\ttooltip\n#Loc;1;text/db/%s.loc\n" % FRAG)
@@ -846,6 +869,7 @@ def verify():
     loc_path = "text/db/%s.loc" % FRAG
     tables, stat_loc = stat_rows()
     all_loc = dict(LOC, **dict(stat_loc))
+    all_loc.update(hud_words()[0])
     with tempfile.TemporaryDirectory() as td:
         call("extract_files", {"source": {"pack": key}, "paths": [rel for _, rel in files],
                                "destination": td, "as_tsv": False})
@@ -885,7 +909,8 @@ def main(argv):
         bad = check_loc()
         for b in bad:
             print("FINDING: %s" % b)
-        print("loc keys: %d shipped" % len(LOC) if not bad else "loc keys do not match the Lua")
+        print("loc keys: %d messages and %d HUD words" % (len(LOC), len(hud_words()[0])) if not bad
+              else "loc keys do not match the Lua")
         return 1 if bad else 0
     if not argv:
         return pack()

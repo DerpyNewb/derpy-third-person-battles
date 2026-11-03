@@ -1008,4 +1008,66 @@ T.ls_a_client_hello_the_host_drops = function()
 	check(w:diverged() == nil, tostring(w:diverged()))
 end
 
+-- the author, 2026-11-02: entity switching, in multiplayer. Each switch hands the guard and the swings over through the
+-- queue (main.lua's tick guards whichever body is played), so the same men change hands on both machines
+local function carriers(w, n, op, id)
+	local k = 0
+	for _, c in ipairs(w:sent(n)) do if c.kind == "carrier" and c.fields.op == op and c.fields.id == id then k = k + 1 end end
+	return k
+end
+T.ls_switching_entities_stays_in_step = function()
+	local w = L.new({armies = {{{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, {{general = true, z = 300}}}})
+	w:on("A", function() H.select(H.units[2]) end)
+	w:tap("A", "F2")
+	w:run(0.5)
+	local function played() local id w:on("A", function() id = H.E.F.model and H.E.F.model.id end) return id end
+	local first = played()
+	check(first == 2011, "the front-centre man: " .. tostring(first))
+	w:tap("A", "C")
+	w:run(0.5)
+	local second = played()
+	check(second == 2012, "C: the man to his right: " .. tostring(second))
+	local on, off = guard_ids(w, "A")
+	check(on[2011] == 1 and off[2011] == 1 and on[2012] == 1 and off[2012] == nil, "the guard handed over by id: "
+		.. tostring(on[2011]) .. "/" .. tostring(off[2011]) .. ", " .. tostring(on[2012]) .. "/" .. tostring(off[2012]))
+	check(carriers(w, "A", "ARM", 2011) == 1, "his swings given back through the queue: " .. carriers(w, "A", "ARM", 2011))
+	check(carriers(w, "A", "DISARM", 2012) >= 1, "the new one disarmed through the queue")
+	w:tap("A", "X")
+	w:run(0.5)
+	check(played() == 2011, "X: back to him")
+	on, off = guard_ids(w, "A")
+	check(on[2011] == 2 and off[2012] == 1, "and the guard with him: " .. tostring(on[2011]) .. ", " .. tostring(off[2012]))
+	check(#w:sent("B") == 1, "B decided nothing for A's men")
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
+-- a regiment played whole attacks by CA's order (combat.lua C.melee): one uc command, run on both machines on the same
+-- unit, and no clip on its men
+T.ls_a_regiment_played_whole_attacks_alike_on_both = function()
+	local w = L.new({armies = {{{general = true}, {type = "wh_test_melee", men = 21, x = 40}},
+		{{general = true, z = 300}, {men = 10, x = 40, z = 30}}},
+		machines = {{name = "A", fps = 60, army = 1, fresh = {mct = {combat_one_man = false}}}, {name = "B", fps = 40, army = 2, pairs = "reverse"}}})
+	w:on("A", function() H.select(H.units[2]) end)
+	w:tap("A", "F2")
+	w:run(0.5)
+	local whole, regiment, enemy
+	w:on("A", function()
+		whole = H.E.F.on and H.E.F.model == nil
+		regiment, enemy = H.units[2]._id, H.enemies[2]:unique_ui_id()
+	end)
+	check(whole, "A plays the regiment whole")
+	w:tap("A", "Left mouse")
+	w:run(0.6)
+	check(not sent_kinds(w, "A").play, "no clip on its men")
+	for _, n in ipairs({"A", "B"}) do
+		local ran = {}
+		for _, a in ipairs(w:applied(n)) do
+			if a.kind == "uc" and a.fields.method == "attack_unit" then ran[#ran + 1] = a end
+		end
+		check(#ran == 1, n .. " ran the order " .. #ran .. " times")
+		check(ran[1].model_id == regiment and ran[1].fields.args[1].unit == enemy, n .. ": the regiment on the enemy ahead")
+	end
+	check(w:diverged() == nil, tostring(w:diverged()))
+end
+
 return T

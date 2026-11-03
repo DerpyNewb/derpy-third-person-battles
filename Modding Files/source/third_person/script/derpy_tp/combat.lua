@@ -297,9 +297,10 @@ return function(E)
 
 	-- CA's attack order on the enemy nearest the aim: a unit played whole with no clip to swing charges it. Never for one
 	-- man of a regiment: it is his regiment's order (the author, 2026-10-15: one man gives it no orders)
-	local function order(primary, reach)
+	-- target: the unit already picked (C.melee)
+	local function order(primary, reach, target)
 		if F.model then return end
-		local target = pick_target(reach)
+		target = target or pick_target(reach)
 		if not target then return end
 		send(function()
 			F.uc:attack_unit(target, primary, F.running)
@@ -525,8 +526,33 @@ return function(E)
 		if P.strike(s.m, v, s.slot) then F.blow = {m = s.m, slot = s.slot, d = math.floor(d * 10 + 0.5) / 10, n = P.struck(), till = now + 1} end
 	end
 
+	-- a regiment played whole: not a crew on one body or a war machine (the Tilean tank's ground fire was tuned on
+	-- 2026-10-17 and stays). One man who shoots alone goes to C.solo and one who cannot is never ranged; a gun is never here
+	local function unit_order() return not F.crew and not F.unit:is_war_machine() end
+	-- a unit with CA's fire whilst moving (data.lua fire_moves, the mounted_fire_move attribute)
+	local function fire_moves() return E.D.fire_moves ~= nil and E.D.fire_moves[F.utype] == true end
+	C.fire_moves = fire_moves
+	local function whole_volley() return unit_order() and F.unit:number_of_men_alive() > 1 end
+
 	function C.melee(now, primary)
-		if C.locked(now) or now < F.next_swing then return end -- the mode key's swing too (round 25)
+		if C.locked(now) then return end
+		-- a regiment played whole fights as CA's own does: CA's attack order on the enemy unit under the crosshair, else the
+		-- one nearest the aim, as its volley takes the crosshair's unit (the author, 2026-11-02: "it should use vanilla
+		-- attacking targetting, same as shooting use vanilla shoot the regiment"). Its men's clips played here dealt no
+		-- damage: only one man or a unit of one strikes (C.strike). Both buttons the same order, and no range gate: out of
+		-- reach the regiment walks in, as CA's order does. Not sent again on the unit it is already attacking, which would
+		-- restart its charge
+		if not F.model and whole_volley() then
+			local _, _, _, target = C.aim_point(AIM_RANGE)
+			if target and (not target:is_valid_target() or target:is_routing()) then target = nil end
+			target = target or pick_target()
+			if not target then E.say("derpy_tp_no_enemy") return end
+			if F.native_attack and F.attack_on == target:unique_ui_id() then return end
+			F.attack_on = target:unique_ui_id()
+			order(true, nil, target)
+			return
+		end
+		if now < F.next_swing then return end -- the mode key's swing too (round 25)
 		F.next_swing = now + E.S.swing_cooldown
 		-- held like an action, to the next swing at most: the walk waits (the author, 2026-10-15: "spamming left button while
 		-- walking does nothing, melee should be prioritized" - the walk and its unlatch's WALK_1 cut the swing off)
@@ -542,14 +568,6 @@ return function(E)
 		local body = first and P.mount(first)
 		return shooting(first and P.anim_slot(first)) or shooting(body and P.anim_slot(body))
 	end
-
-	-- a regiment played whole: not a crew on one body or a war machine (the Tilean tank's ground fire was tuned on
-	-- 2026-10-17 and stays). One man who shoots alone goes to C.solo and one who cannot is never ranged; a gun is never here
-	local function unit_order() return not F.crew and not F.unit:is_war_machine() end
-	-- a unit with CA's fire whilst moving (data.lua fire_moves, the mounted_fire_move attribute)
-	local function fire_moves() return E.D.fire_moves ~= nil and E.D.fire_moves[F.utype] == true end
-	C.fire_moves = fire_moves
-	local function whole_volley() return unit_order() and F.unit:number_of_men_alive() > 1 end
 
 	local function fire(now)
 		local reach = F.unit:missile_range()

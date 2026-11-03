@@ -21,7 +21,9 @@ add("+", {0xBB, 0x6B}) add("-", {0xBD, 0x6D})
 K.order = {"toggle", "forward", "back", "left", "right", "walk", "sprint", "look_free", "lock", "attack", "mode", "jump", "fly", "zoom_in",
 	"zoom_out", "cheer", "hide_ui", "minimap", "view", "guide", "page", "ability_1", "ability_2", "ability_3", "ability_4", "ability_5", "ability_6", "ability_7", "ability_8", "ability_9",
 	"ability_10", "command", "cmd_follow", "cmd_charge", "cmd_hold", "cmd_unit_1", "cmd_unit_2", "cmd_unit_3", "cmd_unit_4",
-	"cmd_unit_5", "cmd_unit_6", "cmd_unit_7", "cmd_unit_8", "cmd_unit_9", "cmd_unit_10", "cmd_page", "cmd_pause", "cmd_speed"}
+	"cmd_unit_5", "cmd_unit_6", "cmd_unit_7", "cmd_unit_8", "cmd_unit_9", "cmd_unit_10", "cmd_page", "cmd_pause", "cmd_speed",
+	-- last: a key a player already gave an action above keeps it, and these fall back (settings.lua)
+	"man_left", "man_right"}
 
 K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D", walk = "Z", sprint = "Shift",
 	look_free = "Middle mouse", lock = "Middle mouse", attack = "Left mouse", mode = "Right mouse", jump = "E", fly = "Space", zoom_in = "+", zoom_out = "-",
@@ -29,7 +31,9 @@ K.defaults = {toggle = "F2", forward = "W", back = "S", left = "A", right = "D",
 	ability_1 = "1", ability_2 = "2", ability_3 = "3", ability_4 = "4", ability_5 = "5", ability_6 = "6",
 	ability_7 = "7", ability_8 = "8", ability_9 = "9", ability_10 = "0",
 	command = "Q", cmd_follow = "F1", cmd_charge = "F3", cmd_hold = "F4", cmd_unit_10 = "0", cmd_page = "E",
-	cmd_pause = "Space", cmd_speed = "Shift"}
+	cmd_pause = "Space", cmd_speed = "Shift",
+	-- beside Z and the move keys; the game's own on them only nudge its camera, off while third person is on (K.game)
+	man_left = "X", man_right = "C"}
 -- the number row picks the units, one card each (the author, 2026-10-23: "USE THE NUM ROW FOR SELECTING UNITS"; it was
 -- the numpad)
 for n = 1, 9 do K.defaults["cmd_unit_" .. n] = tostring(n) end
@@ -53,9 +57,10 @@ K.labels = {toggle = "Third person on and off", forward = "Walk forward", back =
 	cmd_hold = "Command mode: hold (Bannerlord style)",
 	cmd_unit_10 = "Command mode: select unit 10 (unit 20 after the page key; Vanilla style)",
 	cmd_page = "Command mode: units 1-10, 11-20 (Vanilla style)", cmd_pause = "Command mode: pause",
-	cmd_speed = "Command mode: slow or normal speed (tap; Vanilla style)"}
+	cmd_speed = "Command mode: slow or normal speed (tap; Vanilla style)",
+	man_left = "Play the entity to the left in your regiment", man_right = "Play the entity to the right in your regiment"}
 for n = 1, 9 do K.labels["cmd_unit_" .. n] = "Command mode: select unit " .. n .. " (Vanilla style)" end
--- in command mode's Bannerlord style the number row picks a group (command.lua C.NAMES), 0 everyone
+-- in command mode's Bannerlord style the number row picks a group (command.lua C.name), 0 everyone
 for n, group in pairs({"infantry", "ranged", "cavalry", "monsters", "artillery", "heroes", [10] = "everyone"}) do
 	K.labels["ability_" .. n] = K.labels["ability_" .. n] .. " (command mode, Bannerlord style: " .. group .. ")"
 end
@@ -69,9 +74,10 @@ for n = 1, 10 do K.shares["cmd_unit_" .. n] = "ability_" .. n end
 
 -- the game's shortcut on each key it binds without a modifier, of the keys above (default_keys, read 2026-10-15): while
 -- third person is on, the one on a key an action has is off (P paused the game as it hid the interface). M and Shift
--- the game binds only with a modifier. T cycles the reinforcement spawn zone (default_keys.xml, read 2026-10-20)
+-- the game binds only with a modifier. T cycles the reinforcement spawn zone (default_keys.xml, read 2026-10-20); X and
+-- C raise and tilt its camera (read 2026-11-02)
 K.game = {P = "toggle_pause", O = "visibility_toggle_radar", K = "toggle_ui", Space = "show_allied_units_proxies",
-	Z = "cam_down", T = "cycle_next_spawn_zone"}
+	Z = "cam_down", T = "cycle_next_spawn_zone", X = "cam_up", C = "rot_d"}
 -- and its control groups on the bare 0-9 (CA's keymap, read 2026-10-23): the number row casts his skills, and picks the
 -- units in command mode
 for n = 0, 9 do K.game[tostring(n)] = "usegroup" .. n end
