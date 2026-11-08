@@ -737,7 +737,7 @@ return function(E)
 		F.lead = nil -- his steering point at its full distance (move.lua)
 		F.fly_want = nil
 		F.target, F.lock_key = nil, nil
-		F.hit_hp, F.next_react = nil, 0 -- a blow is his hit points falling from one frame to the next (combat.lua C.invincible)
+		F.hit_hp, F.next_react, F.killed, F.invincible_off = nil, 0, nil, nil -- a blow is his hit points falling from one frame to the next (combat.lua C.invincible)
 		F.fire_was = unit:is_behaviour_active("fire_at_will") -- the player's own setting, given back at the end
 		local x, y, z
 		if F.model then x, y, z = P.model_pos(F.model) else local q = unit:position() x, y, z = q:get_x(), q:get_y(), q:get_z() end

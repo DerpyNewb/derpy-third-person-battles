@@ -255,6 +255,20 @@ local function make_bm()
 	-- the player on this machine: alliance 1 (CA: "In any singleplayer battle this should return 1"), and its first army
 	-- unless opts.local_army = 2, the second human of a side, whose partner's army (H.allies) is the first
 	function B:local_alliance() return 1 end
+	function B:get_player_alliance_num() return 1 end
+	function B:get_non_player_alliance_num() return 2 end
+	-- the battlefield's buildings (H.buildings: {name, category, owner, x, z, health, gate}); CA's battle_building methods.
+	-- owner counts from 0 (measured 2026-11-08: attacking, the enemy's gates read 1; defending, the player's own read 0)
+	function B:buildings()
+		local list = {}
+		for _, o in ipairs(H.buildings or {}) do
+			list[#list + 1] = {_o = o, name = function(s) return s._o.name end, category = function(s) return s._o.category end,
+				alliance_owner_id = function(s) return s._o.owner end, health = function(s) return s._o.health or 1 end,
+				has_gate = function(s) return s._o.gate == true end,
+				central_position = function(s) return v(s._o.x, 0, s._o.z) end}
+		end
+		return listof(list)
+	end
 	function B:local_army() return H.local_army end
 	function B:show_subtitle(key, full, force)
 		rec("subtitle", key, full, force)
@@ -781,6 +795,7 @@ function H.fresh(opts)
 	opts = opts or {}
 	H.K = assert(real_loadfile(file("script/derpy_tp/keys")))()
 	H.T, H.calls, H.timers, H.keys, H.focus, H.mouse, H.wheel_notches = 100, {}, {}, {}, true, {0, 0}, 0
+	H.buildings = opts.buildings
 	H.log, H.phase, H.selection_cbs, H.selected, H.sel, H.listeners = {}, {}, {}, nil, {}, {}
 	H.model_timers, H.heard = {}, {}
 	H.casts, H.phases, H.drop_casts = {}, {}, 0

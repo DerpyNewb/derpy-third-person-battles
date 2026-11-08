@@ -534,8 +534,57 @@ return function(E)
 	C.fire_moves = fire_moves
 	local function whole_volley() return unit_order() and F.unit:number_of_men_alive() > 1 end
 
+	-- a blow of body's would land on an enemy man: its first attack clip's point (victim)
+	local function lands(body)
+		for _, s in ipairs(SLOTS_ATTACK) do if P.has_slot(body, s) then return victim(body, s) ~= nil end end
+		return false
+	end
+
+	-- the enemy's gate nearest ahead of him, inside GATE_REACH m of its centre (CA's order from 8.8 m out walks him to
+	-- 0.3 m of it). No script call damages a building and a blow lands only on a man (victim), so a click at one is CA's
+	-- own attack order on it (measured 2026-11-08 on a gate: eight swings, 0.535 -> 0.535; CA's order 1.000 -> 0.734 in
+	-- 25 s, and 1.00 -> 0.53 in a second siege). alliance_owner_id counts from 0 and get_*_alliance_num from 1: attacking,
+	-- the player was 1 and the enemy's gates 1; defending, his own gates 0. Barricades are not here: in a custom siege
+	-- every barricade slot (glb_barricade_*, category "house") reads health 1 and refuses CA's order, even after show(),
+	-- so a click near one would do nothing. ponytail: built barricades need a campaign siege to tell them apart
+	local GATE_REACH = 12
+	local function gate_ahead()
+		local ok, bs = pcall(function() return bm:buildings() end)
+		if not ok or not bs then return nil end
+		local theirs = bm:get_non_player_alliance_num() - 1
+		local x, z = my_xz()
+		local fx, fz = math.sin(E.rig.yaw), math.cos(E.rig.yaw)
+		local best, best_d
+		for i = 1, bs:count() do
+			local b = bs:item(i)
+			if b:alliance_owner_id() == theirs and b:health() > 0 and b:has_gate() then
+				local p = b:central_position()
+				local dx, dz = p:get_x() - x, p:get_z() - z
+				local d = math.sqrt(dx * dx + dz * dz)
+				if d < GATE_REACH and (d < 1 or (dx * fx + dz * fz) / d > STRIKE_COS) and (not best_d or d < best_d) then best, best_d = b, d end
+			end
+		end
+		return best
+	end
+
 	function C.melee(now, primary)
 		if C.locked(now) then return end
+		-- a unit of one at the enemy's gate, nobody where his blow lands: CA's order on the gate, not sent again on the gate
+		-- it is already on (a step ends it, move.lua)
+		if F.single and not F.model then
+			local b = gate_ahead()
+			if b and not lands(P.mount(F.single) or F.single) then
+				local id = "building " .. b:name()
+				if F.native_attack and F.attack_on == id then return end
+				F.attack_on = id
+				send(function()
+					F.uc:attack_building(b, 1, false)
+					F.native_attack = true
+					E.log("attack order on the building " .. b:name())
+				end)
+				return
+			end
+		end
 		-- a regiment played whole fights as CA's own does: CA's attack order on the enemy unit under the crosshair, else the
 		-- one nearest the aim, as its volley takes the crosshair's unit (the author, 2026-11-02: "it should use vanilla
 		-- attacking targetting, same as shooting use vanilla shoot the regiment"). Its men's clips played here dealt no
@@ -1005,6 +1054,15 @@ return function(E)
 		return false
 	end
 
+	-- a unit of one whose rider shoots and whose mount fights, with an enemy where the mount's blow lands: the Sisters of
+	-- Twilight on their dragon fight and shoot at once in vanilla (a player, 2026-10-23; measured 2026-11-08, CA's attack
+	-- order in melee, ammo 58 -> 56), and in third person did one or the other
+	local function mount_reaches()
+		local m = F.single
+		local body = m and not (F.model or F.crew or F.arty) and P.features.anim and F.men_ok and P.mount(m)
+		return body and lands(body) or false
+	end
+
 	function C.attack(now, clicked, held)
 		C.flush(now)
 		if C.locked(now) then return end
@@ -1014,7 +1072,12 @@ return function(E)
 			-- cannon toward the point and fired nothing (measured 2026-10-18, probes/zz_tp_arty_order.lua)
 			-- No enemy there: said on screen (a player, 2026-10-30: "artillery never fires")
 			if F.arty then if clicked and not order(true, F.unit:missile_range()) then E.say("derpy_tp_no_target") end
-			elseif F.solo then C.solo(now, clicked, held) else C.ground(now, clicked, held) end
+			elseif F.solo then C.solo(now, clicked, held)
+			else
+				C.ground(now, clicked, held)
+				-- and his mount swings with the shot, on the click only: no attack he did not ask for
+				if clicked and mount_reaches() then C.melee(now, true) end
+			end
 		elseif clicked and not F.arty then -- a gun out of shot is nothing: its crew never swing (the author, 2026-10-18)
 			C.melee(now, true)
 		end
@@ -1177,11 +1240,26 @@ return function(E)
 	-- played whole - CA's switch is the whole unit's, and would cover all his men. Released at once, as CA's own use on a
 	-- unit the player controls (lib_battle_script_unit.lua). An invincibility the battle gave him is left alone, on and
 	-- off. idle: no move key held this frame
+	-- A lethal blow inside the window stops at 1 hp: CA's switch keeps him alive, it does not stop the damage (a player,
+	-- 2026-11-03, a beheaded lord standing on; measured 2026-11-08, a Goblin Big Boss 183 -> 1 in one blow, alive 7 s at 1
+	-- hp, vanilla 239 -> 0). That blow is the one he dies of. INVINCIBLE_LAG: s past the window the switch may still hold,
+	-- as every uc: call lands on the engine's next tick
+	local INVINCIBLE_LAG = 0.3
 	function C.invincible(man, now, idle)
+		if F.killed then return end -- dying: never shielded again
 		if man then
 			local hp = P.model_hp(man)
 			local hit = F.hit_hp ~= nil and hp < F.hit_hp
 			F.hit_hp = hp
+			if hit and hp > 0 and hp <= 1 and (F.invincible or now and now - (F.invincible_off or -1e9) <= INVINCIBLE_LAG) then
+				F.uc:set_invincible(false)
+				F.uc:release_control()
+				F.uc:kill()
+				F.uc:release_control()
+				F.invincible, F.invincible_off, F.killed = nil, nil, true
+				E.log("a killing blow inside his window: he dies")
+				return
+			end
 			if hit and idle and now and now >= (F.next_react or 0)
 				and not (F.lock or F.swung or F.pending or F.shot or F.firing or F.native_attack) and react(man) then
 				F.next_react = now + REACT_GAP
@@ -1192,6 +1270,7 @@ return function(E)
 		if want == (F.invincible or false) or want and F.unit:is_invulnerable() then return end
 		F.uc:set_invincible(want)
 		F.uc:release_control()
+		if F.invincible and not want then F.invincible_off = now end
 		F.invincible = want or nil
 	end
 

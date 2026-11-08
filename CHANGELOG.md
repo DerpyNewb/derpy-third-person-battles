@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-11-08, second update
+
+Workshop manifest 1907773830457288151 (build `36d4c69b`).
+
+- A killing blow no longer leaves the entity you play standing at 1 hp. The game's invincibility does not block damage,
+  it stops a lethal blow at 1 hp, and the mod shields a unit of one while he blocks or reels. A hit that leaves him at
+  1 hp inside that window, or 0.3 s after it, now kills him.
+- A lord, hero or other single entity damages enemy gates: a click with an enemy gate within 12 m ahead and no enemy
+  where the blow lands is the game's own attack order on the gate. A step ends it. A building's owner number counts
+  from 0 and the player's alliance number from 1 (measured attacking and defending).
+- A rider who shoots from a mount that fights (the Sisters of Twilight): in ranged mode a click fires, and the mount
+  swings too when an enemy is where its blow lands.
+- Seen in game before the upload: the owner numbers, and the game's order on a gate (1.00 to 0.53). Not seen: the 1 hp
+  kill and the mount's swing in game, the gate through the mod's own click. Not fixed: barricades (in a custom siege
+  every barricade slot refuses the attack order, none is built), the Soul Grinder's sprint, the flamethrower's column.
+
+## 2026-11-08
+
+Workshop manifest 574328921042259151 (build `dc93af35`).
+
+- With the numpad unit keys, each card shows only its digit, and a key label is never wider than its card.
+- F2 with nobody to play says so.
+- Seen working in game before the upload.
+
+## 2026-11-07
+
+Workshop manifest 6088154110788324478 (build `a2ded00a`).
+
+- Better frame rate in third person, most of all with the bars over each entity on: the entities under the bars are
+  read ten times a second and placed every frame, the game's HUD is hidden again four times a second under the
+  cinematic UI instead of every frame, and the panel's parts are looked up once.
+- Command mode (vanilla style): the target line names the key that frees the cursor.
+- Mounted entities you play keep their block animations (1911-1930 are no longer counted as swings).
+
 ## 2026-11-03
 
 Workshop manifest 3181060629449301078 (build `45a97df2`).

@@ -1348,6 +1348,78 @@ T.mounted_swings_use_rider_slots = function()
 		.. tostring(H.last("play")[3]))
 end
 
+-- a player, 2026-10-23: "no damage to barricades". A blow lands on an enemy man or on nothing (combat.lua victim), and no
+-- script call damages a building (measured 2026-11-08: eight swings at a gate, 0.535 -> 0.535; CA's attack_building from
+-- the same spot, 1.000 -> 0.734 in 25 s). A unit of one's click with the enemy's gate ahead and nobody where his blow lands
+-- is CA's attack order on the gate, as a regiment's click is on a unit; a step ends it
+T.a_click_at_an_enemy_gate_is_cas_attack_on_it = function()
+	-- owner 1 is the enemy's (alliance 2): alliance_owner_id counts from 0, measured 2026-11-08
+	local GATE = {name = "gatehouse", category = "gate", gate = true, owner = 1, x = 0, z = 6}
+	H.fresh({buildings = {GATE}})
+	H.tap("F2") H.step(0.6)
+	H.tap("Left mouse") H.step(0.6)
+	local c = H.last("uc:attack_building")
+	check(H.count("uc:attack_building") == 1 and c[3]:name() == "gatehouse" and c[4] == 1, "CA's order on the gate: "
+		.. H.count("uc:attack_building"))
+	check(H.count("play") == 0 and H.E.F.native_attack, "no swing of ours over it, his own swings armed")
+	past_swing_gap() H.tap("Left mouse") H.step(0.6)
+	check(H.count("uc:attack_building") == 1, "not sent again on the gate it is already on")
+	H.down("W") H.step(0.6) H.up("W") H.step(0.6)
+	check(not H.E.F.native_attack, "a step ends it")
+	past_swing_gap() H.tap("Left mouse") H.step(0.6)
+	check(H.count("uc:attack_building") == 2, "and the next click orders it again")
+	-- an enemy man where the blow lands: the swing
+	H.fresh({buildings = {GATE}, enemies = {{x = 0, z = 2.5, men = 1}}})
+	H.tap("F2") H.step(0.6)
+	H.tap("Left mouse") H.step(0.6)
+	check(H.count("uc:attack_building") == 0 and H.count("play") == 1, "a man in reach: the swing")
+	-- not his own side's gate (0, as the player defending read it; 2, the number his alliance goes by), not one behind
+	-- him, not one already down, not a wall, not a barricade slot (refuses CA's order), not one out of reach
+	for _, b in ipairs({{owner = 0}, {owner = 2}, {z = -6}, {health = 0}, {gate = false, category = "fort_wall"},
+		{gate = false, category = "house", name = "glb_barricade_01"}, {z = 40}}) do
+		local o = {} for k, x in pairs(GATE) do o[k] = x end for k, x in pairs(b) do o[k] = x end
+		H.fresh({buildings = {o}})
+		H.tap("F2") H.step(0.6)
+		H.tap("Left mouse") H.step(0.6)
+		check(H.count("uc:attack_building") == 0 and H.count("play") == 1, "the swing for " .. tostring(o.owner) .. " "
+			.. tostring(o.z) .. " " .. tostring(o.health) .. " " .. tostring(o.category))
+	end
+end
+
+-- a player, 2026-10-23: the Sisters of Twilight "attack with the bow and in melee at the same time" in vanilla, and only one
+-- of the two in third person (measured 2026-11-08: vanilla's attack order in melee, ammo 58 -> 56; third person, either
+-- mode, one or the other). A rider who shoots on a mount that fights: in ranged mode his click fires and, with an enemy
+-- where the mount's blow lands, swings the mount too. Only on the click: no attack he did not ask for
+T.a_shooting_rider_on_a_fighting_mount_does_both_on_one_click = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_mount", men = 1, x = 40, range = 100, ammo = 10, slots = {[1901] = true}}},
+		enemies = {{x = 40, z = 3, men = 3}}, features = STRIKES})
+	H.units[2]._models[1].mount = {id = 999, x = 40, y = 0, z = 0, hp = 100, hp_max = 100, slots = {[454] = true, [455] = true}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	H.E.D.impacts = {wh_test_mount = {{0, 2.5}, {0, 2.5}}}
+	check(H.E.F.ranged and H.E.F.single, "a unit of one, in ranged mode")
+	H.tap("Left mouse") H.step(0.5)
+	local p = H.last("play")
+	check(H.count("uc:attack_unit") + H.count("uc:attack_location") == 1, "the click fires")
+	check(H.count("play") == 1 and p[2] == 999 and p[3] == 454, "and swings the mount: " .. tostring(p and p[3]))
+	check(H.count("strike") == 1, "its blow struck: " .. H.count("strike"))
+	-- nobody in the mount's reach: the shot alone
+	H.fresh({units = {{general = true}, {type = "wh_test_mount", men = 1, x = 40, range = 100, ammo = 10, slots = {[1901] = true}}},
+		enemies = {{x = 40, z = 40, men = 3}}, features = STRIKES})
+	H.units[2]._models[1].mount = {id = 999, x = 40, y = 0, z = 0, hp = 100, hp_max = 100, slots = {[454] = true, [455] = true}}
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	H.E.D.impacts = {wh_test_mount = {{0, 2.5}, {0, 2.5}}}
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("uc:attack_unit") + H.count("uc:attack_location") == 1 and H.count("play") == 0, "out of reach, the shot alone: "
+		.. H.count("play"))
+	-- a shooter on foot is a shooter: no swing
+	H.fresh({units = {{general = true}, {type = "wh_test_ranged_lord", men = 1, x = 40, range = 100, ammo = 10, slots = {[454] = true}}},
+		enemies = {{x = 40, z = 3, men = 3}}, features = STRIKES})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	H.E.D.impacts = {wh_test_ranged_lord = {{0, 2.5}}}
+	H.tap("Left mouse") H.step(0.5)
+	check(H.count("play") == 0, "on foot, no swing: " .. H.count("play"))
+end
+
 T.flying_mount_swings_use_airborne_rider_slots = function()
 	local u = playing({type = "wh_test_fly_mount", men = 1, flying = true, slots = {[454] = true, [1901] = true, [1941] = true}})
 	u._models[1].mount = {id = 991, slots = {[454] = true, [494] = true}}
@@ -7865,6 +7937,39 @@ T.a_blow_on_a_unit_of_one_standing_idle_plays_his_defend = function()
 	n = H.count("play")
 	H.E.F.model.hp = H.E.F.model.hp - 5 H.step(0.1)
 	check(H.count("play") == n, "one man of a regiment: nothing")
+end
+
+-- a player, 2026-11-03: a beheaded lord stood on at 1 hp. Measured 2026-11-08: a Goblin Big Boss played, 183 -> 1 in one
+-- blow, then 7 s alive at 1 hp; vanilla 239 -> 0. CA's invincibility stops a lethal blow at 1 hp, so a blow that leaves
+-- him there while his window is on (or just closed, the switch landing a tick late) is the one he dies of
+T.a_killing_blow_inside_his_window_kills_him = function()
+	general_on() H.step(0.5)
+	local man = H.units[1]._models[1]
+	engine_plays(man, 474, 800) H.step(0.1)
+	check(invincible() == true, "on under his block")
+	man.hp = 1 H.step(0.1)
+	check(H.count("uc:kill") == 1 and invincible() == false, "the blow he would have died of kills him: " .. H.count("uc:kill"))
+	check(released_after_each_switch(), "each switch released")
+	-- just after the window: the switch reaches the engine a tick late
+	general_on() H.step(0.5)
+	man = H.units[1]._models[1]
+	engine_plays(man, 474, 300) H.step(0.5)
+	check(invincible() == false, "off again")
+	man.hp = 1 H.step(0.1)
+	check(H.count("uc:kill") == 1, "a tick after it: " .. H.count("uc:kill"))
+	-- outside it: a blow to 1 hp is only a blow
+	general_on() H.step(0.5)
+	man = H.units[1]._models[1]
+	man.hp = 1 H.step(0.1)
+	check(H.count("uc:kill") == 0, "no window, no kill: " .. H.count("uc:kill"))
+	-- an invincibility the battle gave him is not ours to end
+	H.fresh()
+	H.units[1]._invulnerable = true
+	H.tap("F2") H.step(0.5)
+	man = H.units[1]._models[1]
+	engine_plays(man, 474, 800) H.step(0.1)
+	man.hp = 1 H.step(0.1)
+	check(H.count("uc:kill") == 0, "the battle's own: " .. H.count("uc:kill"))
 end
 
 T.a_mounted_unit_of_one_cannot_be_hurt_while_his_mount_reels = function()
