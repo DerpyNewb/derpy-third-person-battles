@@ -579,7 +579,7 @@ return function(E)
 				F.attack_on = id
 				send(function()
 					F.uc:attack_building(b, 1, false)
-					F.native_attack = true
+					F.native_attack = "building" -- move.lua leaves him to the order's walk
 					E.log("attack order on the building " .. b:name())
 				end)
 				return
@@ -1059,7 +1059,9 @@ return function(E)
 	-- order in melee, ammo 58 -> 56), and in third person did one or the other
 	local function mount_reaches()
 		local m = F.single
-		local body = m and not (F.model or F.crew or F.arty) and P.features.anim and F.men_ok and P.mount(m)
+		-- a crew on one body counts (the Sisters of Twilight are two riders on one dragon, F.crew, measured 2026-11-08); a war
+		-- machine does not (a chariot's crew is played, its chariot steered)
+		local body = m and not (F.model or F.arty) and not F.unit:is_war_machine() and P.features.anim and F.men_ok and P.mount(m)
 		return body and lands(body) or false
 	end
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-08, third update
+
+Workshop manifest 1737806279072665617 (build `b6adf1c8`). Both fixes below were found broken in game after the second
+update; the offline tests had passed.
+
+- Attacking an enemy gate walks to it and damages it. A unit of one is held on his spot every frame no move key is
+  down, and that held him 9 m out under the game's order on the gate; the hold now stands aside for that order alone.
+  Seen in game: 1.00 to 0.84, and a step ends it.
+- The Sisters of Twilight's ranged click also swings the dragon. Two riders on one mount are a crew, which the first
+  version left out; crews are in, war machines (chariots) stay out. Seen in game: three blows for 1,102 hp.
+- The 1 hp report is still open: a lethal blow under the mod's shield could not be produced on demand, and one stall
+  at 1 hp came with the shield off.
+
 ## 2026-11-08, second update
 
 Workshop manifest 1907773830457288151 (build `36d4c69b`).

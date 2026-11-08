@@ -55,6 +55,33 @@ folders differ from their published size. Scripts, manifest and both packs are i
   `HANDOFF_20261020_THIRD_PERSON_FLAMETHROWER_PROBES.md`.
 - Barricades (above).
 
+## Verified in game after the upload (14:25-14:55, the published `36d4c69b` from its Workshop folder)
+
+Driven over the bridge with `probes/zz_tp_live_20261108.lua` (keys stubbed, enemy held), 720p test prefs, reverted.
+
+- **Gate: broken as shipped.** The pack's click sent CA's order (`attack order on the building` in the log, three
+  times), but the general stood 9 m out for 40 s and the gate stayed at 1.00. Cause: `move.lua` `man_drive` holds a
+  unit of one on his spot (`P.hold`) every idle frame, which overrides the order's walk; the harness does not model
+  that. With the hold skipped while the order runs (patched live), he walked to 1.6 m and took the gate 1.00 -> 0.84;
+  a step cleared the order and the gate stayed at 0.77. Fixed: the gate order sets `native_attack = "building"` and
+  `M.drive` skips the hold for that alone (a unit of one's other CA orders keep it).
+- **Sisters of Twilight: broken as shipped.** Two riders on one dragon are `F.crew`, and `mount_reaches` excluded
+  crews, so the click fired (ammo 60 -> 58) and the dragon did nothing. With crews let through and war machines kept
+  out (patched live): each click fired and the dragon swung (clips 494-497), the log read `hit 387`, `hit 349`, `hit 366`
+  and the Warboss lost exactly 1,102 hp; two other clicks were blocked.
+- **1 hp: not proven either way.** One clean fight (Empire General vs Orc Warboss, unshielded) died 109 -> 0 with no
+  1 hp stage, but the kill path did not log, so the blow simply landed unshielded. A forced test failed: holding CA's
+  invincibility on every frame blocked every blow outright for 56 s (unshielded, blows landed every 4-8 s), so the
+  "lethal blow clamped to 1 hp" mechanism could not be produced on demand. A Branchwraith fight then sat at **1 hp for
+  7.1 s** with the pack's shield off, 4 s after the forcing ended (the forcing never released control, so that sample
+  is contaminated). A third, clean run with a frame record was lost: the bridge wedged ("failed to parse command JSON"),
+  and from then on `bm:time_elapsed_ms()` returned a function, so the pack's frame threw every tick (200,000 log lines)
+  and switched itself off. The 1 hp cause is open; the shipped kill path is harmless but may not be the fix.
+
+Fixed build `b6adf1c8` (717 + 49, 43/43; the gate test now fails when the hold is restored, the mount test when crews
+are excluded again), deployed and **uploaded 14:56** at the author's request ("update it"): Steam log `Uploaded new content ( ManifestID 1737806279072665617 )`, `: OK`; published file_size 5,619,740 = pack + preview, 0 of 37 folders differ. Staging in `Modding Files/Backup/pre_upload_20261108b_third_person/`. Change note: "Fixed: attacking an enemy gate now walks to it and damages it (it stood still before)" / "Fixed: Sisters of Twilight, and other riders sharing one mount: in ranged mode a click now also swings the mount at an enemy in reach". Not re-run in game as a build: the live patches
+were the same logic.
+
 ## Change note
 
 ```

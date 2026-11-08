@@ -1362,6 +1362,10 @@ T.a_click_at_an_enemy_gate_is_cas_attack_on_it = function()
 	check(H.count("uc:attack_building") == 1 and c[3]:name() == "gatehouse" and c[4] == 1, "CA's order on the gate: "
 		.. H.count("uc:attack_building"))
 	check(H.count("play") == 0 and H.E.F.native_attack, "no swing of ours over it, his own swings armed")
+	-- and the order walks him there: no hold on his spot while it runs (live 2026-11-08: held, 9 m out for 40 s, no damage)
+	local holds = H.count("hold")
+	H.step(0.5)
+	check(H.count("hold") == holds, "not held on his spot under the order: " .. (H.count("hold") - holds))
 	past_swing_gap() H.tap("Left mouse") H.step(0.6)
 	check(H.count("uc:attack_building") == 1, "not sent again on the gate it is already on")
 	H.down("W") H.step(0.6) H.up("W") H.step(0.6)
@@ -1411,6 +1415,18 @@ T.a_shooting_rider_on_a_fighting_mount_does_both_on_one_click = function()
 	H.tap("Left mouse") H.step(0.5)
 	check(H.count("uc:attack_unit") + H.count("uc:attack_location") == 1 and H.count("play") == 0, "out of reach, the shot alone: "
 		.. H.count("play"))
+	-- two riders on one mount (the Sisters of Twilight, a crew, measured 2026-11-08): the same
+	H.fresh({units = {{general = true}, {type = "wh_test_mount", men = 2, x = 40, range = 100, ammo = 10, slots = {[1901] = true}}},
+		enemies = {{x = 40, z = 3, men = 3}}, features = STRIKES})
+	local beast = {id = 999, x = 40, y = 0, z = 0, hp = 100, hp_max = 100, slots = {[454] = true, [455] = true}}
+	for _, m in ipairs(H.units[2]._models) do m.mount = beast end
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	H.E.D.impacts = {wh_test_mount = {{0, 2.5}, {0, 2.5}}}
+	check(H.E.F.crew and H.E.F.single and H.E.F.ranged, "a crew on one body, played as one, ranged: " .. tostring(H.E.F.crew))
+	H.tap("Left mouse") H.step(0.5)
+	p = H.last("play")
+	check(H.count("uc:attack_unit") + H.count("uc:attack_location") == 1 and p and p[2] == 999 and p[3] == 454,
+		"a crew's click fires and swings its mount: " .. tostring(p and p[3]))
 	-- a shooter on foot is a shooter: no swing
 	H.fresh({units = {{general = true}, {type = "wh_test_ranged_lord", men = 1, x = 40, range = 100, ammo = 10, slots = {[454] = true}}},
 		enemies = {{x = 40, z = 3, men = 3}}, features = STRIKES})

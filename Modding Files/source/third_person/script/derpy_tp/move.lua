@@ -166,6 +166,9 @@ return function(E)
 			local n = math.sqrt(dx * dx + dz * dz)
 			dx, dz = dx / n, dz / n
 		end
+		-- CA's order on a gate walks him to it: holding him on his spot each idle frame (man_drive) kept him 9 m out, the gate
+		-- untouched, for 40 s (measured 2026-11-08); left to the order he walked in and took it 1.00 -> 0.84. A step ends it
+		if F.single and F.native_attack == "building" and kf == 0 and kr == 0 then F.man_hold = nil return end
 		if F.model or F.single then man_drive(now, dx, dz, run, speed) return end
 		if kf == 0 and kr == 0 then M.halt() return end
 		local q = F.unit:position()
