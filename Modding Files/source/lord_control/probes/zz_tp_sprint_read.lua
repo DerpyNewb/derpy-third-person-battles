@@ -9,5 +9,7 @@ for _, r in ipairs(T.units) do
 		.. " | flying " .. tostring(r.flying) .. ", sprinting " .. tostring(r.sprinting) .. ", charging " .. tostring(r.charging)
 		.. ", CHARGE " .. tostring(r.charges) .. ", FLY_CHARGE " .. tostring(r.fly_charges)
 		.. ", command speed " .. tostring(r.cmd_speed) .. (r.melee and " IN MELEE" or "")
+		.. " | charge_order " .. tostring(r.charge_order) .. ", swings " .. tostring(r.swings)
+		.. " | " .. tostring(r.flags) .. " | logged: " .. tostring(r.logged)
 end
 return out

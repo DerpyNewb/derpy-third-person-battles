@@ -528,9 +528,10 @@ function M.uncarrier(hi, lo)
 	return {op = op, id = lo, shots = f % 2 == 1, charge = math.floor(f / 2) % 2 == 1}
 end
 
--- ATTACK_1-10, MOVING_, JUMPING_ and FLY_ATTACK_1-10 (484-503: FLY_ATTACK_8-10 were left in until 2026-10-19), RIDER_ and
--- RIDER_FLY_ATTACK_1-10
-local function is_attack(s) return s >= 454 and s <= 463 or s >= 484 and s <= 503 or s >= 1901 and s <= 1950 end
+-- ATTACK_1-10, MOVING_, JUMPING_ and FLY_ATTACK_1-10 (484-503: FLY_ATTACK_8-10 were left in until 2026-10-19), RIDER_ATTACK_1-10
+-- (1901-1910), RIDER_MOVING_ and RIDER_JUMPING_ATTACK_1-5 and RIDER_FLY_ATTACK_1-10 (1931-1950). Not RIDER_ATTACK_IDLE_ and
+-- RIDER_DEFEND_1-10 between them (1911-1930), no swing: one 1901-1950 sweep took a rider's blocks too until 2026-11-07
+local function is_attack(s) return s >= 454 and s <= 463 or s >= 484 and s <= 503 or s >= 1901 and s <= 1910 or s >= 1931 and s <= 1950 end
 -- one man of a regiment: his regiment's volleys too (2026-10-19, its fire at will left alone: he aimed and fired with
 -- it). The aim, fire and reload clips, as combat.lua's shooting()
 local function is_shot(s) return s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116 end

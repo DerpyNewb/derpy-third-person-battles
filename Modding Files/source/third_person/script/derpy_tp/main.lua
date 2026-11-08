@@ -3,7 +3,7 @@
 -- Two clocks: real time (os.clock) for the camera and the Manual fire hand-over, model time
 -- (bm:time_elapsed_ms) for everything that acts in the battle, so cooldowns, reloads and order gaps follow
 -- game speed and stop with the pause.
-local MAX_ERRORS, ZOOM_LARGE, ZOOM_NOTCH = 3, 2, 0.15
+local MAX_ERRORS, ZOOM_LARGE, ZOOM_NOTCH, HUD_EVERY = 3, 2, 0.15, 0.25
 -- a pause is read off the battle's speed first (battle:current_battle_speed: 0 is stopped). No documented call says
 -- "paused" otherwise, and model time moves in 100-200 ms ticks, so a pause is also model time standing still this long
 -- in real time, stretched by a speed under 1: at a quarter, a 200 ms tick takes 0.8 s and is slow motion, not a pause;
@@ -381,7 +381,19 @@ return function(E)
 	local function tick(now, dt, gnow, paused)
 		local S, unit = E.S, F.unit
 		F.dt = dt -- real time: the model clock steps in 100 ms ticks (move.lua's turn)
-		hud(E.command.vanilla()) -- CA's whole HUD in command mode's Vanilla style (the author, 2026-10-23: "yes the whole")
+		-- CA's whole HUD in command mode's Vanilla style (the author, 2026-10-23: "yes the whole"). Each pass searches CA's
+		-- interface from its root, every frame (a player, 2026-11-04: frame drops). Under the cinematic UI (cursor below) CA's
+		-- interface is not drawn, so there it runs HUD_EVERY real s apart, and at once when what it hides changes: the mouse
+		-- freed or taken, the style, CA's banners. Wherever CA's interface shows, every frame still: the game shows a banner
+		-- again every tenth of a second (command.lua, measured 2026-10-23). ponytail: the frame the mouse is freed, a part the
+		-- game showed again under the cinematic UI can show for that one frame
+		local vanilla_ui = E.command.vanilla()
+		local veiled = not P.features.net and (F.ui_off or F.dragging and not vanilla_ui and not F.banners)
+		if not veiled or vanilla_ui ~= F.hud_vanilla or F.dragging ~= F.hud_drag or F.banners ~= F.hud_banners
+			or now >= (F.hud_at or 0) then
+			F.hud_vanilla, F.hud_drag, F.hud_banners, F.hud_at = vanilla_ui, F.dragging, F.banners, now + HUD_EVERY
+			hud(vanilla_ui)
+		end
 		if unit:number_of_men_alive() == 0 or unit:is_routing() then M.stop("unit lost") return end
 		local single = not F.model and (unit:number_of_men_alive() == 1 or F.crew) and P.models(unit)[1]
 		if single and P.model_hp(single) <= 0 then M.stop("unit lost") return end
@@ -669,7 +681,9 @@ return function(E)
 				.. ", wheel " .. tostring(P.features.wheel))
 		end
 		unit = unit or pick_unit()
-		if not unit or unit:number_of_men_alive() == 0 then return end
+		-- nobody to play: no one unit selected and his general dead. Said, or F2 did nothing a player could see (2026-11-08,
+		-- live: nothing on screen, nothing in the log)
+		if not unit or unit:number_of_men_alive() == 0 then E.say("derpy_tp_no_unit", E.S.names.toggle) return end
 		F.unit, F.uc, F.utype, F.arty = unit, create_unitcontroller(unit), unit:type(), unit:is_artillery()
 		local men_ok, why = check("men", P.check_men, unit)
 		F.men_ok = men_ok

@@ -136,7 +136,9 @@ local ok, res = pcall(function()
 		T.units[#T.units + 1] = rec
 		cur = rec
 		local c = uc_of[u:unique_ui_id()]
-		c:teleport_to_location(v(sx, bm:get_terrain_height(sx, sz), sz), math.deg(yaw) % 360, 30)
+		-- TP_SP_NOTP: where he stands, along his facing (a teleport breaks a regiment's steering check)
+		if _G.TP_SP_NOTP then yaw = math.rad(u:bearing())
+		else c:teleport_to_location(v(sx, bm:get_terrain_height(sx, sz), sz), math.deg(yaw) % 360, 30) end
 		c:release_control()
 		bm:clear_selection()
 		u:select_in_ui()
@@ -155,6 +157,13 @@ local ok, res = pcall(function()
 			elseif step == "check_on" and t >= 2.3 then
 				rec.on = F.on and F.unit and F.unit:unique_ui_id() == rec.u:unique_ui_id()
 				rec.steered = (F.model or F.single) ~= nil
+				rec.flags = "men_ok " .. tostring(F.men_ok) .. ", single_steer " .. tostring(F.single_steer) .. ", model " .. tostring(F.model ~= nil)
+					.. ", single " .. tostring(F.single ~= nil) .. ", crew " .. tostring(F.crew) .. ", chariot-model " .. tostring(F.body ~= nil)
+					.. ", steer " .. tostring(P.features.steer) .. ", mailbox " .. tostring(P.features.mailbox) .. ", strikes " .. tostring(E.strikes)
+					.. ", men " .. tostring(rec.u:number_of_men_alive()) .. ", models " .. tostring(#P.models(rec.u))
+				local tags = ""
+				for k in pairs(E.logged or {}) do tags = tags .. k .. " " end
+				rec.logged = tags
 				if not rec.on then rec.skipped = "did not go on" step = "toggle_off" return end
 				E.rig.yaw, E.rig.want_yaw = yaw, yaw
 				set("forward", true)
@@ -182,7 +191,18 @@ local ok, res = pcall(function()
 					rec.sprint = r1(math.sqrt((x - rec.s0[1]) ^ 2 + (z - rec.s0[2]) ^ 2) / (t - rec.s0[3]))
 					rec.ratio = rec.run > 0 and r1(rec.sprint / rec.run) or -1
 					rec.melee = rec.u:is_in_melee()
+					rec.charge_order = F.charge_order ~= nil
 					set("sprint", false) set("forward", false)
+					step, rec.t_swing = "swing", t
+				end
+			elseif step == "swing" then
+				-- one click once he has stood a second: a swing sent is F.swings counting up
+				local ts = t - rec.t_swing
+				if ts >= 1 and not rec.sw0 then rec.sw0 = F.swings set("attack", true)
+				elseif rec.sw0 and not rec.released then set("attack", false) rec.released = true
+				elseif ts >= 3 then
+					rec.swings = F.swings - rec.sw0
+					rec.slot_after = F.lock and F.lock.slot
 					step = "toggle_off"
 				end
 			elseif step == "toggle_off" then pcall(E.main.stop, "sprint test") step = "off_check" rec.t_off = t

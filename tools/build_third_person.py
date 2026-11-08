@@ -46,6 +46,9 @@ LOC = {
     # main.lua M.start: a spectator, or a co-op partner with no army of their own (units given to them are the other
     # player's army); it was in the log only, and F2 seemed to do nothing (a player, 2026-10-31)
     "derpy_tp_mp_watching": "Third-Person Battles: you have no army of your own in this battle, so there is nobody for you to play. Units another player gives you can't be played in third person.",
+    # main.lua M.start: no one unit selected and the general dead; F2 did nothing on screen or in the log (2026-11-08, live)
+    # (%s: the toggle key as MCT has it)
+    "derpy_tp_no_unit": "Select one unit to play, then press %s.",
     # combat.lua C.attack: a gun's click with no enemy in its range ahead did nothing and said nothing (a player, 2026-10-30:
     # "artillery never fires")
     "derpy_tp_no_target": "No enemy in range ahead to fire at.",

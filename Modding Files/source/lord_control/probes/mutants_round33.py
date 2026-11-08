@@ -7,7 +7,7 @@ MUTANTS = [
     # the platform: the copy and what reads it
     (P, "\t\tif is_attack(slot) then unpoint(m) end", "", PUSH),
     (P, "\t\tif is_attack(slot) then unpoint(m) end", "\t\tunpoint(m)", PUSH),
-    (P, "or s >= 1901 and s <= 1950 end", "end", FRAG),
+    (P, "or s >= 1901 and s <= 1910 or s >= 1931 and s <= 1950 end", "end", FRAG),
     (P, "or s >= 484 and s <= 500 or", "or", FRAG),
     (P, "s >= 454 and s <= 463 or", "s >= 454 and s <= 460 or", FRAG),
     (P, "\t\tanim = orig_of[mr.tostring(anim)] or anim", "", FRAG),

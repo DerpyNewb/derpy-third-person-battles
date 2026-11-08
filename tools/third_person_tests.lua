@@ -554,6 +554,24 @@ T.errors_switch_it_off_after_three = function()
 	check(H.logged("test: position() failed"), "the error is in the script log")
 end
 
+-- F2 with nobody to play - nothing selected and his general dead - says so, with the key as MCT has it (2026-11-08, live:
+-- it did nothing on screen and nothing in the log, one way a player gets "F2 does nothing")
+T.f2_with_nobody_to_play_says_so = function()
+	H.fresh({units = {{general = true}, {men = 10, x = 20}}, mct = {key_toggle = "F6"}})
+	H.loc = {derpy_tp_no_unit = "Select one unit to play, then press %s."}
+	for _, m in ipairs(H.units[1]._models) do m.alive = false end
+	H.select(nil)
+	H.tap("F6") H.step(0.1)
+	check(not H.E.F.on, "nobody played")
+	local s = H.last("subtitle")
+	check(s and s[2] == "derpy_tp_no_unit", "the player is told: " .. tostring(s and s[2]))
+	local line = find_uicomponent(H.root, "scripted_subtitles", "text_child")
+	check(line and line.text == "Select one unit to play, then press F6.", "with his key: " .. tostring(line and line.text))
+	H.select(H.units[2])
+	H.tap("F6") H.step(0.1)
+	check(H.E.F.on and H.E.F.unit == H.units[2], "a unit selected: it is played")
+end
+
 T.replays_still_do_nothing = function()
 	H.fresh({replay = true})
 	H.tap("F2")
@@ -4143,10 +4161,13 @@ T.the_man_played_alone_points_at_a_fragment_with_no_attack_clips = function()
 	check(mine.addr ~= shared and hmine.addr ~= hshared and mine.addr ~= hmine.addr, "rider and horse each on a copy")
 	check(mr.read_pointer(mine, 0).addr == BASE + 0x39d9448, "the copy carries the fragment's head")
 	for _, f in ipairs({mine, hmine}) do
-		for _, s in ipairs({454, 459, 463, 484, 494, 500, 501, 503, 1901, 1941, 1950}) do
+		-- RIDER_ATTACK_1-10 1901-1910, RIDER_MOVING_ATTACK_1-5 and RIDER_JUMPING_ATTACK_1-5 1931-1940, RIDER_FLY_ATTACK_1-10
+		-- 1941-1950; between them RIDER_ATTACK_IDLE_1-10 (1911-1920) and RIDER_DEFEND_1-10 (1921-1930) are no swing, and the
+		-- 1901-1950 sweep took a rider's blocks too (2026-11-07)
+		for _, s in ipairs({454, 459, 463, 484, 494, 500, 501, 503, 1901, 1910, 1931, 1940, 1941, 1950}) do
 			check(mr.read_uint16(f, 0x50 + s * 2) == 0xffff, "no attack clip in slot " .. s)
 		end
-		for _, s in ipairs({0, 42, 135, 453, 464, 483, 504, 1094, 1557, 1564, 1900, 1951, 2329}) do
+		for _, s in ipairs({0, 42, 135, 453, 464, 483, 504, 1094, 1557, 1564, 1900, 1911, 1920, 1921, 1930, 1951, 2329}) do
 			check(mr.read_uint16(f, 0x50 + s * 2) == s % 31, "slot " .. s .. " kept")
 		end
 	end
@@ -4564,6 +4585,46 @@ T.third_person_hides_unrequested_hud = function()
 	check(not face:Visible() and not abilities:Visible(), "looking again: hidden")
 	H.tap("F2")
 	check(face:Visible() and abilities:Visible() and button:Visible() and radar:Visible(), "third person off: all back")
+end
+-- a player, 2026-11-04: frame drops. Each pass over CA's HUD searches its interface from the root, and it ran every frame.
+-- Under the cinematic UI, which draws none of CA's interface, four times a second and at once when what it hides changes;
+-- wherever CA's interface shows (the freed mouse here), every frame still, as the game shows parts again on its own
+T.cas_hud_is_hidden_again_four_times_a_second = function()
+	local radar = battle_hud()
+	local set, n = getmetatable(radar).__index.SetVisible, 0
+	radar.SetVisible = function(self, b) n = n + 1 return set(self, b) end
+	H.tap("F2") H.step(0.5)
+	n = 0 H.step(1)
+	check(n >= 3 and n <= 5, "hidden again four times a second, not each frame: " .. n)
+	radar.visible = true H.step(0.3)
+	check(not radar:Visible(), "shown again by the game: hidden within a quarter second")
+	local radar2, _, face = battle_hud()
+	local set2, n2 = getmetatable(radar2).__index.SetVisible, 0
+	radar2.SetVisible = function(self, b) n2 = n2 + 1 return set2(self, b) end
+	H.tap("F2") H.step(0.5)
+	H.down("Middle mouse")
+	for _ = 1, 60 do if not H.E.F.dragging then break end H.step(1 / 60) end
+	check(not H.E.F.dragging and not face:Visible(), "the mouse just freed")
+	H.step(1 / 60)
+	check(face:Visible(), "CA's portrait the next frame, not at the next pass")
+	n2 = 0 H.step(0.5)
+	check(n2 >= 28, "CA's interface showing: hidden again every frame: " .. n2 .. " in 30 frames")
+	H.up("Middle mouse")
+	for _ = 1, 60 do if H.E.F.dragging then break end H.step(1 / 60) end
+	H.step(1 / 60)
+	check(H.E.F.dragging and not face:Visible(), "the mouse taken back: the portrait hidden the next frame")
+	H.tap("F2")
+	check(face:Visible(), "third person off: back")
+end
+-- the pack's own panel parts, looked up once each: about 50 searches of the panel a frame before (frame drops, 2026-11-04)
+T.the_panels_parts_are_looked_up_once = function()
+	H.fresh({units = {{general = true}}, enemies = {{men = 10, z = 15}}})
+	H.tap("F2") H.step(1)
+	local panel, find, n = find_uicomponent(H.root, "derpy_tp_hud"), find_uicomponent, 0
+	find_uicomponent = function(root, ...) if root == panel then n = n + 1 end return find(root, ...) end
+	H.step(1)
+	find_uicomponent = find
+	check(n < 60, "searches of the panel in 60 frames: " .. n)
 end
 
 T.multiplayer_hides_cas_portrait_and_abilities_while_looking = function()
@@ -8016,6 +8077,28 @@ T.every_man_near_him_has_a_bar_on_his_head_filled_to_his_health = function()
 	for _, x in pairs(man_bars()) do n = n + (x:Visible() and 1 or 0) end
 	check(n == 0 and not hud_part("men_bars"):Visible(), "the setting off: none")
 end
+-- a player, 2026-11-04: "framedrops while you are on third person". Each man's list, place and health is a memreader call,
+-- and every man within 70 m was read every frame. They are read ten times a second; between reads each bar is put where
+-- this frame's view shows the place last read, so a turn of the view moves them in the same frame
+T.the_men_under_the_bars_are_read_ten_times_a_second = function()
+	H.fresh({units = {{general = true}}, enemies = {{men = 10, z = 15}}, mct = {display_bars_range = 40}})
+	pinhole(900)
+	H.tap("F2") H.step(3)
+	local P, id, reads = H.E.P, H.enemies[1]._id, 0
+	local models = P.models
+	P.models = function(u) if u._id == id then reads = reads + 1 end return models(u) end
+	H.step(1)
+	P.models = models
+	check(reads >= 9 and reads <= 11, "the enemy's men read once each 0.1 s: " .. reads .. " reads in 60 frames")
+	local L = assert(loadfile("/script/derpy_tp/hud_layout"))()
+	local b, m = man_bars()["derpy_tp_man_" .. id .. "_1"], H.enemies[1]._models[1]
+	local x0 = b.x
+	H.E.rig.look(30, 0) H.step(1 / 60)
+	local sx = H.w2s(m.x, m.y + 1.8 + L.man.lift, m.z)
+	check(b.x ~= x0, "the view turned: the bar moved in the same frame")
+	check(b:Visible() and math.abs(b.x - (sx - L.man.size[1] / 2)) <= 1,
+		"on his head as this frame's view shows him: " .. b.x .. " against " .. sx - L.man.size[1] / 2)
+end
 
 -- CA's tracker chevrons (unitcontroller:highlight) under the men of every unit the player does not command, an enemy only
 -- while he can see it, each released at once; never a controller on a unit of his. Shown by the guide key (the author,
@@ -9270,7 +9353,7 @@ end
 T.the_guide_key_brings_cas_banners_back_and_the_bars_step_aside = function()
 	bar_battle({display_bars_range = 1000})
 	local holder = H.comp("unit_id_holder", H.root)
-	H.step(0.1)
+	H.step(0.3) -- made after the start, under the cinematic UI: CA's parts are hidden again four times a second there
 	local by = pins()
 	local function shown(u) return by[tostring(u._id)]:Visible() end
 	check(H.last("banners")[2] == false and not holder:Visible(), "third person on: no banners")
@@ -9980,6 +10063,28 @@ T.a_middle_click_frees_the_cursor_and_the_next_takes_it_back = function()
 	check(H.E.F.dragging and not H.E.F.free_cursor, "leaving the mode leaves the free cursor")
 	H.tap("Q") H.step(0.1)
 	check(H.E.F.dragging, "and entering starts on the crosshair")
+end
+-- a player, 2026-11-07: "the commands aren't working after pressing q ... I select a unit - it works, but that's all". The
+-- mode opens with the mouse still turning the view, and only the number keys' line was said: the target line names the
+-- key that frees the cursor, as MCT has it, and how to take it back; the Bannerlord style keeps its own line
+T.vanilla_command_mode_says_which_key_frees_the_cursor = function()
+	vanilla_battle()
+	local line = hud_part("target")
+	check(not line:Visible(), "third person: no line")
+	H.tap("Q") H.step(0.1)
+	check(line:Visible() and line.text == "Middle mouse: free the cursor", "the mode opens: " .. tostring(line.text))
+	H.tap("Middle mouse") H.step(0.1)
+	check(line:Visible() and line.text == "Middle mouse: look around", "freed: " .. tostring(line.text))
+	H.tap("Middle mouse") H.step(0.1)
+	check(line.text == "Middle mouse: free the cursor", "taken back: " .. tostring(line.text))
+	H.tap("Q") H.step(0.1)
+	check(not line:Visible(), "leaving: no line")
+	vanilla_battle({key_look_free = "Mouse 4"})
+	H.tap("Q") H.step(0.1)
+	check(hud_part("target").text == "Mouse 4: free the cursor", "the key moved in MCT: " .. tostring(hud_part("target").text))
+	command_battle()
+	H.tap("Q") H.step(0.1)
+	check(hud_part("target").text == "Pick units: 1 to 6, 0 for all", "Bannerlord: " .. tostring(hud_part("target").text))
 end
 -- Review Focus 4: third person ending inside the mode with the cursor free
 T.f2_in_vanilla_command_mode_leaves_vanillas_own_controls = function()
@@ -10922,17 +11027,22 @@ T.vanilla_command_mode_numbers_the_cards = function()
 	check(not hud_part("card_1_key"):Visible(), "the Bannerlord style: none")
 end
 
--- a key name wider than the lozenge widens it to the left, and never off its card: cards touch
+-- a key name wider than the lozenge widens it to the left, and never past its card: cards touch, and in game the next
+-- card's lozenge covered the rest (2026-11-08, live: unit keys on the numpad read a cut-off "Numpad" on every card). A
+-- numpad key shows its digit
 T.a_long_card_key_widens_its_lozenge = function()
-	vanilla_battle({key_cmd_unit_1 = "Numpad 1"})
+	vanilla_battle({key_cmd_unit_1 = "Caps Lock", key_cmd_unit_2 = "Numpad 2", key_cmd_unit_3 = "F7"})
 	local cards = lay_cards()
 	H.tap("Q") H.step(0.3)
 	local plate, key = hud_part("card_1_keyplate"), hud_part("card_1_key")
-	check(key.text == "Numpad 1" and plate.w > 26 and key.w == plate.w, "widened: " .. tostring(plate.w))
+	check(key.text == "Caps Lock" and plate.w > 26 and key.w == plate.w, "widened: " .. tostring(plate.w))
 	check(near(plate.x, math.max(cards[2].x, cards[2].x + 59 - plate.w), 1), "widened to the left, not off its card: " .. plate.x)
+	check(hud_part("card_2_key").text == "2" and hud_part("card_2_keyplate").w == 26,
+		"a numpad key: its digit, in the lozenge's own width: " .. tostring(hud_part("card_2_key").text))
+	check(hud_part("card_3_key").text == "F7", "any other key whole: " .. tostring(hud_part("card_3_key").text))
 	H.E.S.names.cmd_unit_1 = "A name far wider than any card" H.step(0.3)
-	check(plate.w > 60 and near(plate.x, cards[2].x, 1), "wider than the card: on its left edge, not over its neighbour: "
-		.. plate.x .. ", " .. plate.w)
+	check(plate.w <= cards[2].w and near(plate.x, cards[2].x, 1), "wider than the card: its card's width, on its left edge, "
+		.. "not over its neighbour: " .. plate.x .. ", " .. plate.w)
 end
 
 -- a regiment played whole attacks by CA's own order, on the enemy ahead, as its volley does (the author, 2026-11-02:

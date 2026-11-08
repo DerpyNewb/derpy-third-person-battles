@@ -157,13 +157,24 @@ return function(E)
 		local list = {}
 		for n = 1, 10 do
 			local k, name = comps[F.command.page * 10 + n], E.S.names["cmd_unit_" .. n]
-			if k and name then list[n] = {k, name} end
+			-- a numpad key by its digit: "Numpad 1" is wider than a card (2026-11-08, live: every card a cut-off "Numpad")
+			if k and name then list[n] = {k, name:match("^Numpad (%d)$") or name} end
 		end
 		E.hud.cards(list)
 	end
 	local function say_page(n)
 		local p = F.command.page * 10
 		E.say("derpy_tp_command_page", (p + 1) .. "-" .. math.min(p + 10, n))
+	end
+	-- the mode opens with the mouse still turning the view (main.lua look): the target line names the key that frees the
+	-- cursor, as MCT has it, while the mode lasts (a player, 2026-11-07: "the commands aren't working after pressing q ... I
+	-- select a unit - it works, but that's all"). Written on a change only (hud.lua H.target); none with the key unbound
+	local function cursor_line()
+		local key = E.S.names.look_free
+		if not key then return end
+		local s = F.free_cursor and E.loc("derpy_tp_ui_cursor_back", "%s: look around")
+			or E.loc("derpy_tp_ui_cursor_free", "%s: free the cursor")
+		E.hud.target((s:gsub("%%s", function() return key end)))
 	end
 	-- the number keys select card 1-10 of the page, one regiment each, replacing the selection (no call adds to it); the
 	-- page key steps the tens
@@ -463,7 +474,7 @@ return function(E)
 				F.uc:release_control()
 			end
 		end
-		if C.vanilla() then labels(now) end -- paused and with the mouse freed too: CA's cards show there
+		if C.vanilla() then labels(now) cursor_line() end -- paused and with the mouse freed too: CA's cards show there
 		if not keys then return end
 		local S, P = E.S, E.P
 		time_keys(P, S, now)

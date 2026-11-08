@@ -72,7 +72,7 @@ MUTANTS = [
     (CMD, "if C.vanilla() then number_keys(P, S) return end", "if C.vanilla() then number_keys(P, S) end", CLICKS),
     # CA's HUD left hidden; the panel left where it was, the way back never shown, the panel not given back on leaving;
     # the radar left in it, or not back (live run 2026-10-23: the author picked the pack's panel with CA's HUD)
-    (MAIN, "hud(E.command.vanilla())", "hud(false)", HUD),
+    (MAIN, "\t\t\thud(vanilla_ui)", "\t\t\thud(false)", HUD),
     # (retired 2026-10-23: enter() without its place() - equivalent since H.update places again, in the same frame,
     # whenever CA's band moves the floor, which entering the Vanilla style always does)
     (CMD, "\t\tE.hud.back(true) -- first: the bar centres without the page tab it sets aside\n\t\tE.hud.place()", "\t\tE.hud.place()", HUD),

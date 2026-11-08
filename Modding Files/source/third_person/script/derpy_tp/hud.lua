@@ -33,7 +33,17 @@ return function(E)
 	local function clock() return bm:time_elapsed_ms() / 1000 end
 	local ACT_PARTS = {"frame", "icon", "active_l", "active_r", "dim", "coolplate", "cool", "keyplate", "key"}
 
-	local function part(id) return ui and find_uicomponent(ui, id) end
+	-- each found part kept while the panel is the same one (H.show finds or makes it; the pack never destroys one): about 50
+	-- searches of the panel a frame before, its bars under it (a player, 2026-11-04: frame drops). A part not found is
+	-- searched for again
+	local parts, parts_of = {}, nil
+	local function part(id)
+		if not ui then return nil end
+		if parts_of ~= ui then parts, parts_of = {}, ui end
+		local c = parts[id]
+		if not c then c = find_uicomponent(ui, id) parts[id] = c or nil end
+		return c
+	end
 
 	-- one write, only when the value differs from the last one written
 	local function put(c, key, value, write)
@@ -653,16 +663,24 @@ return function(E)
 		if b.fill and b.w ~= fw then b.w = fw b.fill:Resize(fw, h) end
 		if not men_on[b] then men_on[b] = true b.c:SetVisible(true) end
 	end
+	-- MEN_EVERY: real s between reads of the men (each man's list, place and health is a memreader call, and every man within
+	-- 70 m was read every frame: a player, 2026-11-04, "framedrops while you are on third person"). men_seen: bar -> {x, y,
+	-- z, health}, the last read; every frame each is put where this frame's view shows that place, so a turn of the view moves
+	-- the bars at once. ponytail: a running man's bar steps MEN_EVERY at a time; extrapolate from the last two reads if seen
+	local MEN_EVERY, men_at, men_seen = 0.1, -1e9, {}
 	function H.men()
 		guard("men_bars", function()
 			local holder, V, now = part("men_bars"), view(), os.clock()
 			if V and still(V, view_was) and now - cal_at >= CAL_EVERY then cal_at = now calibrate(V) end
 			view_was = V
 			local S, shown = E.S, {}
-			if holder and V and cal and S.man_bars and (S.bars == "always" or S.bars == "guide" and guide_was) and not F.banners
-				and E.P.features.men then
-				local sw, sh = core:get_screen_resolution()
-				local w, h = L.man.size[1], L.man.size[2]
+			local sw, sh = core:get_screen_resolution()
+			local w, h = L.man.size[1], L.man.size[2]
+			local on = holder and V and cal and S.man_bars and (S.bars == "always" or S.bars == "guide" and guide_was)
+				and not F.banners and E.P.features.men
+			if not on then men_seen = {} end
+			if on and now - men_at >= MEN_EVERY then
+				men_at, men_seen = now, {}
 				local mx, mz
 				if F.model then local x, _, z = E.P.model_pos(F.model) mx, mz = x, z else local q = F.unit:position() mx, mz = q:get_x(), q:get_z() end
 				local reach = S.bars_range >= 1000 and math.huge or S.bars_range * S.bars_range
@@ -697,13 +715,18 @@ return function(E)
 								if sx and max > 0 and cur > 0 and sx > -w and sx < sw + w and sy > 0 and sy < sh + h then
 									local b = pool[k]
 									if not b and made < MEN_MADE then made = made + 1 b = new_bar(holder, uid, k) pool[k] = b end
-									if b then n = n + 1 shown[b] = true place(b, sx, sy, cur / max) end
+									if b then n = n + 1 men_seen[b] = {x, y + up, z, cur / max} end
 								end
 							end
 						end
 					end
 					if n >= MEN_MAX then break end
 				end
+			end
+			-- every frame: each man read last, where this frame's view shows him
+			for b, p in pairs(men_seen) do
+				local sx, sy = project(V, p[1], p[2], p[3])
+				if sx and sx > -w and sx < sw + w and sy > 0 and sy < sh + h then shown[b] = true place(b, sx, sy, p[4]) end
 			end
 			for b in pairs(men_on) do if not shown[b] then men_on[b] = nil b.c:SetVisible(false) end end
 		end)
@@ -782,10 +805,11 @@ return function(E)
 				local e, ids = list and list[n], {"card_" .. n .. "_keyplate", "card_" .. n .. "_key"}
 				if e then
 					text(ids[2], e[2])
-					local w = math.floor(math.max(pw, math.ceil(part(ids[2]):TextDimensionsForText(e[2]) / s) + 8) * s + 0.5)
-					local h = math.floor(ph * s + 0.5)
 					local x, y = e[1]:Position()
 					local cw, ch = e[1]:Dimensions()
+					-- never wider than its card: cards touch, and the next card's lozenge covered the rest (2026-11-08)
+					local w = math.min(cw, math.floor(math.max(pw, math.ceil(part(ids[2]):TextDimensionsForText(e[2]) / s) + 8) * s + 0.5))
+					local h = math.floor(ph * s + 0.5)
 					local left = math.max(x, x + cw - w - math.floor(CARD_INSET * cw / CARD_W + 0.5))
 					local at = math.floor(left) .. "," .. math.floor(y + ch * CARD_ROW / CARD_H - h / 2)
 					for _, id in ipairs(ids) do
