@@ -9,7 +9,7 @@ code would take hours, and one function's decompile does its own local analysis 
 the function where none exists). Every run opens it -readOnly, so the functions a run creates are not kept and
 runs never conflict. Callees print as FUN_<va>; their names, types and the class layouts are ours to supply
 (docs/BATTLE_ENGINE_RE.md). Three traps found setting this up: Ghidra refuses a project path with an element that
-starts with '.', it needs JAVA_HOME (JDK 21 in C:/tools/jdk-21), and the .bat waits for a key after an error, so
+starts with '.', it needs JAVA_HOME (JDK 25 in C:/tools/jdk-25 for 12.2), and the .bat waits for a key after an error, so
 stdin is closed. For byte scans (who calls, who writes, which vtable) tools/exe_re.py is seconds where this is ~1 min.
 """
 import os
@@ -18,8 +18,8 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GHIDRA = r"C:\tools\ghidra_12.1.4_PUBLIC\support\analyzeHeadless.bat"
-JAVA = r"C:\tools\jdk-21"
+GHIDRA = r"C:\tools\ghidra_12.2_PUBLIC\support\analyzeHeadless.bat"
+JAVA = r"C:\tools\jdk-25"  # 12.2 needs Java 25; 12.1.4 + jdk-21 stay installed as the fallback
 EXE = r"F:\SteamLibrary\steamapps\common\Total War WARHAMMER III\Warhammer3.exe"
 PROJECT_DIR = os.path.join(ROOT, "ghidra_cache")
 import struct

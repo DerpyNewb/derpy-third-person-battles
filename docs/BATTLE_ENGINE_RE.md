@@ -338,7 +338,8 @@ played man's path, so a strike and a stop on one update both run.
 
 ## 10. Ghidra: setup and use
 
-Ghidra 12.1.4 is in `C:\tools\ghidra_12.1.4_PUBLIC`, with Temurin JDK 21 in `C:\tools\jdk-21`. REA's Ghidra
+`tools/ghidra_decompile.py` runs Ghidra 12.2 (`C:\tools\ghidra_12.2_PUBLIC`) on Temurin JDK 25 (`C:\tools\jdk-25`) since
+2026-11-08. 12.1.4 and JDK 21 stay installed for REA, which accepts Ghidra 12.1.x only. REA's Ghidra
 provider works since REA 6.7.0 (`tools/external/README.md`); Ghidra itself also works headless without it.
 
 ```powershell
