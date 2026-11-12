@@ -6,8 +6,12 @@ Item 3822187184. These are fixes for three of the four bugs-thread reports check
 
 Build `89ceb490`, saved to `Modding Files/Modpacks/derpy_third_person.pack` and verified from the saved pack (28 files,
 123 loc rows, 11 stat tables, the same file list as the published `509f9be2`; only `combat.lua`, `abilities.lua` and
-`data.lua` differ, each byte-identical to source). **Deployed to the Workshop folder, not uploaded.** No loadfast
-cache existed. The published `509f9be2` is in `Modding Files/Backup/pre_upload_20261111_third_person/`. The pre-edit
+`data.lua` differ, each byte-identical to source). No loadfast cache existed. **Uploaded 10:07** at the author's
+request ("push the patch"), through the steamworks binding (contentPath + the change note below only). Steam's log:
+`Uploaded new content ( ManifestID 1766982325023632379 )`, `: OK` at 10:07:54; published file_size 5,636,872 = pack +
+preview, and no other derpy Workshop folder differed from its published size before the upload. Scripts, manifest
+and the pack are in `Modding Files/Backup/pre_upload_20261112_third_person/`. Repo push `abfd3ee` (with the 11-11
+update, which had not been pushed). The published `509f9be2` is in `Modding Files/Backup/pre_upload_20261111_third_person/`. The pre-edit
 sources are in `Modding Files/Backup/pre_build_20261112_third_person/`, and each build's previous pack is in
 `Modding Files/Backup/derpy_third_person_20261112_*.pack`.
 
