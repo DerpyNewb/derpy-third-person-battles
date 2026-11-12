@@ -23,8 +23,11 @@ local AIM_STEP, FIRE_REAIM, FIRE_ARC, FIRE_COMMIT, STEER_GAP = 2, 5, 20, 4, 0.5 
 local FIRE_TAIL = 10
 -- the clips a shot plays (9.0 ids): AIM_ to KNEEL_ (1547-1599: raise, aim, fire, reload, moving fire, a pilum, the crenels),
 -- GRENADIER and the throws (949-952), RIDER_FIRE_ and RIDER_THROW_PILUM (2104-2116). An idle is none of them: one on his
--- body as the shot leaves must not hold the order for its 9 s
-local function shooting(s) return s and (s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116) or nil end
+-- body as the shot leaves must not hold the order for its 9 s. And SHOOT_READY_TO_STAND (1464), the Verminlord Deceiver
+-- lowering his star, 2.0 s, the only shooter of 493 with it: outside this set, a new target every 0.5 s lowered and raised
+-- him again and he never threw (a player, 2026-11-12; measured that day). His raise holds the order on its own (in_shot)
+local function shooting(s) return s and (s >= 1547 and s <= 1599 or s >= 949 and s <= 952 or s >= 2104 and s <= 2116
+	or s == 1464) or nil end
 -- the clips the engine plays on a man as he is hit, which a unit of one cannot be hurt through (C.invincible), 9.0 ids:
 -- HIT_REACTION_STAND_ and MELEE_BLOCK_1-10 (368-387), DEFEND_1-10 (474-483), FLY_DEFEND_1-10 (504-513),
 -- HIT_REACTION_COMBAT_READY_, _SHOOT_STAND_ and _SHOOT_READY_1-10 (1217-1246), RIDER_DEFEND_1-10 (1921-1930),
@@ -33,6 +36,12 @@ local function reeling(s)
 	return s and (s >= 368 and s <= 387 or s >= 474 and s <= 483 or s >= 504 and s <= 513 or s >= 1217 and s <= 1246
 		or s >= 1921 and s <= 1930 or s >= 1951 and s <= 1960 or s >= 2202 and s <= 2221) or false
 end
+-- the engine's knock on a man, 9.0 ids (unshifted from the pre-9.0 table): KNOCKBACK_ and KNOCKDOWN_1-10, KNOCKDOWN_DEATH_,
+-- KNOCKED_FLYING_, the falls, getting up, lying and dying (143-197). A lethal knock leaves him at 1 hp and he dies as its
+-- clip ends; a clip of ours over it kept him standing at 1 hp until the next knock ran out (measured 2026-11-11: an Empire
+-- General under an Orc Warboss, 249 -> 1 in KNOCKDOWN_1 with no invincibility on, the pack's defend 0.1 s later, 6.6 s at
+-- 1 hp, dead at the end of the next KNOCKDOWN_1; the 2026-11-08 Goblin Big Boss the same). Nothing of ours plays over one
+local function knock(s) return s ~= nil and s >= 143 and s <= 197 end
 -- m from a regiment's centre its men can stand: a wide line of 160 is ~40 m across
 local SPREAD = 30
 -- a blow (C.strike): the engine launches a swing once the point where it lands (its IMPACT_POS, data.lua impacts)
@@ -41,6 +50,10 @@ local SPREAD = 30
 -- not read lands STRIKE_AHEAD m ahead. ponytail: STRIKE_SLACK and STRIKE_COS are not the engine's own thresholds,
 -- which were not read; measure a whiff or a hit at the edge before moving them
 local STRIKE_SLACK, STRIKE_COS, STRIKE_AHEAD = 0.5, 0.5, 2.5
+-- m further out the locked enemy's man takes a blow (victim). Measured 2026-11-11 (probes/zz_tp_reach_hp_block.lua, an
+-- Empire General locked on an Orc Warboss among Orc Boyz): the two misses with him straight ahead stood 1.37 and 1.53 m
+-- past the reach above. The landing checks no range (docs/BATTLE_ENGINE_RE.md section 12), so this is the pack's call
+local LOCK_REACH = 1.6
 -- each swing family's first slot and its IMPACT_POS table in data.lua: ATTACK_1-10, FLY_ATTACK_1-10 off the body that
 -- flies, RIDER_ATTACK_1-10 and RIDER_FLY_ATTACK_1-10 off the rider's own bin (a flyer's and a rider's blow landed
 -- STRIKE_AHEAD m ahead until 2026-11-01: 580 and 711 land units have their own point)
@@ -84,6 +97,9 @@ local CLIP_START = 0.2
 -- stamina, model time: a sprint empties it in STAMINA_DRAIN s and it fills in STAMINA_FILL s off it; empty, no sprint
 -- until STAMINA_AGAIN of it is back. ponytail: constants; an MCT slider each when asked for
 local STAMINA_DRAIN, STAMINA_FILL, STAMINA_AGAIN = 8, 12, 0.25
+-- s of blocking a full bar holds (C.block): two defend clips of ~3 s (Yuan Bo's ran 3 s, 2026-10-19). ponytail: a
+-- constant; an MCT slider when asked for
+local BLOCK_DRAIN = 6
 -- s before the raise to aim ends that fire is sent: one model-time step (100-200 ms) so the command lands in time.
 -- ponytail: a guess until measured in game; too long cuts the raise visibly short
 local AIM_LEAD = 0.15
@@ -96,6 +112,14 @@ return function(E)
 	-- s more a clip waits to be seen in multiplayer: the queue's delay (platform.lua P.net_delay), longer than the one
 	-- tick these windows were measured with
 	local function late() return P.features.net and P.net_delay or 0 end
+	-- the engine knocks him (knock above): him or his mount, the one man or unit of one played (default)
+	local function knocked(man)
+		man = man or F.model or F.single
+		if not man then return false end
+		local mount = P.mount(man)
+		return knock(P.anim_slot(man)) or mount ~= nil and knock(P.anim_slot(mount))
+	end
+	C.knocked = knocked
 
 	-- his models: the one man, a unit of one's (a crew's first man: the rest ride the same body), or every man of the
 	-- unit up to MAX_MODELS
@@ -341,7 +365,9 @@ return function(E)
 	-- the enemy man a blow lands on: m the model playing slot, the point where it lands turned with his heading (as a
 	-- shot's muzzle is, launch). A rider's victim is his mount, where his hit points are. nil: nobody in its reach.
 	-- Locked on, his man first, where one is in its reach (a player, 2026-10-23: "two lords fighting focus their attacks
-	-- on one entity"; a blow went to whoever stood nearest where it landed, an enemy lord in his guard hard to kill)
+	-- on one entity"; a blow went to whoever stood nearest where it landed, an enemy lord in his guard hard to kill):
+	-- LOCK_REACH further out, and in the direction the swing was aimed at him (F.lock.yaw, swing), not the body's, which
+	-- the clip can show before the turn to him is done (3 of 8 locked misses, measured 2026-11-11)
 	local function victim(m, slot)
 		local imp = impact(slot)
 		local rx, rz = imp and imp[1] or 0, imp and imp[2] or STRIKE_AHEAD
@@ -352,7 +378,8 @@ return function(E)
 		local ix, iz = x + rx * c + rz * sn, z - rx * sn + rz * c
 		local dx, dz = (ix - x) / reach, (iz - z) / reach
 		local best, best_d
-		local function men_of(u)
+		local function men_of(u, extra, ax, az)
+			ax, az = ax or dx, az or dz
 			local q = u:position()
 			if u:number_of_men_alive() > 0 and (q:get_x() - x) ^ 2 + (q:get_z() - z) ^ 2 < (reach + SPREAD) ^ 2 then
 				local body = E.D.bodies and E.D.bodies[u:type()]
@@ -363,7 +390,7 @@ return function(E)
 						local ex, _, ez = P.model_pos(vm)
 						local ox, oz = ex - x, ez - z
 						local d = math.sqrt(ox * ox + oz * oz)
-						if d - r <= reach + STRIKE_SLACK and (d <= r or ox * dx + oz * dz >= STRIKE_COS * d) then
+						if d - r <= reach + STRIKE_SLACK + (extra or 0) and (d <= r or ox * ax + oz * az >= STRIKE_COS * d) then
 							local di = (ex - ix) ^ 2 + (ez - iz) ^ 2
 							if not best_d or di < best_d then best, best_d = vm, di end
 						end
@@ -372,7 +399,10 @@ return function(E)
 			end
 		end
 		local held = held_target()
-		if held then men_of(held) end
+		if held then
+			local aim = F.lock and F.lock.yaw
+			men_of(held, LOCK_REACH, aim and math.sin(aim), aim and math.cos(aim))
+		end
 		if not best then
 			local armies = bm:get_non_player_alliance():armies()
 			for a = 1, armies:count() do
@@ -611,11 +641,13 @@ return function(E)
 
 	-- ground fire at the aim (single entities and regiments without a one-man shot): turned first when
 	-- the aim is outside FIRE_ARC; re-aimed when the point moves FIRE_REAIM, no faster than STEER_GAP
-	-- a shooting clip on him or on his body
-	local function in_shot()
-		local first = F.model or P.models(F.unit)[1]
-		local body = first and P.mount(first)
-		return shooting(first and P.anim_slot(first)) or shooting(body and P.anim_slot(body))
+	-- a shooting clip on him or on his body, or one ended under STEER_GAP ago (C.ground reads them each frame). And the
+	-- Verminlord Deceiver raised: he holds his star up with no clip until his reload ends, 0.2 to 1.2 s after his raise in
+	-- one test, and a new target there lowered him again, 2 s down and 2 up (measured 2026-11-12). Held to his throw, one
+	-- reload at most. ponytail: a target that dies while he waits keeps him on it until then
+	local function in_shot(now)
+		local shot = E.D.shots[F.utype]
+		return now - (F.shot_seen or -1e9) < STEER_GAP or F.raised and now - F.raised < (shot and shot[2] or 0)
 	end
 
 	local function fire(now)
@@ -635,7 +667,7 @@ return function(E)
 		if target and not target:is_valid_target() or target and target:is_routing() then target = nil end
 		if target and unit_order() then
 			local id = target:unique_ui_id()
-			if F.fire_unit == id or (F.fire_unit or F.fire_at) and in_shot() or now - (F.last_order or -1e9) < STEER_GAP then return end
+			if F.fire_unit == id or (F.fire_unit or F.fire_at) and in_shot(now) or now - (F.last_order or -1e9) < STEER_GAP then return end
 			F.uc:fire_at_will(true)
 			F.uc:attack_unit(target, true, false)
 			F.uc:release_control()
@@ -646,7 +678,7 @@ return function(E)
 		-- a shot under way is not re-aimed or turned: a new order starts the engine's aim again (the author, 2026-10-18:
 		-- "moving the mouse and aiming for fire, it keeps repeating the aim animation and never firing" - the Necrofex
 		-- Colossus, 13 orders in 14 s, his FIRE_LEVEL letting the shot go 2.66 s into 9.5). The unit order's too
-		if (F.fire_at or F.fire_unit) and in_shot() then return end
+		if (F.fire_at or F.fire_unit) and in_shot(now) then return end
 		F.fire_unit = nil
 		local q = F.unit:position()
 		local want = math.deg(math.atan2(ax - q:get_x(), az - q:get_z())) % 360
@@ -674,7 +706,7 @@ return function(E)
 	end
 
 	function C.stop_fire()
-		F.firing, F.fire_at, F.turn_to, F.fire_order_t, F.fire_unit = false, nil, nil, nil, nil
+		F.firing, F.fire_at, F.turn_to, F.fire_order_t, F.fire_unit, F.raised = false, nil, nil, nil, nil, nil
 		if F.held_fire then F.uc:fire_at_will(false) end -- shooting over: no shot he did not ask for
 		F.uc:halt()
 		F.uc:release_control()
@@ -709,9 +741,11 @@ return function(E)
 		local first = F.model or P.models(F.unit)[1]
 		local body = first and P.mount(first)
 		local mine, its = first and P.anim_slot(first), body and P.anim_slot(body)
+		if shooting(mine) or shooting(its) then F.shot_seen = now end
+		if mine == 1465 or its == 1465 then F.raised = now end -- STAND_TO_SHOOT_READY, the Deceiver's raise (in_shot)
 		local ammo = F.unit:ammo_left()
 		-- a shot out, and the shooting clips it left in
-		if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip = ammo, {shooting(mine) and mine, shooting(its) and its, now} end
+		if ammo < F.fire_ammo then F.fire_ammo, F.fire_clip, F.raised = ammo, {shooting(mine) and mine, shooting(its) and its, now}, nil end
 		local can, last = E.can_shoot(), F.fire_clip
 		if last then
 			local over = (not last[1] or mine ~= last[1]) and (not last[2] or its ~= last[2]) or now - last[3] > FIRE_TAIL
@@ -1041,7 +1075,7 @@ return function(E)
 		if not over then return true end
 		-- a charge attack thrown on the run stays latched under the walk (measured 2026-10-16): freed here, or by the charge
 		-- (charge_run) when he sprints on
-		if L.runs and not F.sprinting then each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end) end
+		if L.runs and not F.sprinting and not knocked() then each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end) end
 		-- for the in-combat stall (main.lua): a clip sent and never reported
 		if L.m and not L.seen then
 			E.log("clip " .. tostring(L.slot) .. " never played: in melee " .. tostring(F.unit:is_in_melee()) .. ", his clip "
@@ -1067,7 +1101,7 @@ return function(E)
 
 	function C.attack(now, clicked, held)
 		C.flush(now)
-		if C.locked(now) then return end
+		if C.locked(now) or knocked() then return end
 		if clicked and (F.charging or F.sprinting and (F.charge_order or not (F.model or F.single))) and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
 		if F.ranged then
 			-- a gun's click is its attack on the enemy nearest the crosshair, out to its range: ground fire drove a flame
@@ -1089,7 +1123,7 @@ return function(E)
 	-- held like an action. Measured 2026-10-15: about half of all land units' men have CELEBRATE (1.5-7.1 s, median 2.9,
 	-- each with its own sound); Plaguebearers, Blightkings and Tamurkhan have neither, and have no cheer (F.can_cheer)
 	function C.cheer(now)
-		if C.locked(now) then return end
+		if C.locked(now) or knocked() then return end
 		local first = F.model or P.models(F.unit)[1]
 		first = first and (P.mount(first) or first)
 		local function has(list)
@@ -1119,7 +1153,7 @@ return function(E)
 	-- have none does nothing - no attack order in its place (F.can_jump, read off his men at the start). None in the air:
 	-- a ground clip, as the charge attack's
 	function C.jump(now)
-		if C.locked(now) or not F.can_jump or now < F.next_jump or not (P.features.anim and F.men_ok)
+		if C.locked(now) or knocked() or not F.can_jump or now < F.next_jump or not (P.features.anim and F.men_ok)
 			or F.unit:is_currently_flying() then return end
 		F.next_jump = now + E.S.jump_cooldown
 		E.log("jump attack")
@@ -1136,6 +1170,7 @@ return function(E)
 	-- mid-stride (the author, 2026-10-18: "looks like its not looping but being cut off mid animation"; Harald's is 0.8 s,
 	-- the Great Unclean One's 1.9)
 	function C.charge_run(now, want)
+		if knocked() then return end -- neither his CHARGE nor the WALK_1 that ends it over a knock
 		local first = F.model or P.models(F.unit)[1]
 		first = first and (P.mount(first) or first)
 		local air = F.unit:is_currently_flying()
@@ -1169,7 +1204,8 @@ return function(E)
 	function C.sprint(now, want)
 		local dt = math.max(0, now - (F.stamina_t or now))
 		F.stamina_t = now
-		F.stamina = math.max(0, math.min(1, F.stamina + dt * (F.sprinting and -1 / STAMINA_DRAIN or 1 / STAMINA_FILL)))
+		local rate = F.sprinting and -1 / STAMINA_DRAIN or F.block and -1 / BLOCK_DRAIN or 1 / STAMINA_FILL
+		F.stamina = math.max(0, math.min(1, F.stamina + dt * rate))
 		F.sprinting = want and (not C.locked(now) or F.lock.runs) and F.stamina > 0 and (F.sprinting or F.stamina >= STAMINA_AGAIN)
 		C.charge(now)
 		C.charge_run(now, F.sprinting)
@@ -1223,18 +1259,70 @@ return function(E)
 	local REACT_GAP = 6 -- s from one to the next: at most half of a melee he stands in, with clips of about 3 s
 	local REACTS = {{474, 483}, {368, 377}} -- DEFEND_1-10, else HIT_REACTION_STAND_1-10
 	local FLY_REACTS = {{504, 513}} -- FLY_DEFEND_1-10
-	local function react(man)
-		local body = P.mount(man) or man
-		for _, r in ipairs(F.unit:is_currently_flying() and FLY_REACTS or REACTS) do
+	-- the next clip of the first range body has any of, in turn
+	local function pick(body, ranges)
+		for _, r in ipairs(ranges) do
 			local has = {}
 			for s = r[1], r[2] do if P.has_slot(body, s) then has[#has + 1] = s end end
 			if #has > 0 then
 				local k = turn.react or 0
 				turn.react = k + 1
-				return P.play(body, has[k % #has + 1], 6)
+				return has[k % #has + 1]
 			end
 		end
-		return false
+	end
+	local function react(man)
+		if knocked(man) then return false end -- a blow that knocks him: his knock plays out (knock)
+		local body = P.mount(man) or man
+		local slot = pick(body, F.unit:is_currently_flying() and FLY_REACTS or REACTS)
+		return slot ~= nil and P.play(body, slot, 6)
+	end
+
+	-- the block (a player, 2026-11-03: "I can't really defend myself" against heroes; the author, 2026-11-11: a defend clip
+	-- and the shield, on the sprint's stamina). A unit of one only, as the shield is (C.invincible). A press starts a
+	-- defend clip and he is held to it, as to a swing (C.locked): no attack, no step; it runs to its end whether the key is
+	-- let go or not, so a tap buys no free shield, and held, the next follows. Stamina drains while a block's clip runs
+	-- (C.sprint). DEFEND_1-10 (FLY_DEFEND in the air) on the body that carries his clips, else a rider's own RIDER_DEFEND
+	-- (RIDER_FLY_DEFEND); never a hit reaction
+	local function block_clip(man)
+		local air = F.unit:is_currently_flying()
+		local body = P.mount(man) or man
+		local slot = pick(body, {air and {504, 513} or {474, 483}})
+		if slot then return body, slot end
+		if body ~= man then
+			slot = pick(man, {air and {1951, 1960} or {1921, 1930}})
+			if slot then return man, slot end
+		end
+	end
+	-- want: the key held; man: a unit of one's model (main.lua single), else nil
+	function C.block(now, want, man)
+		local pressed = want and not F.block_want
+		F.block_want = want
+		local b = F.block
+		if b then
+			local s = P.anim_slot(b.m)
+			if s == b.slot then b.seen = true end
+			if b.seen and s ~= b.slot or not b.seen and now >= b.from + LOCK_WAIT + late() then F.block, b = nil, nil end
+		end
+		-- a new block needs a quarter of the bar, as a sprint does; one held on from the last may go on to empty
+		if b or not want or F.stamina <= 0 or not F.blocked and F.stamina < STAMINA_AGAIN then
+			if not b then F.blocked = nil end
+			return
+		end
+		local able = man and P.features.anim and F.men_ok
+		-- a swing under way or a knock plays on; asked first, as picking a clip turns the defends' rotation
+		if able and (C.locked(now) or knocked(man)) then return end
+		local body, slot
+		if able then body, slot = block_clip(man) end
+		if not body then
+			if pressed then E.say("derpy_tp_block_single") end
+			return
+		end
+		act(now)
+		P.play(body, slot, 6, now + LOCK_MAX + late())
+		F.lock = {from = now, till = now + LOCK_MAX, yaw = E.rig.yaw, m = body, slot = slot, guard = true, block = true}
+		F.block, F.blocked = {m = body, slot = slot, from = now}, true
+		E.log("block " .. slot)
 	end
 
 	-- a unit of one cannot be hurt through his jump, his charge attack, or a block or hit reaction on him or his mount
@@ -1242,10 +1330,11 @@ return function(E)
 	-- played whole - CA's switch is the whole unit's, and would cover all his men. Released at once, as CA's own use on a
 	-- unit the player controls (lib_battle_script_unit.lua). An invincibility the battle gave him is left alone, on and
 	-- off. idle: no move key held this frame
-	-- A lethal blow inside the window stops at 1 hp: CA's switch keeps him alive, it does not stop the damage (a player,
-	-- 2026-11-03, a beheaded lord standing on; measured 2026-11-08, a Goblin Big Boss 183 -> 1 in one blow, alive 7 s at 1
-	-- hp, vanilla 239 -> 0). That blow is the one he dies of. INVINCIBLE_LAG: s past the window the switch may still hold,
-	-- as every uc: call lands on the engine's next tick
+	-- A blow that leaves him at 1 hp inside the window (or INVINCIBLE_LAG s after it, as every uc: call lands on the
+	-- engine's next tick) kills him: written 2026-11-08 for a lord standing beheaded at 1 hp, on the guess that CA's
+	-- switch stops a lethal blow there. Not so: held on, it stopped every blow outright (56 s, 2026-11-08), and the 1 hp
+	-- was the engine's own lethal knock, which kills as its clip ends, cut by a clip of ours (knock, measured 2026-11-11,
+	-- the switch off). Kept as a backstop; not seen to fire
 	local INVINCIBLE_LAG = 0.3
 	function C.invincible(man, now, idle)
 		if F.killed then return end -- dying: never shielded again

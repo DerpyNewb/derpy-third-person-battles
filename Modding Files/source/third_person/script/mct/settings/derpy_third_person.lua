@@ -33,6 +33,9 @@ local function checkbox(section, key, text, tooltip, default)
 end
 
 m:add_new_section("keys", "Keys")
+checkbox("keys", "key_azerty", "AZERTY keyboard",
+	"On, the default keys move to their places on an AZERTY keyboard: Z, Q, S and D to move, W to walk, A for command "
+	.. "mode. Keys you change below stay as you set them.", false)
 -- the pairs that may share one key (keys.lua K.shares): each one's tooltip names the other
 local partner = {}
 for a, b in pairs(K.shares) do partner[a], partner[b] = b, a end
@@ -130,7 +133,7 @@ style:set_assigned_section("command")
 local speed = m:add_new_option("command_speed", "dropdown")
 speed:set_text("Battle speed in command mode")
 speed:set_tooltip_text("How fast the battle runs while you give orders. Play your general or a hero and press the "
-	.. "command key (Q unless changed under Keys). Multiplayer battles keep their speed.")
+	.. "command key (Q, or A with AZERTY keyboard on, unless changed under Keys). Multiplayer battles keep their speed.")
 speed:add_dropdown_values({{key = "normal", text = "Normal", tt = "", is_default = false},
 	{key = "half", text = "Half", tt = "", is_default = false}, {key = "quarter", text = "Quarter", tt = "", is_default = true},
 	{key = "paused", text = "Paused", tt = "", is_default = false}})

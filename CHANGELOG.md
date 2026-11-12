@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-11-12
+
+Workshop manifest 1766982325023632379 (build `89ceb490`).
+
+- The Verminlord Deceiver throws with a moving aim. Every new target under the crosshair sent a new attack order, which
+  lowered his star and raised it again, 2 s each way, and he never threw. His lowering now counts as a shot under way.
+  Once he has raised, he keeps his target until the throw leaves, for one reload at most, because he holds the star up
+  with no animation until his reload ends. Every other shooter now waits 0.5 s after its last shooting animation
+  before it takes a new target.
+- Spells and abilities aimed at an enemy can target a routing unit. After a won battle every enemy routs, and no such
+  spell had a target, though the game allows the cast.
+- The sprint's charge animation no longer has a gap in every stride on older units (Throgg among them). Their `.anim`
+  files are version 5, whose header the generator could not read, so 111 units had no charge length. Moving-attack
+  lengths for 58 units and raise lengths for 27 came with it.
+- Seen in game before the upload: the Deceiver threw 3 times in 30 s with the aim swinging 20 degrees either side
+  every 3 s (0 on the previous build); Warp Stars landed on a routing unit during the victory countdown; Throgg's
+  charge ran unbroken for 7.1 s. Not seen in game: the new moving-attack and raise lengths.
+
+## 2026-11-11
+
+Workshop manifest 4407525306414029598 (build `509f9be2`).
+
+- Hold F to block, with a lord, hero or monster played as a unit of one. He plays his defend animation and takes no
+  damage while it runs. Blocking drains stamina, a new block needs a quarter of the bar, and a tap still plays one
+  whole defend.
+- Lock-on in a crowd: blows land on the locked enemy from 1.6 m further out, and while the entity you play is still
+  turning to face him.
+- The entity you play no longer stands at 1 hp after a killing knockdown. The game's lethal knockdown kills as its
+  animation ends, and an animation of the mod's played over it had cut that off. Nothing of the mod's plays over a
+  knock now.
+- An AZERTY option (Keys section) moves the default keys to their AZERTY places. Keys chosen by hand stay.
+- Seen in game before the upload: 12 of 12 locked blows landed on a lord in a crowd (3 of 8 before), a block held off
+  the Warboss's blows, and a killing knockdown killed with nothing played over it.
+
 ## 2026-11-08, third update
 
 Workshop manifest 1737806279072665617 (build `b6adf1c8`). Both fixes below were found broken in game after the second

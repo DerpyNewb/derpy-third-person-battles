@@ -123,6 +123,9 @@ local ok, res = pcall(function()
 				local mx, mz
 				local b = F.model or F.single
 				if b then local x, _, z = P.model_pos(P.mount(b) or b) mx, mz = x, z else local q = me:position() mx, mz = q:get_x(), q:get_z() end
+				-- _G.TP_CF_AT_LORD: aim and walk at the lord where he stands, not the regiment's centre (2026-11-11: the lord
+				-- ended 7 m from it, and the walk passed him by)
+				if _G.TP_CF_AT_LORD then local lq = lord:position() gx, gz = lq:get_x(), lq:get_z() end
 				local yaw = math.atan2(gx - mx, gz - mz)
 				E.rig.yaw, E.rig.want_yaw = yaw, yaw
 				rec.d_start = math.floor(math.sqrt((gx - mx) ^ 2 + (gz - mz) ^ 2) * 10 + 0.5) / 10

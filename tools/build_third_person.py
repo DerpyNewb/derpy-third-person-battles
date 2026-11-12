@@ -54,6 +54,8 @@ LOC = {
     "derpy_tp_no_target": "No enemy in range ahead to fire at.",
     # combat.lua C.melee: a regiment played whole attacks by CA's order, and a click with no enemy ahead sends none
     "derpy_tp_no_enemy": "No enemy ahead to attack.",
+    # combat.lua C.block: the block key on a regiment, one entity of one, or an entity with no defend animation
+    "derpy_tp_block_single": "Blocking needs a single entity with a defend animation, such as a lord, a hero or a monster.",
     # command mode is the lord's (spec 3.12); no key named, every key can be moved in MCT
     "derpy_tp_command_general_and_heroes": "Only your general and heroes can command the army. Turn on \"Any unit can command\" in this mod's settings to command from any unit.",
     # command mode, Vanilla style: the number keys' page, said on entering and on the page key (%s: "11-20")

@@ -104,13 +104,19 @@ def fire_pos(meta, name=b"FIRE_POS"):
 def anim_length(b):
     """An .anim's play time, s: u32 version, u32 1, f32 frame rate, the skeleton's name (u16 length, then its bytes),
     u32 0, then f32 seconds (read 2026-10-16 off v8 files, against the game: the Streltsi's raise 1.1 s and Akshina's
-    Ambushers' 0.8 s, as the script log saw them play). None when the bytes are not that shape."""
+    Ambushers' 0.8 s, as the script log saw them play). A v5 file has no u32 0: the seconds follow the name (read
+    2026-11-12, 840 of CA's 842 v5 files in range; Throgg's CHARGE 0.7 s, as the game played it). Without v5, 59 units
+    had no CHARGE length, Throgg among them, and the sprint left 0.1 s with no clip every stride. None when the bytes
+    are not that shape."""
     if not b or len(b) < 14:
         return None
-    _ver, one = struct.unpack_from("<II", b, 0)
+    ver, one = struct.unpack_from("<II", b, 0)
     n, = struct.unpack_from("<H", b, 12)
     if one != 1 or len(b) < 14 + n + 8:
         return None
+    if ver == 5:
+        t, = struct.unpack_from("<f", b, 14 + n)
+        return round(t, 3) if 0 < t < 60 else None
     zero, t = struct.unpack_from("<If", b, 14 + n)
     return round(t, 3) if zero == 0 and 0 < t < 60 else None
 
@@ -358,6 +364,10 @@ def _selftest():
     head = struct.pack("<IIfH", 8, 1, 20.0, 10) + b"humanoid01" + struct.pack("<If", 0, 1.1)
     assert anim_length(head) == 1.1, "the play time past the skeleton's name"
     assert anim_length(head[:-2]) is None and anim_length(b"x" * 30) is None, "a short or foreign file has none"
+    v5 = struct.pack("<IIfH", 5, 1, 20.0, 11) + b"humanoid04c" + struct.pack("<fI", 0.7, 88)
+    assert anim_length(v5) == 0.7, "v5: the play time straight after the name, no u32 0: %s" % anim_length(v5)
+    assert anim_length(struct.pack("<IIfH", 8, 1, 20.0, 11) + b"humanoid04c" + struct.pack("<fI", 0.7, 88)) is None, \
+        "the v5 layout under v8's number is not read as v5"
     f = Files.__new__(Files)
     f.at = {"animations/x/a.anm.meta": ev(2.3)}
     assert f.get("animations\\X\\a.anm.meta") == ev(2.3), "a backslashed, upper-case meta path is found"

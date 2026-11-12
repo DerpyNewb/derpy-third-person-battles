@@ -152,6 +152,24 @@ T.settings_default_taken_leaves_unbound = function()
 	check(S.keys.left == 0x41 and S.keys.attack == 0x01, "the others still work")
 end
 
+-- a player, 2026-11-03: AZERTY keys. Windows key codes follow the layout, so WASD lands on scattered keys there, and
+-- moving forward to Z and left to Q by hand took the walk and command keys' own defaults: both went unbound
+T.settings_azerty_moves_the_defaults = function()
+	local S = settings_with({key_azerty = true})
+	check(S.keys.forward == 0x5A and S.keys.left == 0x51 and S.keys.back == 0x53 and S.keys.right == 0x44, "Z Q S D")
+	check(S.keys.walk == 0x57 and S.keys.command == 0x41, "walk on W, command mode on A")
+	check(S.names.forward == "Z" and S.names.command == "A", "the names the bar shows: " .. tostring(S.names.forward))
+	check(#S.conflicts == 0, "nothing unbound: " .. #S.conflicts)
+	S = settings_with({key_azerty = true, key_forward = "Up"})
+	check(S.keys.forward == 0x26 and S.keys.walk == 0x57, "a key moved by hand stays where it was put")
+	S = settings_with({key_azerty = true, key_forward = "Z", key_left = "Q"})
+	check(S.keys.forward == 0x5A and S.keys.left == 0x51 and S.keys.walk == 0x57 and S.keys.command == 0x41
+		and #S.conflicts == 0, "ZQSD already set by hand: walk and command mode still bound")
+	S = settings_with({key_azerty = true, key_walk = "S"})
+	check(S.keys.walk == 0x57 and S.conflicts[1] and S.conflicts[1].now == "W", "a clash falls back to the AZERTY default")
+	check(settings_with({key_azerty = false}).keys.forward == 0x57, "off: W")
+end
+
 T.settings_unknown_name_uses_default = function()
 	local S = settings_with({key_attack = "Nonsense"})
 	check(S.keys.attack == 0x01, "attack falls back to Left mouse")
@@ -1641,8 +1659,48 @@ T.a_shot_under_way_is_not_re_aimed = function()
 	for _ = 1, 4 do H.mouse = {20, 0} H.step(1 / 60) H.step(0.7) end
 	check(H.count("uc:attack_location") == orders, "the crosshair moved, his clip under way: no new order, "
 		.. (H.count("uc:attack_location") - orders))
-	body.anim_slot = nil H.step(0.1)
+	body.anim_slot = nil H.step(0.6) -- a clip ended under STEER_GAP ago still counts (the Deceiver, round 74)
 	check(H.count("uc:attack_location") == orders + 1, "his clip over: aimed again, " .. (H.count("uc:attack_location") - orders))
+end
+
+-- a player, 2026-11-12: the Verminlord Deceiver "can't fire. The ranged attack animation cuts off before it finishes
+-- throwing". Measured that day: his raise is STAND_TO_SHOOT_READY (1465, 2.0 s), the only shooter of 493 with a clip there;
+-- with the crosshair crossing between two units, a new attack order every 0.5 s lowered (1464) and raised him again, 9
+-- orders and no throw in 11 s. His raise and its lowering are a shot under way, so the order waits for them, and raised he
+-- waits for his throw: he holds the star up with no clip until his reload ends, 0.2 to 1.2 s, and an order there lowered
+-- him again too (7 orders in 12 s, no throw; then one throw lost of three)
+T.a_unit_of_one_raising_to_shoot_is_not_re_aimed = function()
+	H.fresh({units = {{general = true}, {type = "wh_test_ranged_lord", men = 1, range = 100, ammo = 10}},
+		enemies = {{x = 0, z = 20, men = 20}, {x = 20, z = 20, men = 20}}})
+	H.E.D.shots = {wh_test_ranged_lord = {"wh_test_star", 6, 1}} -- his 6 s reload
+	H.select(H.units[2]) H.tap("F2") H.step(0.1)
+	set_view(nil, math.rad(3)) H.step(0.5)
+	local man = H.units[2]._models[1]
+	H.down("Left mouse") H.step(1)
+	local a = H.last("uc:attack_unit")
+	check(H.count("uc:attack_unit") == 1 and a[3] == H.enemies[1], "an order on the unit ahead: " .. H.count("uc:attack_unit"))
+	man.anim_slot = 1464 -- lowering
+	set_view(math.rad(45)) H.step(1)
+	man.anim_slot = 1465 -- raising
+	H.step(1)
+	check(H.count("uc:attack_unit") == 1, "the crosshair on the other unit through his raise: no new order, "
+		.. H.count("uc:attack_unit"))
+	man.anim_slot = nil H.step(1)
+	check(H.count("uc:attack_unit") == 1, "raised, waiting for his throw: no new order, " .. H.count("uc:attack_unit"))
+	man.anim_slot = 1556 H.step(0.5) -- FIRE_LOW, the throw
+	H.units[2]._ammo = 9 H.step(0.5)
+	man.anim_slot = nil H.step(1)
+	a = H.last("uc:attack_unit")
+	check(H.count("uc:attack_unit") == 2 and a[3] == H.enemies[2], "the throw out: the order follows the crosshair")
+	-- raised and no throw (his target gone, out of reach): held one reload, then the crosshair's again
+	man.anim_slot = 1465 H.step(2)
+	man.anim_slot = nil set_view(0) H.step(5)
+	check(H.count("uc:attack_unit") == 2, "raised, no throw yet, inside one reload: no new order, " .. H.count("uc:attack_unit"))
+	H.step(1.5)
+	a = H.last("uc:attack_unit")
+	check(H.count("uc:attack_unit") == 3 and a[3] == H.enemies[1], "no throw in one reload: the order follows the crosshair, "
+		.. H.count("uc:attack_unit"))
+	H.up("Left mouse")
 end
 
 -- the click's own order is never held back: clicked while his last shot's reload plays, it goes at once
@@ -2150,6 +2208,18 @@ T.ability_enemy_goes_to_the_unit_on_the_ray = function()
 	cast_key("1")
 	local c = H.last("uc:perform_special_ability")
 	check(c and c[3] == FIREBALL and c[4] == H.enemies[2], "the enemy straight ahead, not the one 30 m aside")
+end
+
+-- a player, 2026-11-11: "spells, guns/bows and hero skill-shot abilities cant be used after the battle is won". Measured
+-- 2026-11-12: every enemy routing, Warp Stars aimed at a routing unit 45 m ahead came back "no enemy near the crosshair",
+-- and CA's own cast on that unit landed. A routing enemy is a target
+T.an_enemy_ability_lands_on_a_routing_enemy = function()
+	H.fresh({units = {{general = true, abilities = {FIREBALL}}}, enemies = {{x = 0, z = 50}}})
+	H.enemies[1]._routing = true
+	H.tap("F2") H.step(0.1)
+	cast_key("1")
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[3] == FIREBALL and c[4] == H.enemies[1], "the routing enemy on the crosshair: " .. tostring(c and c[4]))
 end
 
 -- a player, 2026-10-23: Grimgor's You're Next!, for lords and heroes only (its invalid target flag
@@ -7988,6 +8058,128 @@ T.a_killing_blow_inside_his_window_kills_him = function()
 	check(H.count("uc:kill") == 0, "the battle's own: " .. H.count("uc:kill"))
 end
 
+-- the block (a player, 2026-11-03: "I can't really defend myself" against heroes; the author, 2026-11-11: a defend clip
+-- and the shield, on the sprint's stamina). Harness DEFEND clips run 2.5 s; a full bar blocks 6 s
+local function blocker(slots)
+	H.fresh({units = {{general = true, slots = slots, clip_ms = {[474] = 2500, [475] = 2500, [476] = 2500, [477] = 2500,
+		[1921] = 2500}}}})
+	H.tap("F2") H.step(0.5)
+	return H.units[1]._models[1]
+end
+
+T.a_held_block_defends_him_on_stamina = function()
+	local man = blocker()
+	H.down("F") H.step(0.1)
+	local p = H.last("play")
+	check(p and p[2] == man.id and p[3] == 474 and p[4] == 6, "DEFEND_1, held whole: " .. tostring(p and p[3]))
+	check(invincible() == true, "shielded at once")
+	check(H.last("disarm") and H.count("arm") == 0, "kept disarmed: the engine starts no swing of its own over it")
+	local steers = H.count("steer")
+	H.tap("Left mouse") H.down("W") H.step(0.5) H.up("W")
+	check(plays_of(454) == 0 and H.count("steer") == steers, "no swing and no step while he blocks")
+	H.step(2)
+	check(plays_of(475) == 1, "held: DEFEND_2 follows the first")
+	H.step(2.5)
+	check(plays_of(476) == 1, "and DEFEND_3")
+	local s = H.E.F.stamina
+	check(s > 0.1 and s < 0.2, "5.1 s of a 6 s bar: " .. s)
+	H.step(2.6)
+	-- empty at 6.1 s; the third clip ran on to 7.5 and the bar refills from there
+	check(H.E.F.stamina < 0.05 and plays_of(477) == 0, "empty: no fourth: " .. H.E.F.stamina)
+	H.up("F") H.step(0.1)
+	check(invincible() == false and released_after_each_switch(), "the last clip over: no shield")
+	H.step(3)
+	H.tap("Left mouse") H.step(0.3)
+	check(plays_of(454) == 1, "he swings again")
+end
+
+-- a tap is the whole of one clip: no second, and its stamina spent for the whole clip, so it buys no free shield
+T.a_tapped_block_is_one_whole_clip = function()
+	blocker()
+	H.tap("F") H.step(1)
+	check(plays_of(474) == 1 and invincible() == true, "let go: its clip runs on, shielded")
+	H.step(2)
+	check(plays_of(475) == 0 and invincible() == false, "over at its end, no second")
+	local s = H.E.F.stamina
+	check(s > 0.5 and s < 0.72, "drained for the clip, not the tap: " .. s)
+	-- under a quarter, a press starts none; held at a quarter, the run that began goes on
+	H.E.F.stamina = 0.2
+	H.tap("F") H.step(0.1)
+	check(plays_of(475) == 0, "under a quarter: none")
+end
+
+-- the shield is on from the press, not from the clip's report (0.19-0.31 s late in a busy battle); and a block never cuts
+-- a swing under way: it starts once the swing's clip is over
+T.a_block_shields_from_the_press_and_waits_for_a_swing = function()
+	blocker()
+	H.report_ms = 300
+	H.tap("F") H.step(0.1)
+	check(invincible() == true and H.E.F.lock and H.E.F.lock.block, "shielded before the engine reports the clip")
+	H.report_ms = nil
+	H.step(3)
+	past_swing_gap()
+	H.tap("Left mouse") H.step(0.2)
+	H.down("F") H.step(0.5)
+	check(plays_of(454) == 1 and plays_of(475) == 0, "the swing plays on, no defend over it")
+	H.step(4)
+	check(plays_of(475) == 1, "the defend once the swing is over")
+	H.up("F")
+end
+
+T.only_a_single_entity_with_a_defend_clip_blocks = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("F") H.step(1)
+	check(plays_of(474) == 0 and H.count("uc:set_invincible") == 0, "one man of a regiment: nothing, it would shield them all")
+	local s = H.last("subtitle")
+	check(s and s[2] == "derpy_tp_block_single" and H.count("subtitle") == 1, "said once a press: " .. H.count("subtitle"))
+	H.up("F")
+	whole_on() H.step(0.5)
+	H.tap("F") H.step(0.5)
+	check(H.count("uc:set_invincible") == 0 and H.last("subtitle")[2] == "derpy_tp_block_single", "nor a regiment played whole")
+	-- a unit of one with no defend clip: no hit reaction in its place
+	blocker({[454] = true, [368] = true})
+	H.tap("F") H.step(0.5)
+	check(#H.all("play") == 0 and H.last("subtitle")[2] == "derpy_tp_block_single", "no DEFEND: nothing, and said")
+	-- a rider whose horse has no defend: his own RIDER_DEFEND
+	local man = blocker({[454] = true, [1921] = true})
+	man.mount = {id = 999, x = man.x, y = man.y, z = man.z, hp = 100, hp_max = 100, slots = {}}
+	H.tap("F") H.step(0.1)
+	local p = H.last("play")
+	check(p and p[2] == man.id and p[3] == 1921 and invincible() == true, "RIDER_DEFEND_1 on him: " .. tostring(p and p[3]))
+end
+
+-- measured 2026-11-11: a lethal knock leaves him at 1 hp and he dies as its clip ends. The pack's defend 0.1 s after it
+-- cut it and he stood 6.6 s at 1 hp, dead at the end of the next knock; a move key's WALK_1 unlatch would cut it as well.
+-- Nothing of ours plays over the engine's knock on him or his mount
+T.nothing_of_ours_plays_over_a_knock = function()
+	general_on() H.step(0.5)
+	local man = H.units[1]._models[1]
+	engine_plays(man, 153, 2500) -- KNOCKDOWN_1
+	local n = H.count("play")
+	man.hp = 1 H.step(0.1)
+	check(H.count("play") == n, "no defend over his knockdown: " .. H.count("play") - n)
+	H.tap("Left mouse") H.tap("E") H.tap("O") H.tap("F")
+	local steers, holds = H.count("steer"), H.count("hold")
+	H.down("W") H.down("Shift") H.step(0.5) H.up("Shift") H.up("W") H.step(0.1)
+	check(H.count("play") == n, "no swing, jump, cheer, block, sprint or unlatch over it: " .. H.count("play") - n)
+	check(H.count("steer") == steers and H.count("hold") == holds, "nothing sent to him while knocked: steer "
+		.. H.count("steer") - steers .. ", hold " .. H.count("hold") - holds)
+	H.step(2.5)
+	check(H.count("hold") > holds, "up again: held on his spot")
+	H.tap("Left mouse") H.step(0.3)
+	check(plays_of(454) == 1, "and a click swings")
+	-- his mount knocked back: no defend on the blow
+	H.fresh()
+	man = H.units[1]._models[1]
+	local horse = {id = 999, x = man.x, y = man.y, z = man.z, hp = 100, hp_max = 100}
+	man.mount = horse
+	H.tap("F2") H.step(0.5)
+	engine_plays(horse, 143, 2000) -- KNOCKBACK_1
+	n = H.count("play")
+	man.hp = man.hp - 5 H.step(0.1)
+	check(H.count("play") == n, "no defend over his mount's knockback")
+end
+
 T.a_mounted_unit_of_one_cannot_be_hurt_while_his_mount_reels = function()
 	H.fresh()
 	local man = H.units[1]._models[1]
@@ -10939,6 +11131,32 @@ T.locked_on_his_blow_lands_on_the_locked_enemy = function()
 	past_swing_gap()
 	H.tap("Left mouse") H.step(0.3)
 	check(H.count("strike") == 3 and H.last("strike")[3] == H.enemies[1]._models[1].id, "the hero out of reach: the man")
+end
+
+-- measured 2026-11-11 (probes/zz_tp_reach_hp_block.lua, an Empire General locked on an Orc Warboss among Orc Boyz): of 8
+-- locked swings 3 landed on him; 2 missed with him straight ahead 1.37 and 1.53 m past the blow's reach, 3 with him in
+-- reach but outside the blow's direction, the clip showing while the General still turned to him. Locked on, his man
+-- takes it LOCK_REACH further out, and his direction is judged from the swing's aim at him, not the body mid-turn
+T.locked_on_his_blow_reaches_further_and_follows_the_aim = function()
+	-- ATTACK_1 lands 2.5 m ahead: plain reach 3 m past his edge (r 0.5), so a hero 4.4 m ahead is out of it
+	striking({{x = 40, z = 1.5, men = 1}, {x = 40, z = 4.4, men = 1}}, {{0, 2.5}})
+	H.tap("Left mouse") H.step(0.3)
+	check(H.last("strike")[3] == H.enemies[1]._models[1].id, "not locked: the man in front")
+	past_swing_gap()
+	H.E.F.target = H.enemies[2]
+	H.tap("Left mouse") H.step(0.3)
+	check(H.last("strike")[3] == H.enemies[2]._models[1].id, "locked: the hero 0.9 m past the plain reach")
+	local h = H.enemies[2]
+	h._z, h._models[1].z = 5.6, 5.6
+	past_swing_gap()
+	H.tap("Left mouse") H.step(0.3)
+	check(H.last("strike")[3] == H.enemies[1]._models[1].id, "2.1 m past it: still out, the man")
+	-- the hero 2 m to his right: the body faces +z when the clip shows (the turn to him not done)
+	h._x, h._z, h._models[1].x, h._models[1].z = 42, 0, 42, 0
+	past_swing_gap()
+	H.units[2]._models[11].yaw = 0
+	H.tap("Left mouse") H.step(0.3)
+	check(H.last("strike")[3] == h._models[1].id, "the hero to his right, the body still facing ahead: struck along the aim")
 end
 
 -- a player, 2026-10-30: "artillery never fires" - a click with no enemy in the gun's range ahead did nothing, silently

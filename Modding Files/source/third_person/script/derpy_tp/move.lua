@@ -111,6 +111,10 @@ return function(E)
 	-- F.model, one man of a regiment; F.single, a unit of one (main.lua)
 	local function man_drive(now, dx, dz, run, speed)
 		local man = F.model or F.single
+		-- the engine's knock on him plays out with nothing sent to him: its end is where a lethal knock kills him (combat.lua
+		-- knock), and a walk under a clip latches it (the WALK_1 below, measured 2026-10-14), which here would hold him
+		-- knocked for good
+		if E.combat.knocked(man) then F.man_hold, F.lead = nil, nil return end
 		local m = P.mount(man) or man
 		local x, _, z = P.model_pos(m)
 		-- he faces where he walks and keeps that facing when he stops, as a single entity does (the author, 2026-10-15:

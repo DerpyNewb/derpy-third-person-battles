@@ -60,8 +60,10 @@ return function(E)
 			local units = armies:item(a):units()
 			for i = 1, units:count() do
 				local u = units:item(i)
-				-- an enemy the game will not let be attacked (hidden, arriving, leaving) is no target either
-				if u:unique_ui_id() ~= F.unit:unique_ui_id() and u:number_of_men_alive() > 0 and not u:is_routing()
+				-- an enemy the game will not let be attacked (hidden, arriving, leaving) is no target either. A routing enemy is
+				-- one, as the game's own cast takes him: once a battle was won every enemy routed and no spell aimed at one
+				-- went off (a player, 2026-11-11; measured 2026-11-12, CA's cast on the same routing unit landed)
+				if u:unique_ui_id() ~= F.unit:unique_ui_id() and u:number_of_men_alive() > 0 and (enemy or not u:is_routing())
 					and (not enemy or u:is_valid_target()) and may_target(key, u) then
 					local p = u:position()
 					local px, py, pz = p:get_x() - R.ex, p:get_y() - R.ey, p:get_z() - R.ez

@@ -14,11 +14,13 @@ return function(mct, K, T)
 	end
 	local S = {keys = {}, names = {}, conflicts = {}}
 	local owner = {}
+	local azerty = get("key_azerty", false) == true
 	for _, action in ipairs(K.order) do
+		local default = azerty and K.azerty[K.defaults[action]] or K.defaults[action]
 		local name = get("key_" .. action, K.defaults[action])
-		if K.vk[name] == nil then name = K.defaults[action] end
+		if K.vk[name] == nil or name == K.defaults[action] then name = default end
 		if owner[name] and owner[name] ~= K.shares[action] then
-			local fallback = K.defaults[action]
+			local fallback = default
 			local now = (not owner[fallback] or owner[fallback] == K.shares[action]) and fallback or nil
 			S.conflicts[#S.conflicts + 1] = {action = action, key = name, taken_by = owner[name], now = now}
 			name = now

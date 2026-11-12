@@ -463,7 +463,7 @@ return function(E)
 			F.moving = kf ~= 0 or kr ~= 0 -- a shot on the move (combat.lua)
 			if F.command then
 				-- the clicks and number keys are command mode's: he neither fights nor casts, and he walks on
-				if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) end
+				if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) E.combat.block(gnow, false, single or nil) end
 			elseif not paused then
 				-- toggled, or held (the author, 2026-10-15: "make shift be a long press or a toggable in the mct"; 2026-10-16:
 				-- "make z as the toggable walk"): he runs unless it has him walk
@@ -477,6 +477,7 @@ return function(E)
 				-- held on the move (the author, 2026-10-16: "shift button as the charge or sprint button"): the charge, at the run
 				E.combat.sprint(gnow, P.held(S.keys.sprint) and F.dragging and not F.armed and (kf ~= 0 or kr ~= 0))
 				F.running = F.sprinting or not F.walking
+				E.combat.block(gnow, P.held(S.keys.block) and F.dragging and not F.armed, single or nil)
 				if P.pressed(S.keys.jump) and F.dragging and not F.armed then E.combat.jump(gnow) end
 				if P.pressed(S.keys.cheer) and F.dragging and not F.armed then E.combat.cheer(gnow) end
 				-- one man of a regiment only: a unit played whole or a unit of one has nobody beside him
@@ -510,7 +511,7 @@ return function(E)
 		else
 			F.dragging, F.moving = false, false
 			cursor(true)
-			if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) end
+			if not paused then E.combat.sprint(gnow, false) E.combat.attack(gnow, false, false) E.combat.block(gnow, false, single or nil) end
 		end
 		E.command.update(now, gnow, focused and F.command ~= nil, kf ~= 0 or kr ~= 0)
 		E.abilities.update(now) -- real time: the label and arrow follow the camera, which turns while paused
@@ -538,7 +539,8 @@ return function(E)
 			-- shot clips, the engine's own order fires him (combat.lua C.ground)
 			local man = F.model or single
 			if man then
-				if F.lock or F.swung or F.native_attack or F.pending or F.shot then P.arm(man)
+				-- a block's lock keeps him disarmed: its clip is no attack, and armed the engine's own swing could start over it
+				if F.lock and not F.lock.block or F.swung or F.native_attack or F.pending or F.shot then P.arm(man)
 				else P.disarm(man, F.model ~= nil, single and F.sprinting and F.charge_order ~= nil) end
 				F.disarmed = man
 			end
@@ -732,6 +734,7 @@ return function(E)
 		F.ready_at = ready_by[unit:unique_ui_id()] or 0
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
+		F.block, F.blocked, F.block_want = nil, nil, nil -- combat.lua C.block
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
 		F.banners = false
 		F.lead = nil -- his steering point at its full distance (move.lua)
