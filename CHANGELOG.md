@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-11-18
+
+Workshop manifest 1002071125206648033 (build `b5ac9ea2`).
+
+- An ability is greyed out when the game won't let it go off right now, as on CA's own bar. The game refuses
+  Skarbrand's Bellow of Endless Fury in melee, but the pack's slot looked ready there: the key armed it and the click
+  did nothing.
+- When an ability doesn't go off, a line under the crosshair says why: "Recharging", "Not enough winds" or "Cannot be
+  used now".
+- A click with nothing to hit leaves the ability armed, so you can aim again. The click casts at the unit the label
+  names while that unit is still a valid target in reach.
+- A wide unit counts as under the crosshair when its front is, up to 20 m either side of its centre.
+- The Army abilities page lists only the buttons CA's bar shows. Single Combat! hides its 25 duel abilities, and the
+  army's own during a duel. The pack listed and cast them all.
+- A click during a swing or the gap after it is kept, and swings when the gap ends. The gap is still 4 s. Clicking
+  every 3 s, Tyrion swung on 5 of 10 clicks before and now swings in every gap.
+- A swing takes an attack that reaches the enemy in front when the next one in turn would hit nobody (one entity or a
+  unit of one).
+- A move key pressed during a swing walks the entity you play out once the blow has landed. Skarbrand in a crowd of
+  Orc Boyz was rooted about 4 s per swing and is now free at 1.8 s. A click while walking still plays out in full.
+
 ## 2026-11-12
 
 Workshop manifest 1766982325023632379 (build `89ceb490`).

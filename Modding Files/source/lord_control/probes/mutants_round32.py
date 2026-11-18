@@ -35,7 +35,8 @@ MUTANTS = [
      "F.solo = false\n\t\t\tcapabilities", "the_next_shooter_does_not_inherit_a_nonshooters_restriction"),
     (C, "if air then\n\t\t\t\tif P.has_slot(flyer, s + 40)",
      "if false then\n\t\t\t\tif P.has_slot(flyer, s + 40)", "a_flying_mount_chooses_an_available_air_attack"),
-    (C, "function C.stand_down(now)\n\t\tF.native_attack = nil", "function C.stand_down(now)",
+    # re-aimed 2026-11-18: stand_down also drops a click held for the swing gap (mutants_round75.py)
+    (C, "function C.stand_down(now)\n\t\tF.native_attack, F.held_click = nil, nil", "function C.stand_down(now)\n\t\tF.held_click = nil",
      "switching_to_ranged_cancels_a_native_melee_attack"),
     (C, "if P.has_slot(m, slot) then P.play(m, slot, mask) return m, slot end -- an artillery crewman's parent is his gun",
      "-- no crew fallback", "a_war_machine_crew_keep_their_own_melee_clip"),

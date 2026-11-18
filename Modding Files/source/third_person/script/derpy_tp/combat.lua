@@ -8,6 +8,7 @@ local SLOTS_TAUNT = {1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113}
 -- s an action clip holds him at most; s it may take to report (measured 2026-10-15: the jump runs ~2 s, the charge
 -- attack ~1.8; reported 0.1 s after being sent in a small battle, 0.19-0.31 s in a busy one)
 local LOCK_MAX, LOCK_WAIT = 3, 1
+local HELD_LATE = 0.5 -- s past the swing gap's end a click held for it may still swing (C.attack)
 local TURN_DEG, TURN_WAIT_MS, MAX_MODELS = 25, 350, 160
 local AIM_COS, AIM_RANGE, AIM_CLOSE = 0.707, 150, 8 -- a melee target: inside 45 deg and 150 m, or 8 m any way
 local CHARGE_REACH = 30 -- the sprint's charge: an enemy this near ahead
@@ -460,6 +461,15 @@ return function(E)
 		end
 		local k = turn[key] or 0
 		local slot = has[k % #has + 1]
+		-- a blow struck here (C.strike) comes from the next clip of the button that reaches a man, when its turn's reaches
+		-- nobody: Tyrion's ATTACK_1 lands 1.9 m ahead, on nobody against Grimgor alone 2.7 m off, 5 times of 5 (a player,
+		-- 2026-11-16; measured 2026-11-18). With none in reach, the turn's
+		if attack and not air and strikes() then
+			for j = 0, #has - 1 do
+				local s = has[(k + j) % #has + 1]
+				if victim(mount or first, s) then slot = s break end
+			end
+		end
 		turn[key], F.swings = k + 1, F.swings + 1
 		act(now)
 		-- an action faces the camera as it starts and keeps that facing to its end (main.lua): left alone, the engine played
@@ -474,7 +484,7 @@ return function(E)
 			local p = held:position()
 			yaw = math.atan2(p:get_x() - mx, p:get_z() - mz)
 		end
-		if now then F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = yaw, turns = hold ~= nil} end
+		if now then F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = yaw, turns = hold ~= nil, swing = attack} end
 		-- when the clip is given up on: the F.pending till C.locked sets for one never seen (multiplayer: nothing is sent
 		-- for him until then or until it shows, platform.lua M.net_rules)
 		local give_up = now and now + LOCK_MAX + late()
@@ -511,7 +521,7 @@ return function(E)
 					-- a swing's clip outlives its hold (2.6-3.5 s against 1.5): it turns him itself to its end (move.lua)
 					if F.lock.turns then F.swung = {carrier, played} end
 					-- its blow, posted once the clip shows on him (C.strike)
-					if attack and strikes() then F.strike = {m = carrier, slot = played, till = give_up or 0} end
+					if attack and strikes() then F.strike, F.lock.strikes = {m = carrier, slot = played, till = give_up or 0}, true end
 				end
 				any = any or carrier ~= nil
 			end)
@@ -598,7 +608,12 @@ return function(E)
 	end
 
 	function C.melee(now, primary)
-		if C.locked(now) then return end
+		-- a click through his own swing's clip is held for after it, as one in the gap is (below): clicked every 3 s, one in
+		-- three fell inside Tyrion's 2.4 s ATTACK_2 and was dropped (measured 2026-11-18). Not through a jump or a cheer
+		if C.locked(now) then
+			if F.lock and F.lock.swing then F.held_click = {primary} end
+			return
+		end
 		-- a unit of one at the enemy's gate, nobody where his blow lands: CA's order on the gate, not sent again on the gate
 		-- it is already on (a step ends it, move.lua)
 		if F.single and not F.model then
@@ -631,8 +646,10 @@ return function(E)
 			order(true, nil, target)
 			return
 		end
-		if now < F.next_swing then return end -- the mode key's swing too (round 25)
-		F.next_swing = now + E.S.swing_cooldown
+		-- the mode key's swing too (round 25). A click inside the gap swings as it ends (C.attack): Tyrion's clips run 1.6-2.4 s
+		-- against the 4 s gap, and a click once he looked finished was dropped, every second one (a player, 2026-11-16)
+		if now < F.next_swing then F.held_click = {primary} return end
+		F.next_swing, F.held_click = now + E.S.swing_cooldown, nil
 		-- held like an action, to the next swing at most: the walk waits (the author, 2026-10-15: "spamming left button while
 		-- walking does nothing, melee should be prioritized" - the walk and its unlatch's WALK_1 cut the swing off)
 		if P.features.anim and F.men_ok then swing(SLOTS_ATTACK, primary, now, E.S.swing_cooldown) return end
@@ -1045,7 +1062,7 @@ return function(E)
 
 	-- the shot or fire order under way stops, the reload still counting: the mode key, and arming an ability
 	function C.stand_down(now)
-		F.native_attack = nil
+		F.native_attack, F.held_click = nil, nil
 		move_fire(false)
 		if F.firing then C.stop_fire() end
 		C.drop(now)
@@ -1071,8 +1088,15 @@ return function(E)
 		local slot = L.m and P.anim_slot(L.m)
 		-- no clip sent yet (a turn order's wait) is nothing reported: read as seen, the lock ended as the clip was sent
 		if L.m and slot == L.slot then L.seen = true end
-		local over = now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT + late())
+		-- a swing whose blow has landed, or found nobody, ends on a move key pressed after it began: the clip's follow-through
+		-- is cut, never the blow ("you get stuck with larger lords", a player, 2026-11-15; Skarbrand's ATTACK_1 rooted him
+		-- 3.9 s in a crowd, measured 2026-11-18). The blow waits on him armed until it lands (P.blow). A key held through it
+		-- from before is a click while walking, which plays out (the author, 2026-10-15: "melee should be prioritized")
+		if not F.moving then L.still = true end
+		local walked = L.strikes and L.still and L.seen and F.moving and not F.strike and not F.blow and P.blow(L.m) == nil
+		local over = walked or now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT + late())
 		if not over then return true end
+		if walked then F.swung, F.held_click = nil, nil end -- nor its clip's turn, nor a click held for after it: he walks
 		-- a charge attack thrown on the run stays latched under the walk (measured 2026-10-16): freed here, or by the charge
 		-- (charge_run) when he sprints on
 		if L.runs and not F.sprinting and not knocked() then each(function(m) m = P.mount(m) or m if P.has_slot(m, WALK_1) then P.play(m, WALK_1, 0) end end) end
@@ -1101,7 +1125,18 @@ return function(E)
 
 	function C.attack(now, clicked, held)
 		C.flush(now)
-		if C.locked(now) or knocked() then return end
+		if knocked() then return end
+		if C.locked(now) then
+			if clicked and not F.ranged then C.melee(now, true) end -- held for after his clip (C.melee)
+			return
+		end
+		-- a click held for the swing gap (C.melee), swung as the gap ends; not when something else held him past its end (a
+		-- knock, a jump), which would swing it long after the click
+		local h = F.held_click
+		if h and now >= F.next_swing then
+			F.held_click = nil
+			if not clicked and now - F.next_swing <= HELD_LATE then C.melee(now, h[1]) return end
+		end
 		if clicked and (F.charging or F.sprinting and (F.charge_order or not (F.model or F.single))) and F.can_charge and now >= F.next_charge and not F.unit:is_currently_flying() then C.charge_attack(now) return end
 		if F.ranged then
 			-- a gun's click is its attack on the enemy nearest the crosshair, out to its range: ground fire drove a flame

@@ -4,7 +4,7 @@
     py tools/build_third_person.py --selftest   compile checks, the Lua harness, data.lua, the loc keys and the HUD files
     py tools/build_third_person.py --check      only the loc keys: every E.say key has a row and every row is said
     py tools/build_third_person.py --bridge     write probes/zz_tp_load.lua, which loads the modules into a running battle
-    py tools/build_third_person.py              selftest, then pack through RPFM (needs RPFM open) and read it back
+    py tools/build_third_person.py              selftest, then pack through RPFM (rpfm_server starts itself) and read it back
 
 The source tree Modding Files/source/third_person/ mirrors the pack. The harness RUNS the shipped
 modules under Lua 5.1.5 against a stubbed battle (tools/third_person_harness.lua) - it does not
@@ -828,7 +828,7 @@ def import_stat_tables(key, td):
 
 
 def pack():
-    """Selftest, then build the pack through RPFM (needs RPFM open) and read every file back."""
+    """Selftest, then build the pack through RPFM (rpfm_server starts itself) and read every file back."""
     import datetime
     import shutil
     sys.path.insert(0, os.path.join(ROOT, "tools"))

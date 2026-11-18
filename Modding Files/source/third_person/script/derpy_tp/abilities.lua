@@ -5,6 +5,8 @@
 local RANGE = 300 -- m: farthest ground point or unit an ability is aimed at
 -- a unit is on the crosshair inside 12 deg of it, as the eye sees it: half a 20 m regiment front seen from 50 m
 local CONE = math.tan(math.rad(12))
+-- m: half a unit's frontage counts as on the crosshair at most (CA's unit:ordered_width(), the width of its position)
+local MAX_HALF = 20
 
 return function(E)
 	local F = E.F
@@ -40,21 +42,33 @@ return function(E)
 		return not t or (u:unit_class() == "com") == (t == "com")
 	end
 
+	-- where he stands: the man played, else his unit
+	local function origin()
+		if F.model then local x, _, z = E.P.model_pos(F.model) return x, z end
+		local q = F.unit:position()
+		return q:get_x(), q:get_z()
+	end
+	-- half u's frontage, MAX_HALF at most; 0 without an answer
+	local function half_width(u)
+		local ok, w = pcall(function() return u:ordered_width() end)
+		return ok and type(w) == "number" and w > 0 and math.min(w / 2, MAX_HALF) or 0
+	end
+
 	-- the unit, enemy or friendly, nearest the camera's ray by angle, inside CONE and in front of the camera, that ability
 	-- key may land on; never the caster. By metres off the ray, a far unit in a screen corner won when nothing was near
-	-- (seen in game 2026-10-14). Past range m from the caster it is no target; far says one on the crosshair was (the
-	-- author: "no enemy in range")
+	-- (seen in game 2026-10-14). Its front counts, not its centre alone: 5 m from a 120-man unit its centre sat 9-17 deg
+	-- off with the crosshair on its men (measured 2026-11-18). Past range m from the caster it is no target; far says one
+	-- on the crosshair was (the author: "no enemy in range")
 	local function nearest_to_ray(enemy, range, key)
 		local R = E.rig
 		if not R.ex then return nil end -- before the camera's first frame
-		local ox, oz
-		if F.model then local x, _, z = E.P.model_pos(F.model) ox, oz = x, z else local q = F.unit:position() ox, oz = q:get_x(), q:get_z() end
+		local ox, oz = origin()
 		local far = false
 		local dx, dy, dz = R.lx - R.ex, R.ly - R.ey, R.lz - R.ez
 		local len = math.sqrt(dx * dx + dy * dy + dz * dz)
 		dx, dy, dz = dx / len, dy / len, dz / len
 		local alliance = enemy and bm:get_non_player_alliance() or bm:get_player_alliance()
-		local best, best_d
+		local best, best_e, best_d
 		local armies = alliance:armies()
 		for a = 1, armies:count() do
 			local units = armies:item(a):units()
@@ -70,9 +84,11 @@ return function(E)
 					local t = px * dx + py * dy + pz * dz
 					if t > 0 and t < RANGE then
 						local cx, cy, cz = px - dx * t, py - dy * t, pz - dz * t
-						local d = math.sqrt(cx * cx + cy * cy + cz * cz) / t
-						if d < CONE and (p:get_x() - ox) ^ 2 + (p:get_z() - oz) ^ 2 > range * range then far = true
-						elseif d < CONE and (not best_d or d < best_d) then best, best_d = u, d end
+						local m = math.sqrt(cx * cx + cy * cy + cz * cz)
+						-- e: its nearest front off the ray, 0 with the ray through it; then its centre's, between two
+						local e, d = math.max(m - half_width(u), 0) / t, m / t
+						if e < CONE and (p:get_x() - ox) ^ 2 + (p:get_z() - oz) ^ 2 > range * range then far = true
+						elseif e < CONE and (not best_e or e < best_e or e == best_e and d < best_d) then best, best_e, best_d = u, e, d end
 					end
 				end
 			end
@@ -80,13 +96,39 @@ return function(E)
 		return best, far
 	end
 
-	-- slot n's ability key when it can go off now; nil and why when not
+	-- the unit the label names (A.update), while it is still one to land on in reach; else the one on the crosshair now. A
+	-- click found nothing 0.1 s after the label had named a unit (measured 2026-11-18)
+	local function target_of(enemy, range, key, pick)
+		if pick and pick:number_of_men_alive() > 0 and (enemy and pick:is_valid_target() or not enemy and not pick:is_routing()) then
+			local ox, oz = origin()
+			local q = pick:position()
+			if (q:get_x() - ox) ^ 2 + (q:get_z() - oz) ^ 2 <= range * range then return pick end
+		end
+		return nearest_to_ray(enemy, range, key)
+	end
+
+	-- why an aimed ability has nothing to land on, as its label says it
+	local function nothing(kind, key, far)
+		if kind == "ground" then return E.loc("derpy_tp_ui_target_no_ground", "No ground in sight") end
+		if kind ~= "enemy" then return E.loc("derpy_tp_ui_target_no_ally", "No ally in sight") end
+		return far and E.loc("derpy_tp_ui_target_far", "Out of range")
+			or E.D.targets and E.D.targets[key] == "com" and E.loc("derpy_tp_ui_target_no_lord", "No lord or hero in sight")
+			or E.loc("derpy_tp_ui_target_no_enemy", "No enemy in sight")
+	end
+	local function cannot_now() return E.loc("derpy_tp_ui_ability_now", "Cannot be used now") end
+
+	-- slot n's ability key when it can go off now; nil, why for the log and why for the player when not. Skarbrand's
+	-- Bellow of Endless Fury in melee looked ready, armed, and the click did nothing (a player, 2026-11-14)
 	local function ready(n)
 		local key = E.hud.key(n) -- slot n of the page shown (hud.lua)
 		if not key then return nil, "no ability in slot " .. n end
-		if not E.hud.can(n) then return nil, key .. " cannot be cast now" end
 		-- can_perform stays true through a cooldown (measured): the order went out anyway
-		if E.hud.cooling(n) then return nil, key .. " is cooling down" end
+		if E.hud.cooling(n) then return nil, key .. " is cooling down", E.loc("derpy_tp_ui_ability_recharging", "Recharging") end
+		if not E.hud.can(n) then
+			local c, w = E.hud.mana(n), E.hud.winds()
+			return nil, key .. " cannot be cast now", c > 0 and w and w < c and E.loc("derpy_tp_ui_ability_winds", "Not enough winds")
+				or cannot_now()
+		end
 		return key
 	end
 
@@ -99,9 +141,11 @@ return function(E)
 		return ok and type(k) == "string" and k ~= ""
 	end
 
-	function A.cast(n, over)
-		local key, why = ready(n)
-		if not key then return why end
+	-- returns why it did not go off for the log, why for the player, and true when it had nothing to land on. pick: the
+	-- unit the armed label names
+	function A.cast(n, over, pick)
+		local key, why, said = ready(n)
+		if not key then return why, said end
 		-- a transformation replaces his unit with another (docs/BATTLE_UNIT_SWAPS.md 7): played on, the old unit's man
 		-- was steered on and the new unit never came (the author, 2026-10-17: "change ammunition units will disappear
 		-- when the ability is pressed"). Third person ends first, everything put back while the unit is there, then it
@@ -127,12 +171,12 @@ return function(E)
 			local at
 			if kind == "ground" then
 				local x, _, z = E.combat.aim_point(reach(n))
-				if not x then return "no aim yet" end
+				if not x then return "no aim yet", nothing(kind), true end
 				at = v(x, bm:get_terrain_height(x, z), z)
 			elseif kind == "enemy" or kind == "friend" then
-				local target, far = nearest_to_ray(kind == "enemy", reach(n), key)
+				local target, far = target_of(kind == "enemy", reach(n), key, pick)
 				if not target and kind == "friend" then target = F.unit end
-				if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key end
+				if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key, nothing(kind, key, far), true end
 				at = target:position()
 			else
 				at = F.unit:position()
@@ -140,7 +184,7 @@ return function(E)
 			local ok, err = pcall(function() F.unit:army():use_special_ability(key, at, math.deg(E.rig.yaw) % 360) end)
 			if not ok then
 				E.once("cast_" .. key, "the game refused " .. key .. " (army, " .. kind .. "): " .. tostring(err))
-				return nil
+				return "the game refused " .. key, cannot_now()
 			end
 			E.log("cast " .. key .. " (army, " .. kind .. ")")
 			return nil
@@ -151,18 +195,18 @@ return function(E)
 		key = up or key
 		if kind == "ground" then
 			local x, _, z = E.combat.aim_point(reach(n))
-			if not x then return "no aim yet" end
+			if not x then return "no aim yet", nothing(kind), true end
 			-- along his view, a bearing in degrees as CA's orders take unit:bearing(): left out, it is 0, and every wind
 			-- spell went one way (players, 2026-10-23 and 24: "they seem to always go one direction")
 			ok, err = pcall(F.uc.perform_special_ability_ground, F.uc, key, v(x, bm:get_terrain_height(x, z), z),
 				math.deg(E.rig.yaw) % 360)
 		elseif kind == "enemy" then
-			local target, far = nearest_to_ray(true, reach(n), base)
-			if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key end
+			local target, far = target_of(true, reach(n), base, pick)
+			if not target then return (far and "out of range" or "no enemy near the crosshair") .. " for " .. key, nothing(kind, base, far), true end
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, target)
 		elseif kind == "friend" then -- no ally on the crosshair: himself, if it may land on him
-			local target = nearest_to_ray(false, reach(n), base) or may_target(base, F.unit) and F.unit
-			if not target then return "no ally near the crosshair for " .. key end
+			local target = target_of(false, reach(n), base, pick) or may_target(base, F.unit) and F.unit
+			if not target then return "no ally near the crosshair for " .. key, nothing(kind), true end
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, target)
 		elseif kind == "none" and up then -- CA's activation knows no overcast: the controller, on himself
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, F.unit)
@@ -173,10 +217,11 @@ return function(E)
 		else
 			ok, err = pcall(F.uc.perform_special_ability, F.uc, key, F.unit)
 		end
-		-- the engine refusing an order is not a fault in this mod: name the ability once, never count it as an error
+		-- the engine refusing an order is not a fault in this mod: name the ability once in the log, never count it as an
+		-- error; the player is told every time
 		if not ok then
 			E.once("cast_" .. key, "the game refused " .. key .. " (" .. kind .. "): " .. tostring(err))
-			return nil
+			return "the game refused " .. key, cannot_now()
 		end
 		-- a context activation gave the controller no order: releasing it let the unit resume its last move (seen in
 		-- game 2026-10-14), so only a unit order is handed back
@@ -238,10 +283,18 @@ return function(E)
 			end
 			return nil
 		end
-		local key, why = ready(n)
-		if not key then return why end
+		local key, why, said = ready(n)
+		if not key then
+			if said then E.hud.refuse(n, said) end
+			return why
+		end
 		local kind = kind_of(n, key)
-		if not AIMED[kind] and not E.hud.upgraded(n) then A.cancel() return A.cast(n) end
+		if not AIMED[kind] and not E.hud.upgraded(n) then
+			A.cancel()
+			why, said = A.cast(n)
+			if said then E.hud.refuse(n, said) end
+			return why
+		end
 		E.combat.stand_down(now) -- the author: "stop melee or shooting"
 		F.armed = {n = n, key = key, kind = kind, label_at = -1e9, range = reach(n)}
 		E.hud.armed(n)
@@ -249,7 +302,9 @@ return function(E)
 		E.hud.cost(cost(n, false))
 		return nil
 	end
-	-- the click: an overcast the winds no longer pay for drops to normal power and says why, and waits for the next
+	-- the click: an overcast the winds no longer pay for drops to normal power and says why, and waits for the next. With
+	-- nothing to land on it stays armed, to aim again, the label saying why; before, the click disarmed in silence (the
+	-- 2026-11-18 reports). Refused, it disarms and says why
 	function A.fire()
 		local a = F.armed
 		if not a then return end
@@ -260,8 +315,11 @@ return function(E)
 			refuse(a.n)
 			return nil
 		end
+		local why, said, aim = A.cast(a.n, a.over, a.unit)
+		if aim and F.armed == a then E.hud.refuse(a.n, said) return why end
 		A.cancel()
-		return A.cast(a.n, a.over)
+		if said then E.hud.refuse(a.n, said) end
+		return why
 	end
 	-- the label and the unit it names are picked every LABEL_EVERY; the arrow over him follows the view every frame
 	function A.update(now)
@@ -280,17 +338,13 @@ return function(E)
 				-- %s: metres to the point
 				s = x and (E.loc("derpy_tp_ui_target_ground", "Ground, %s m"):gsub("%%s",
 					tostring(math.floor(math.sqrt((x - q:get_x()) ^ 2 + (z - q:get_z()) ^ 2) + 0.5))))
-					or E.loc("derpy_tp_ui_target_no_ground", "No ground in sight")
+					or nothing(a.kind)
 			else
 				local far
 				a.unit, far = nearest_to_ray(a.kind == "enemy", a.range, a.key)
-				local lords = E.D.targets and E.D.targets[a.key] == "com"
 				s = a.unit and E.hud.unit_name(a.unit)
-					or (a.kind ~= "enemy" and (may_target(a.key, F.unit) and himself
-						or E.loc("derpy_tp_ui_target_no_ally", "No ally in sight")))
-					or (far and E.loc("derpy_tp_ui_target_far", "Out of range"))
-					or (lords and E.loc("derpy_tp_ui_target_no_lord", "No lord or hero in sight"))
-					or E.loc("derpy_tp_ui_target_no_enemy", "No enemy in sight")
+					or a.kind ~= "enemy" and may_target(a.key, F.unit) and himself
+					or nothing(a.kind, a.key, far)
 			end
 			E.hud.target(s)
 		end

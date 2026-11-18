@@ -50,7 +50,7 @@ TOOLS = [
     # audits
     "check_lua_api.py", "check_lua_literal_left.py",
     # the import closure of the above
-    "preview_guilds_panel.py", "gen_great_guilds.py", "check_skill_trees.py", "rpfm_client.py",
+    "preview_guilds_panel.py", "gen_great_guilds.py", "check_skill_trees.py", "rpfm_client.py", "rpfm_mcp_bridge.py",
     "read_pack_index.py",
     "read_vanilla_cache.py", "read_vanilla_db.py", "read_vanilla_loc.py",
     # reverse engineering the exe (docs/BATTLE_ENGINE_RE.md): static scans, and Ghidra headless with its script
@@ -84,7 +84,9 @@ HISTORY = ["HANDOFF_20261008_THIRD_PERSON_LORD_CONTROL.md", "HANDOFF_20261013_TH
            # WORKSHOP_REPORTS_20261103/20261107 and LIVE_TEST_20261108_* are left out: the reports name Steam commenters
            "PATCH_NOTES_20261107_THIRD_PERSON.md", "PATCH_NOTES_20261108_THIRD_PERSON.md",
            # WORKSHOP_REPORTS_20261112_THIRD_PERSON.md is left out: it names Steam commenters
-           "PATCH_NOTES_20261111_THIRD_PERSON.md", "PATCH_NOTES_20261112_THIRD_PERSON.md"]
+           "PATCH_NOTES_20261111_THIRD_PERSON.md", "PATCH_NOTES_20261112_THIRD_PERSON.md",
+           # THIRD_PERSON_BUGS_20261024.md is left out: it names Steam commenters
+           "PATCH_NOTES_20261118_THIRD_PERSON.md"]
 # reference docs, at the same path in the repo
 REFERENCE = ["BATTLE_ENGINE_RE.md"]
 LEDGER = ".superpowers/sdd/2026-10-14-third-person-hud/progress.md"

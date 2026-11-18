@@ -729,7 +729,7 @@ return function(E)
 		-- only controlling the gunners, not the artillery piece itself")
 		F.ranged = E.can_shoot()
 		-- a reload under way when he was last let go still counts (ready_by, by unit)
-		F.firing, F.want_shot, F.shot, F.next_swing, F.swings, F.shot_n = false, false, nil, 0, 0, 0
+		F.firing, F.want_shot, F.shot, F.next_swing, F.swings, F.shot_n, F.held_click = false, false, nil, 0, 0, 0, nil
 		F.moving, F.move_fire = false, nil
 		F.ready_at = ready_by[unit:unique_ui_id()] or 0
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false

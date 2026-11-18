@@ -2245,8 +2245,9 @@ T.an_ability_never_for_lords_and_heroes_is_never_cast_on_him = function()
 	H.tap("F2") H.step(0.1)
 	cast_key("1")
 	check(H.count("uc:perform_special_ability") == 0, "only a hero of his on the crosshair: nothing cast, not on himself")
+	check(H.E.F.armed, "still armed, to aim again")
 	H.E.rig.want_yaw = math.atan2(30, 40) H.step(1)
-	cast_key("1")
+	H.tap("Left mouse") H.step(1 / 60)
 	local c = H.last("uc:perform_special_ability")
 	check(c and c[3] == WHIPLASH and c[4] == H.units[3], "his regiment on the crosshair: on it")
 end
@@ -4961,6 +4962,65 @@ T.a_slot_dims_when_its_ability_cannot_be_cast = function()
 	check(not hud_part("slot_2_dim"):Visible(), "castable again: undimmed")
 end
 
+-- 2026-11-18, Skarbrand's Bellow of Endless Fury in melee (a player, 11-14): CA's button greys out (CanCurrentlyPerform
+-- false) while can_perform_special_ability stays true. The slot follows CA's button, and the key casts nothing
+T.a_unit_ability_cas_button_greys_out_is_dimmed_and_not_cast = function()
+	hud_on({abilities = {"a1"}})
+	H.cco["BattleAbilityList.At(0).CanCurrentlyPerform"] = false
+	H.step(0.3)
+	check(hud_part("slot_1_dim"):Visible(), "CA's button greyed out: dimmed")
+	H.tap("1") H.step(1 / 60) H.tap("Left mouse") H.step(1 / 60)
+	check(H.count("uc:perform_special_ability") == 0 and not H.E.F.armed, "not cast, not armed")
+	H.cco["BattleAbilityList.At(0).CanCurrentlyPerform"] = true
+	H.step(2.5)
+	check(not hud_part("slot_1_dim"):Visible(), "CA's button ready again: undimmed")
+	H.tap("1") H.step(1 / 60)
+	check(H.count("uc:perform_special_ability") == 1, "and the key casts it")
+end
+
+-- a press that cannot go off says why under the crosshair for a moment (the same report: the click did nothing and said
+-- nothing)
+T.a_refused_press_says_why_on_screen = function()
+	hud_on({abilities = {"a1"}, secs = {a1 = 30}})
+	H.step(0.3)
+	H.tap("1") H.step(1 / 60)
+	check(hud_part("target"):Visible() and hud_part("target").text == "Recharging", "recharging: " .. tostring(hud_part("target").text))
+	H.step(2.5)
+	check(not hud_part("target"):Visible(), "the line goes after a while")
+	H.cco["BattleAbilityList.At(0).RechargeTimeRemainingSecs"] = 0
+	H.cco["BattleAbilityList.At(0).CanCurrentlyPerform"] = false
+	H.step(0.3)
+	H.tap("1") H.step(1 / 60)
+	check(hud_part("target"):Visible() and hud_part("target").text == "Cannot be used now",
+		"CA's button greyed out: " .. tostring(hud_part("target").text))
+end
+
+T.a_spell_the_winds_cannot_pay_for_says_so = function()
+	local t = hud_cco({"s1"})
+	t["BattleAbilityList.At(0).ManaUsed"] = 10
+	t["BattleAbilityList.At(0).CanCurrentlyPerform"] = false
+	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"] = 6
+	hud_on({abilities = {"s1"}, cco = t})
+	H.step(0.3)
+	H.tap("1") H.step(1 / 60)
+	check(hud_part("target").text == "Not enough winds", "6 winds for a 10-wind spell: " .. tostring(hud_part("target").text))
+end
+
+-- seen in game 2026-10-14, the game refusing a cast is logged once a battle: on screen it is said every time
+T.a_cast_the_game_refuses_says_so_every_time = function()
+	H.fresh({units = {{general = true, abilities = {"wh_test_modded_ability"}}}})
+	H.refuse_cast = {wh_test_modded_ability = true}
+	H.tap("F2") H.step(0.1)
+	local said = {}
+	for k = 1, 2 do
+		H.tap("1") H.step(1 / 60)
+		said[k] = hud_part("target"):Visible() and hud_part("target").text
+		H.step(2.5)
+	end
+	H.refuse_cast = nil -- before any check: a failed one would leave it set for the tests after
+	for k = 1, 2 do check(said[k] == "Cannot be used now", "refusal " .. k .. ": " .. tostring(said[k])) end
+end
+
 T.cooldown_seconds_round_up_and_clear_when_ready = function()
 	hud_on({abilities = {"a1"}, secs = {a1 = 4.2}})
 	H.step(0.3)
@@ -5148,6 +5208,51 @@ T.ability_enemy_far_off_the_crosshair_is_not_a_target = function()
 		.. tostring(hud_part("target").text))
 	H.tap("Left mouse") H.step(1 / 60)
 	check(H.count("uc:perform_special_ability") == 0, "and nothing cast at it")
+end
+
+-- a click with nothing to hit used to disarm in silence (the 2026-11-18 reports): it stays armed, the label saying why
+T.a_click_with_nothing_to_hit_stays_armed = function()
+	armed_on({})
+	H.tap("1") H.step(0.3)
+	H.tap("Left mouse") H.step(1 / 60)
+	check(H.E.F.armed and hud_part("slot_1_armed"):Visible(), "nothing on the crosshair: still armed")
+	check(hud_part("target").text == "No enemy in sight", "the label says why: " .. tostring(hud_part("target").text))
+	check(H.count("uc:perform_special_ability") == 0, "nothing cast")
+end
+
+-- measured 2026-11-18: a click found no target 0.1 s after the label had named one. The click takes the unit the label
+-- names
+T.the_click_casts_at_the_unit_the_label_names = function()
+	armed_on({enemies = {{x = 0, z = 50}}})
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed.unit == H.enemies[1], "the label names it")
+	H.enemies[1]._x = 40 -- off the crosshair before the label's next look
+	H.tap("Left mouse") H.step(1 / 60)
+	local c = H.last("uc:perform_special_ability")
+	check(c and c[4] == H.enemies[1], "cast at the unit the label named")
+	-- not once it is no target: hidden, or out of the ability's reach
+	for _, gone in ipairs({function(u) u._hidden = true end, function(u) u._z = 400 end}) do
+		armed_on({enemies = {{x = 0, z = 50}}})
+		H.tap("1") H.step(0.3)
+		gone(H.enemies[1])
+		H.tap("Left mouse") H.step(1 / 60)
+		check(H.count("uc:perform_special_ability") == 0 and H.E.F.armed, "no target now: nothing cast, still armed")
+	end
+end
+
+-- measured 2026-11-18: 5 m from a 120-man unit its centre sat 9-17 deg off the crosshair, outside the 12 deg cone, with
+-- the crosshair on its men. A unit is on the crosshair when its front is, not only its centre
+T.a_wide_unit_is_on_the_crosshair_when_its_flank_is = function()
+	armed_on({enemies = {{x = 18, z = 50, men = 120}}})
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed.unit == H.enemies[1], "the centre 18 m aside, the front within reach of the crosshair: named")
+	armed_on({enemies = {{x = 40, z = 50, men = 120}}})
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed.unit == nil, "40 m aside: still nothing")
+	-- the crosshair inside two units' fronts: the one whose centre is nearer it
+	armed_on({enemies = {{x = 8, z = 50, men = 120}, {x = 1, z = 50, men = 120}}})
+	H.tap("1") H.step(0.3)
+	check(H.E.F.armed.unit == H.enemies[2], "on both: the one centred on it")
 end
 
 -- the rig looks ahead of the man it follows, so his own position is never on the crosshair; a regiment's is, when
@@ -6008,6 +6113,138 @@ T.a_swing_with_no_clip_does_not_hold_the_walk = function()
 	local steers = H.count("steer")
 	H.down("W") H.step(0.3)
 	check(H.count("steer") > steers, "W walks him at once, no lock left behind")
+	H.up("W")
+end
+
+-- Tyrion (a player, 2026-11-16): "almost every second attack does nothing, after a wait of about 3 s". His clips run
+-- 1.6-2.4 s and the gap between two swings is 4 s: a click once he looked finished fell inside the gap and was dropped
+-- (measured 2026-11-18, clicked every 3 s: every second one swung). A click inside the gap swings as it ends
+T.a_click_inside_the_swing_gap_swings_as_it_ends = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("Left mouse")
+	H.E.F.model.anim_end = H.game_ms + 100 H.step(0.3) -- a short clip: its hold is over, the gap is not
+	H.step(2.6)
+	H.tap("Left mouse")
+	check(H.count("play") == 1, "3 s in, inside the gap: not yet")
+	H.step(1.1)
+	check(H.count("play") == 2 and H.last("play")[3] == 455, "the gap over: ATTACK_2, " .. H.count("play"))
+	past_swing_gap()
+	check(H.count("play") == 2, "one click, one swing")
+end
+
+-- measured in game 2026-11-18 with the gap fix: clicked every 3 s, one click in three fell inside Tyrion's 2.4 s ATTACK_2
+-- clip and was still dropped. A click during his swing's clip is held the same way, for when the clip and the gap are over
+T.a_click_during_his_swing_swings_after_it = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("Left mouse") H.step(1)
+	check(H.E.F.lock ~= nil, "his clip plays")
+	H.tap("Left mouse")
+	check(H.count("play") == 1, "during the clip: not yet")
+	H.step(3.2)
+	check(H.count("play") == 2, "the clip and the gap over: swung, " .. H.count("play"))
+	-- not a jump's or a cheer's: a click through one of those is no swing he asked to follow it. The cheer inside a swing's
+	-- gap, so a held click would have one to wait for
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.tap("Left mouse")
+	H.E.F.model.anim_end = H.game_ms + 100 H.step(0.3) -- a short swing: its gap runs on
+	H.tap("O") H.step(0.2)
+	check(plays_of(1094) == 1 and H.E.F.lock ~= nil, "cheering inside the gap")
+	H.E.F.model.anim_end = H.game_ms + 2500 -- the cheer over before the gap
+	H.tap("Left mouse")
+	H.step(4)
+	check(plays_of(454) + plays_of(455) == 1, "the click through the cheer: no swing after it, " .. plays_of(454) + plays_of(455))
+end
+
+-- a click held for the gap goes when he arms an ability, and when something else holds him past the gap's end
+T.a_click_held_for_the_gap_can_go_unswung = function()
+	H.fresh({units = {{general = true, abilities = {FIREBALL}}}, enemies = {{x = 0, z = 50}}})
+	H.tap("F2") H.step(0.1)
+	H.tap("Left mouse")
+	local n = H.count("play")
+	check(n == 1, "the first click swings: " .. n)
+	H.E.F.single.anim_end = H.game_ms + 100 H.step(1)
+	H.tap("Left mouse") -- inside the gap: held for it
+	H.tap("1") H.tap("1") -- armed and disarmed
+	past_swing_gap()
+	check(H.count("play") == n, "armed between: no swing after the gap, " .. H.count("play") - n)
+	H.tap("Left mouse") -- after the gap: a swing
+	n = H.count("play")
+	H.E.F.single.anim_end = H.game_ms + 100 H.step(1)
+	H.tap("Left mouse") -- held for the gap
+	local m = H.E.F.single
+	H.step(H.E.S.swing_cooldown - 2.5) -- 1.5 s before the gap ends
+	m.anim_slot, m.anim_end = 150, H.game_ms + 3000 -- knocked down through its end, up 1.5 s after it
+	H.step(3.5)
+	check(H.count("play") == n, "knocked down through the gap's end: the click is gone after, " .. H.count("play") - n)
+end
+
+-- Tyrion against Grimgor alone 2.7 m away (measured 2026-11-18): the left button alternates ATTACK_1 and ATTACK_2, and
+-- ATTACK_1's blow lands 1.9 m ahead, on nobody, 5 times of 5. A swing takes a clip of its button whose blow reaches
+-- someone, when one does
+T.a_swing_takes_a_clip_of_its_button_that_reaches = function()
+	local slots = {[454] = true, [455] = true, [456] = true, [457] = true}
+	striking({{x = 40, z = 3.2, men = 1}}, {{0, 1.9}, {0, 2.7}, {0, 1.9}, {0, 1.9}}, {slots = slots})
+	for k = 1, 2 do
+		H.tap("Left mouse") H.step(0.4)
+		local s = H.last("strike")
+		check(H.count("strike") == k and s[4] == 455, "click " .. k .. ": ATTACK_2, the one that reaches: " .. tostring(s and s[4]))
+		past_swing_gap()
+	end
+	striking({{x = 40, z = 30, men = 1}}, {{0, 1.9}, {0, 2.7}, {0, 1.9}, {0, 1.9}}, {slots = slots})
+	H.tap("Left mouse") H.step(0.4)
+	check(plays_of(454) == 1, "nobody in reach of either: the button's turn, ATTACK_1")
+	-- both in reach: the button's turn, as before
+	striking({{x = 40, z = 2, men = 1}}, {{0, 1.9}, {0, 2.7}, {0, 1.9}, {0, 1.9}}, {slots = slots})
+	H.tap("Left mouse") H.step(0.4)
+	check(plays_of(454) == 1 and plays_of(455) == 0, "both reach: the first click's turn, ATTACK_1")
+	past_swing_gap()
+	H.tap("Left mouse") H.step(0.4)
+	check(plays_of(454) == 1 and plays_of(455) == 1, "both reach: ATTACK_1 then ATTACK_2")
+end
+
+-- "You get stuck with larger lords" (a player, 2026-11-15): a swing holds him to its clip's end or the gap, and a big lord's
+-- clip is long (Skarbrand's ATTACK_1 rooted him 3.9 s in a crowd, measured 2026-11-18). Once its blow has landed, or it
+-- landed on nobody, a move key walks him out
+T.a_move_key_walks_out_once_the_blow_has_landed = function()
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {men = 1})
+	H.tap("Left mouse") H.step(0.4)
+	check(H.count("strike") == 1, "the blow is struck")
+	local steers = H.count("steer")
+	H.down("W") H.step(0.3)
+	check(H.count("steer") == steers, "armed on him, not landed: he stays")
+	H.up("W") H.step(0.1)
+	H.E.F.single.blow = nil -- it lands
+	H.step(0.3)
+	check(H.E.F.lock ~= nil, "landed, no move key: the swing plays on")
+	H.down("W") H.step(0.3)
+	check(H.count("steer") > steers, "landed: he walks out")
+	local arms = H.count("arm")
+	H.step(0.2)
+	check(H.count("arm") == arms, "walking out: disarmed, so no swing of the engine's starts on him")
+	H.up("W")
+	striking({{x = 40, z = 30, men = 1}}, {{0, 2.5}}, {men = 1})
+	H.tap("Left mouse") H.step(0.4)
+	steers = H.count("steer")
+	H.down("W") H.step(0.3)
+	check(H.count("steer") > steers, "a blow on nobody: he walks out as soon as he likes")
+	H.up("W")
+	-- a click held through the swing is dropped by the walk out: he would swing again as he left
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {men = 1})
+	H.tap("Left mouse") H.step(0.4)
+	H.tap("Left mouse") -- through the clip: held
+	H.E.F.single.blow = nil H.step(0.1)
+	H.down("W")
+	past_swing_gap()
+	check(H.count("strike") == 1 and plays_of(454) + plays_of(455) == 1, "walked out: no second swing, "
+		.. plays_of(454) + plays_of(455))
+	H.up("W")
+	-- a click while walking still plays out (a_swing_while_walking_plays_out): the key was held from before the swing
+	striking({{x = 40, z = 30, men = 1}}, {{0, 2.5}}, {men = 1})
+	H.down("W") H.step(0.5)
+	H.tap("Left mouse") H.step(0.4)
+	steers = H.count("steer")
+	H.step(0.5)
+	check(H.count("steer") == steers, "walking as he clicked: the swing plays on")
 	H.up("W")
 end
 
@@ -8808,6 +9045,19 @@ T.an_army_ability_granted_mid_battle_gets_a_slot = function()
 	H.step(0.5)
 	check(shown_keys() == ROD .. "," .. SWARM, "both: " .. shown_keys())
 	check(hud_part("slot_2_icon").img[0] == "ui/battle ui/ability_icons/" .. SWARM .. ".png", "wearing its icon")
+end
+
+-- Single Combat! (3831075966; a player, 2026-11-14): 25 duel abilities in every army, their buttons hidden on CA's bar,
+-- and in a duel the army's own hidden too, so nobody bombards the duellists. The bar takes what CA's bar shows
+T.a_hidden_army_button_gets_no_slot = function()
+	army_page({army = {{key = ROD}, {key = SWARM}}})
+	local holder = find_uicomponent(H.root, "hud_battle", "army_ability_parent", "button_holder_" .. SWARM)
+	holder:SetVisible(false) H.step(0.5)
+	check(shown_keys() == ROD, "SWARM hidden on CA's bar: no slot: " .. shown_keys())
+	find_uicomponent(H.root, "hud_battle", "army_ability_parent", "button_holder_" .. ROD):SetVisible(false) H.step(0.5)
+	check(shown_keys() == "" and H.E.hud.page_name(0) == nil, "both hidden, a duel: no army page: " .. shown_keys())
+	holder:SetVisible(true) H.step(0.5)
+	check(shown_keys() == SWARM, "shown again after it: " .. shown_keys())
 end
 
 -- overcast by pressing twice (the author, 2026-10-20: "pressing the spell twice can upgrade the spells", "third press

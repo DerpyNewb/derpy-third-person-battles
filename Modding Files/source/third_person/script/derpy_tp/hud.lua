@@ -21,8 +21,8 @@ return function(E)
 	local ui, last, dead, errors, off = nil, {}, {}, 0, false
 	local cco_id, cco_at, keys, on_page, reload_cco = nil, 0, {}, {}, nil -- on_page: the shown page's entries (build)
 	local cooling = {} -- slot n's ability is recharging, as the last context read found it
-	local able = {} -- slot n's army ability can go off, as the last read of CA's button found it
-	local army_n = 0 -- CA's army ability buttons the pages came from
+	local able = {} -- slot n's ability can go off, as the last read of CA's button found it (CanCurrentlyPerform)
+	local army_shown_ids = "" -- the army ability buttons CA's bar showed when the pages were built
 	local acts, act_at = {}, {} -- the action buttons this unit shows, in order, and each one's place in that order
 	local caster = false -- an ability of his spends winds: his army's pool and its bar show
 	local home -- CA's radar's holder and place while the radar is in this panel (H.map): {holder, x, y}
@@ -215,18 +215,30 @@ return function(E)
 	-- pack's 40 stat abilities among them. Also how many buttons CA has, for the update to see one come. ponytail: a
 	-- player with two armies in one battle - whose buttons CA shows is unmeasured
 	local function army_parent() return find_uicomponent(core:get_ui_root(), "hud_battle", "army_ability_parent") end
-	local function army_entries()
-		local p, out = army_parent(), {}
-		local own = H.value('ArmyContext.ArmyAbilitiesList(false).JoinString(RecordKey, ",")')
-		if not p then return out, 0 end
+	-- the buttons CA's bar shows, and their ids joined, for the update to see one come or go. A mod hides some: Single
+	-- Combat! (3831075966; a player, 2026-11-14) gives every army 25 duel abilities with hidden buttons, and hides the
+	-- army's own through a duel (measured 2026-11-18); the pack listed and cast them all
+	local function army_shown()
+		local p, ids = army_parent(), {}
+		if not p then return ids, "" end
 		for i = 0, p:ChildCount() - 1 do
+			local c = UIComponent(p:Find(i))
+			if c:Visible() then ids[#ids + 1] = c:Id() end
+		end
+		return ids, table.concat(ids, ",")
+	end
+	local function army_entries()
+		local out = {}
+		local own = H.value('ArmyContext.ArmyAbilitiesList(false).JoinString(RecordKey, ",")')
+		local ids, shown = army_shown()
+		for _, id in ipairs(ids) do
 			-- keys are [a-z0-9_]: no pattern character, so a plain match (find with a pattern finds nothing in game)
-			local key = UIComponent(p:Find(i)):Id():match("^button_holder_(.+)$")
+			local key = id:match("^button_holder_(.+)$")
 			if key and type(own) == "string" and ("," .. own .. ","):match("," .. key .. ",") then
 				out[#out + 1] = {key = key, army = true}
 			end
 		end
-		return out, p:ChildCount()
+		return out, shown
 	end
 
 	-- the bar's pages (the 2026-10-20 design, Part 2): CA's own list in its order, each ability once - the owned list
@@ -268,7 +280,7 @@ return function(E)
 				table.insert(kinds[e.spell and 2 or 1], e)
 			end
 		end
-		kinds[3], army_n = army_entries()
+		kinds[3], army_shown_ids = army_entries()
 		pages = {}
 		for k, name in ipairs({E.loc("derpy_tp_ui_page_abilities", "Abilities"), E.loc("derpy_tp_ui_page_spells", "Spells"),
 			E.loc("derpy_tp_ui_page_army", "Army abilities")}) do
@@ -402,14 +414,15 @@ return function(E)
 	end
 	-- slot n holds his army's ability (abilities.lua casts it through his army)
 	function H.army(n) return on_page[n] ~= nil and on_page[n].army == true end
-	-- slot n's ability can go off now: his unit's by the engine's own test, his army's by CA's button's (CanCurrentlyPerform,
-	-- false through its recharge too)
+	-- slot n's ability can go off now, by CA's button's own test (CanCurrentlyPerform, false through its recharge too). His
+	-- unit's without a context: the engine's, which stays true in melee for an ability CA greys out there (Skarbrand's
+	-- Bellow of Endless Fury, measured 2026-11-18) and through a cooldown
 	function H.can(n)
 		local e = on_page[n]
 		if not e then return false end
-		if not e.army then return F.unit:can_perform_special_ability(e.key) end
 		local ok, can = pcall(read, n, "CanCurrentlyPerform")
-		return ok and can == true
+		if ok or e.army then return ok and can == true end
+		return F.unit:can_perform_special_ability(e.key)
 	end
 
 	-- the armed ability (abilities.lua): its slot shows CA's selected ring; nil clears every slot
@@ -925,18 +938,21 @@ return function(E)
 		guard("slots", function()
 			for n = 1, math.min(#keys, L.slots) do
 				-- recharging too: can_perform_special_ability stays true through a cooldown (measured 2026-10-21), and CA's
-				-- button greys out through it. An army's: what CA's button said at the last read
-				local can = on_page[n].army and able[n] or not on_page[n].army and u:can_perform_special_ability(keys[n])
+				-- button greys out through it. What CA's button said at the last read; his unit's without one, the engine's
+				local can = able[n]
+				if can == nil and not on_page[n].army then can = u:can_perform_special_ability(keys[n]) end
 				vis("slot_" .. n .. "_dim", not can or cooling[n] or hint ~= nil and hint.n == n and now < hint.till)
 			end
 		end)
+		-- a refusal's line with nothing armed goes with its time (armed, abilities.lua writes the label)
+		if hint and now >= hint.till and not F.armed then H.target(nil) end
 		if now >= cco_at then
 			cco_at = now + CCO_EVERY
 			-- an ability granted or spent mid-battle, his or his army's: the pages again, on the page of the same name if it
 			-- is still there
 			local okn, n = pcall(cco, "BattleAbilityList.Size")
-			local p = army_parent()
-			if okn and list_n and n ~= list_n or (p and p:ChildCount() or 0) ~= army_n then
+			local _, shown = army_shown()
+			if okn and list_n and n ~= list_n or shown ~= army_shown_ids then
 				if F.armed then E.abilities.cancel() end -- an armed slot may hold another ability after (the final review)
 				local name = H.page_name(0)
 				local indexed, why = build()
@@ -958,7 +974,11 @@ return function(E)
 					text("slot_" .. n .. "_cool", secs > 0 and tostring(math.ceil(secs)) or "")
 					vis("slot_" .. n .. "_coolplate", secs > 0)
 					cooling[n] = secs > 0 and not active and not winding
-					if on_page[n].army then able[n] = at("CanCurrentlyPerform") == true end
+					if on_page[n].army then able[n] = at("CanCurrentlyPerform") == true
+					else
+						local okc, c = pcall(at, "CanCurrentlyPerform")
+						if okc then able[n] = c == true else able[n] = nil end
+					end
 					-- its uses left, of an ability that has a count (RemainingUses, -1 without one)
 					local okl, limited = pcall(at, "HasLimitedUses")
 					local left = okl and limited == true and at("RemainingUses")

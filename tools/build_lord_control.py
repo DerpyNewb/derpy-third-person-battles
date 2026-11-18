@@ -1,6 +1,6 @@
 """Build and check derpy_lord_control.pack - steer your general from behind in single-player battles.
     py tools/build_lord_control.py --selftest   run the shipped Lua under stubbed battle objects
-    py tools/build_lord_control.py              selftest, then pack it (needs RPFM open)
+    py tools/build_lord_control.py              selftest, then pack it (rpfm_server starts itself)
 
 REJECTED 2026-10-08 (see docs/sessions/HANDOFF_20261008_THIRD_PERSON_LORD_CONTROL.md); the script lives
 in source/ so a bulk add of pack/ cannot ship it. The selftest RUNS

@@ -20,7 +20,8 @@ MUTANTS = [
     (CB, "or not ahead(co.target, 0)) then", "or not ahead(co.target)) then", CHG),
     # the aim takes any unit, the key never reaches it, one side of the flag read as the other
     (AB, "and (not enemy or u:is_valid_target()) and may_target(key, u) then", "and (not enemy or u:is_valid_target()) then", LORDS),
-    (AB, "local target, far = nearest_to_ray(true, reach(n), base)", "local target, far = nearest_to_ray(true, reach(n))", LORDS),
+    # re-aimed 2026-11-18: the click takes the label's unit first, then the crosshair's (target_of, mutants_round75.py)
+    (AB, "local target, far = target_of(true, reach(n), base, pick)", "local target, far = target_of(true, reach(n), nil, pick)", LORDS),
     (AB, "return not t or (u:unit_class() == \"com\") == (t == \"com\")", "return not t or u:unit_class() == \"com\"", NEVER),
     # a friend ability with no ally on the crosshair cast on him though it never lands on a lord
     (AB, "or may_target(base, F.unit) and F.unit", "or F.unit", NEVER),

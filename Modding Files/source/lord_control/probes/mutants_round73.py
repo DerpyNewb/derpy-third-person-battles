@@ -35,7 +35,8 @@ MUTANTS = [
     # read; knockbacks left out; a walk sent under it
     (CMB, "if knocked(man) then return false end -- a blow", "if false then return false end -- a blow", KNOCK),
     (CMB, "if able and (C.locked(now) or knocked(man)) then return end", "if able and C.locked(now) then return end", KNOCK),
-    (CMB, "if C.locked(now) or knocked() then return end\n\t\tif clicked and", "if C.locked(now) then return end\n\t\tif clicked and", KNOCK),
+    # re-aimed 2026-11-18: C.attack tests the knock alone, then the lock, which holds a click for after a swing (round 75)
+    (CMB, "\t\tC.flush(now)\n\t\tif knocked() then return end\n", "\t\tC.flush(now)\n", KNOCK),
     (CMB, "function C.cheer(now)\n\t\tif C.locked(now) or knocked() then", "function C.cheer(now)\n\t\tif C.locked(now) then", KNOCK),
     (CMB, "if C.locked(now) or knocked() or not F.can_jump", "if C.locked(now) or not F.can_jump", KNOCK),
     (CMB, "if knocked() then return end -- neither his CHARGE", "if false then return end -- neither his CHARGE", KNOCK),
