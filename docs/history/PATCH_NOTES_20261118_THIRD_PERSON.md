@@ -9,7 +9,9 @@ Build `b5ac9ea2`, saved to `Modding Files/Modpacks/derpy_third_person.pack` and 
 `3822187184` (md5 checked, no loadfast cache). **Uploaded 13:09** at the author's request ("push the patch"), through
 the steamworks binding (contentPath + the change note below only). Steam's log: `Uploaded new content ( ManifestID
 1002071125206648033 )`, `: OK` at 13:09:43; published file_size 5,643,576 = pack + preview. Scripts, manifest and the
-pack are in `Modding Files/Backup/pre_upload_20261118_third_person/`. The published `89ceb490` is backed up as
+pack are in `Modding Files/Backup/pre_upload_20261118_third_person/`. Repo push `6305d20`. At upload time two other
+derpy folders held local deploys Steam does not have, `!!!derpy_chd_assets` (`51618D40`) and the lords pack
+(`A331F166`), both identical to their `Modpacks/` copies; no validation had run by 13:15. The published `89ceb490` is backed up as
 `Modding Files/Backup/derpy_third_person_20261118_122607.pack`; the first build of the day (`45120fc6`, before the held
 click through a swing) is `derpy_third_person_20261118_125449.pack`.
 
