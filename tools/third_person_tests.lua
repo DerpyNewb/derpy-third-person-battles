@@ -9060,6 +9060,19 @@ T.a_hidden_army_button_gets_no_slot = function()
 	check(shown_keys() == SWARM, "shown again after it: " .. shown_keys())
 end
 
+-- Boiling Oil! (3829199276; a player, 2026-11-18): every army owns its pot, and outside a siege the player defends it
+-- hides the BUTTON inside CA's holder (button_ability_<key>), not the holder CA's own scripts hide. The holder stays
+-- shown, so the bar listed the pot in every land battle
+T.a_hidden_button_in_a_shown_holder_gets_no_slot = function()
+	army_page({army = {{key = ROD}, {key = SWARM}}})
+	local button = find_uicomponent(H.root, "hud_battle", "army_ability_parent", "button_holder_" .. SWARM,
+		"button_ability_" .. SWARM)
+	button:SetVisible(false) H.step(0.5)
+	check(shown_keys() == ROD, "SWARM's button hidden in its shown holder: no slot: " .. shown_keys())
+	button:SetVisible(true) H.step(0.5)
+	check(shown_keys() == ROD .. "," .. SWARM, "shown again: its slot back: " .. shown_keys())
+end
+
 -- overcast by pressing twice (the author, 2026-10-20: "pressing the spell twice can upgrade the spells", "third press
 -- of 1", and "should show UI hints as possible as the CA Vanilla design"). A caster with these spells, each aimed at the
 -- ground unless o.flags says otherwise; o.cost: winds each costs, the _upgraded overcast's through data.lua overcasts.

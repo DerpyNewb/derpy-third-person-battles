@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-19
+
+Workshop manifest 6303581081662350632 (build `24187034`).
+
+- Boiling Oil!'s pot no longer sits on the Army abilities page in land battles. Outside a siege you defend, Boiling
+  Oil! hides the button inside CA's holder, not the holder itself, and the page only checked the holder. An army
+  ability now needs both shown, so the pot still appears whenever Boiling Oil! shows it.
+
 ## 2026-11-18
 
 Workshop manifest 1002071125206648033 (build `b5ac9ea2`).

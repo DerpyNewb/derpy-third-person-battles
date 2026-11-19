@@ -217,13 +217,16 @@ return function(E)
 	local function army_parent() return find_uicomponent(core:get_ui_root(), "hud_battle", "army_ability_parent") end
 	-- the buttons CA's bar shows, and their ids joined, for the update to see one come or go. A mod hides some: Single
 	-- Combat! (3831075966; a player, 2026-11-14) gives every army 25 duel abilities with hidden buttons, and hides the
-	-- army's own through a duel (measured 2026-11-18); the pack listed and cast them all
+	-- army's own through a duel (measured 2026-11-18); the pack listed and cast them all. CA's scripts hide the holder;
+	-- Boiling Oil! (3829199276; a player, 2026-11-18) hides the button_ability_<key> inside it instead, so both count
 	local function army_shown()
 		local p, ids = army_parent(), {}
 		if not p then return ids, "" end
 		for i = 0, p:ChildCount() - 1 do
 			local c = UIComponent(p:Find(i))
-			if c:Visible() then ids[#ids + 1] = c:Id() end
+			local key = c:Id():match("^button_holder_(.+)$")
+			local b = key and find_uicomponent(c, "button_ability_" .. key)
+			if c:Visible() and (not b or b:Visible()) then ids[#ids + 1] = c:Id() end
 		end
 		return ids, table.concat(ids, ",")
 	end
