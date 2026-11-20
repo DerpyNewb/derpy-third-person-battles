@@ -652,6 +652,12 @@ local function fake_platform()
 		H.gates[#H.gates + 1] = {ms = H.model_ms(), on = on}
 		return true
 	end
+	-- the battle's push gates (platform.lua P.gate_bytes): +0x3b0 set on a spectator's machine, as is_spectator() reads it;
+	-- H.gate_bytes overrides both
+	function P.gate_bytes()
+		local g = H.gate_bytes or {H.spectator and 1 or 0, 0}
+		return g[1], g[2]
+	end
 	function P.terrain_floor(on) rec("terrain_floor", on) return true end
 	function P.anim_slot(m)
 		if m.anim_end and H.model_ms() >= m.anim_end and not H.anim_hold then m.anim_slot = nil end

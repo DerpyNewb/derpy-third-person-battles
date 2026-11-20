@@ -634,10 +634,10 @@ function M.net_rules(P, out, key)
 end
 
 -- The battle's network players, read off CA's player list (CcoMultiplayerRoot.PlayerList, through the CCO global function
--- MultiplayerRootContext; CA's own battle UI reads it there, mp_team_list.twui.xml): {id, name, me, watching, online} for
--- each one, in the list's order, or nil and why it could not be read. id is CA's "unique mp client id"; watching, a
--- spectator or a partner given units to play (IsPassiveParticipant, CA: "spectating but can receive units from active
--- players to join in"). An entry reading offline counts as CA's team list counts it, which never reads IsOnline: the build
+-- MultiplayerRootContext; CA's own battle UI reads it there, mp_team_list.twui.xml): {id, name, me, watching, spectating,
+-- passive, online} for each one, in the list's order, or nil and why it could not be read. id is CA's "unique mp client
+-- id"; watching, a spectator (spectating, IsSpectating) or a partner given units to play (passive, IsPassiveParticipant,
+-- CA: "spectating but can receive units from active players to join in"), the two kept apart for main.lua's log. An entry reading offline counts as CA's team list counts it, which never reads IsOnline: the build
 -- that left those out refused every battle with "it names 1 player" (the report of 2026-10-23, Ruling 31), and one
 -- machine leaving out a player the others count would give its players other bits. Measured in a multiplayer battle
 -- hosted alone (2026-10-23): every entry reads offline, this machine's too, and a lobby's AI slot is an entry ("CPU 1", id
@@ -659,8 +659,9 @@ function M.players()
 			else
 				local id = v(at .. "Id")
 				if type(id) ~= "string" or id == "" then return "player " .. i .. "'s id read " .. tostring(id) end
+				local spectating, passive = v(at .. "IsSpectating") == true, v(at .. "IsPassiveParticipant") == true
 				t[#t + 1] = {id = id, name = tostring(v(at .. "Name") or ""), me = v(at .. "IsLocalPlayer") == true,
-					watching = v(at .. "IsSpectating") == true or v(at .. "IsPassiveParticipant") == true,
+					watching = spectating or passive, spectating = spectating, passive = passive,
 					online = v(at .. "IsOnline") ~= false}
 			end
 		end
@@ -959,6 +960,16 @@ function M.build(mr, net, once)
 		mr.write(cmd, 0x14, mr.uint32(mask or 0))
 		mr.call(A.push, "uint8(pointer, pointer)", mr.read_pointer(b, A.queue), cmd)
 		return true
+	end
+	-- the battle's two push gates, +0x3b0 (what is_spectator() returns) and +0x3b1: the exe drops every queued push while
+	-- either is set, and so do P.play and the net queue. Read for main.lua's log on a refused watcher, since whether a
+	-- partner given units could play turns on them (docs/sessions/GIFTED_UNITS_SCOPE_20261119_THIRD_PERSON.md). Both
+	-- bytes, or nil and why they could not be read
+	function P.gate_bytes()
+		if not A then return nil, "the command pattern was not found" end
+		local b = battle_obj()
+		if not b then return nil, "the battle object is not reachable" end
+		return mr.read_uint8(b, A.gate_a), mr.read_uint8(b, A.gate_b)
 	end
 	-- A pushed clip waits in his queued action slot (+0x5c8) until his update (exe+3086f04) runs it, and it resets it
 	-- instead on any tick an order reached him (+0x324 not 0); in a melee his regiment orders him every tick (measured

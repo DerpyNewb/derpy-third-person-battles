@@ -804,6 +804,57 @@ T.multiplayer_a_partner_given_units_never_starts = function()
 	end)
 end
 
+-- whether a partner given units could ever play turns on facts no machine of ours has read
+-- (docs/sessions/GIFTED_UNITS_SCOPE_20261119_THIRD_PERSON.md): the refusal logs them, once per unit selected
+local function refusal_lines()
+	local t = {}
+	for _, l in ipairs(H.log) do if l:find("refused here:", 1, true) then t[#t + 1] = l end end
+	return t
+end
+T.multiplayer_a_refused_partner_logs_what_decides_gifted_units = function()
+	in_net_mode(function()
+		H.fresh({mp = true, players = {{id = "a", name = "Partner", me = true, passive = true}, {id = "b", name = "Player"}},
+			units = {{general = true}, {type = "wh_test_melee", men = 21}}})
+		H.phase.Deployed()
+		H.step(0.2)
+		H.heard[1] = true
+		H.step(0.5)
+		local u = H.units[2]
+		H.cco_ids = {[tostring(u:unique_ui_id())] = {IsGifted = true, IsUnderMyControl = true,
+			["OwningNetworkPlayerContext.IsLocalPlayer"] = true, ["OriginalOwningNetworkPlayerContext.IsLocalPlayer"] = false}}
+		H.select(u) H.tap("F2") H.step(0.5)
+		local lines = refusal_lines()
+		check(#lines == 1, "one line: " .. #lines)
+		local l = lines[1] or ""
+		check(l:find("is_spectator false, IsSpectating false, IsPassiveParticipant true, push gates 0 0, local_army 1", 1, true),
+			"this machine's flags and gates: " .. l)
+		check(l:find(": IsGifted true, IsUnderMyControl true, owner here true, original owner here false", 1, true),
+			"the selected unit's owner: " .. l)
+		check(not l:find("Partner", 1, true), "no player names: " .. l)
+		H.tap("F2") H.step(0.5)
+		check(#refusal_lines() == 1, "the same unit again: nothing new: " .. #refusal_lines())
+		H.select(H.units[1]) H.tap("F2") H.step(0.5)
+		check(#refusal_lines() == 2, "another unit: a line of its own: " .. #refusal_lines())
+		check(not H.E.F.on, "still refused")
+	end)
+end
+
+-- a spectator's machine: is_spectator and the first push gate set, as the exe has them (Ruling 34)
+T.multiplayer_a_refused_spectator_logs_its_gate = function()
+	in_net_mode(function()
+		H.fresh({mp = true, players = {{id = "a", name = "Watcher", me = true, spectating = true}, {id = "b", name = "Player"}}})
+		H.spectator = true
+		H.phase.Deployed()
+		H.step(0.2)
+		H.heard[1] = true
+		H.step(0.5)
+		H.tap("F2") H.step(0.5)
+		local l = refusal_lines()[1] or ""
+		check(l:find("is_spectator true, IsSpectating true, IsPassiveParticipant false, push gates 1 0", 1, true), "flags and gates: " .. l)
+		check(l:find("; no unit selected", 1, true), "nothing selected: " .. l)
+	end)
+end
+
 -- a player, 2026-10-31: in multiplayer, attacking, "the mouse flickers ... and rapidly makes the clicking noise". There his
 -- unit is selected by clicking its card, which sounds, and CA's interface takes the attack's own click (no cinematic UI to
 -- swallow it): forced back every frame, a click a frame. While he looks around no card is clicked; with the mouse freed

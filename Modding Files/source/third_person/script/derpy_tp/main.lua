@@ -640,6 +640,52 @@ return function(E)
 		end
 	end
 
+	-- a refused watcher's facts. Whether a partner given units could ever play turns on things no machine of ours has read
+	-- (docs/sessions/GIFTED_UNITS_SCOPE_20261119_THIRD_PERSON.md): whether this machine may push at all (the battle's
+	-- +0x3b0 and +0x3b1, P.gate_bytes), which of CA's two flags it reads, what local_army() names, and who CA says controls
+	-- the unit selected. Each read is pcall'd on its own; no names, since a player posts the log. Returns the selected
+	-- unit's ui id ("none") and the line
+	local function watcher_facts()
+		local parts, pick = {}, nil
+		local function add(name, f)
+			local ok, v = pcall(f)
+			parts[#parts + 1] = name .. " " .. (ok and tostring(v) or "threw")
+		end
+		local me = P.net_me or {}
+		add("is_spectator", function() return bm:is_spectator() end)
+		parts[#parts + 1] = "IsSpectating " .. tostring(me.spectating) .. ", IsPassiveParticipant " .. tostring(me.passive)
+		add("push gates", function()
+			local a, b = P.gate_bytes()
+			if a == nil then return "unread (" .. tostring(b) .. ")" end
+			return a .. " " .. b
+		end)
+		add("local_army", function() return bm:local_army() end)
+		-- every unit of his side, how many have a card here (the cards he commands, command.lua cards()), and the selected one
+		add("cards", function()
+			local n, carded, armies = 0, 0, bm:get_player_alliance():armies()
+			for a = 1, armies:count() do
+				local us = armies:item(a):units()
+				for i = 1, us:count() do
+					local u = us:item(i)
+					n = n + 1
+					if find_uicomponent(core:get_ui_root(), "cards_panel", tostring(u:unique_ui_id())) then carded = carded + 1 end
+					if not pick and selected(u) then pick = u end
+				end
+			end
+			return carded .. " of " .. n
+		end)
+		local line = table.concat(parts, ", ")
+		if not pick then return "none", line .. "; no unit selected" end
+		local id = tostring(pick:unique_ui_id())
+		local function cco(expr)
+			local ok, v = pcall(common.get_context_value, "CcoBattleUnit", id, expr)
+			return ok and tostring(v) or "threw"
+		end
+		return id, line .. "; selected " .. tostring(pick:type()) .. ": IsGifted " .. cco("IsGifted") .. ", IsUnderMyControl "
+			.. cco("IsUnderMyControl") .. ", owner here " .. cco("OwningNetworkPlayerContext.IsLocalPlayer")
+			.. ", original owner here " .. cco("OriginalOwningNetworkPlayerContext.IsLocalPlayer")
+	end
+
 	-- multiplayer waits for "Deployed", where every machine builds the fragment table its disarm reads; a build that threw
 	-- leaves it waiting for the battle (platform.lua P.net_ready; MP_FEASIBILITY_20261021_THIRD_PERSON.md, Ruling 20).
 	-- Nothing said or logged: it simply waits. Then for every player's HELLO (platform.lua M.handshake, Rulings 25, 26 and
@@ -655,6 +701,10 @@ return function(E)
 			local ok, watching = pcall(function() return bm:is_spectator() end)
 			if not ok or watching or P.net_me and P.net_me.watching then
 				E.once("spectator", "multiplayer: a spectator or a partner with units given to them plays no army, so third person stays off")
+				-- once per unit selected: a press made after selecting a unit given to them is logged too
+				local okf, key, facts = pcall(watcher_facts)
+				if okf then E.once("watcher_" .. key, "multiplayer: refused here: " .. facts)
+				else E.once("watcher_error", "multiplayer: refused here, its facts threw: " .. tostring(key)) end
 				-- and on screen, at every press: in the log alone, F2 did nothing a player could see (a player, 2026-10-31:
 				-- "my friends who also have the mod cant press f2")
 				E.say("derpy_tp_mp_watching")
