@@ -774,7 +774,7 @@ return function(E)
 		-- "only show cheer and fly if its applicable")
 		capabilities(F.model or P.models(unit)[1])
 		F.lock, F.next_charge, F.next_jump, F.charging, F.charge_at = nil, 0, 0, false, nil
-		F.native_attack, F.charge_order = nil, nil
+		F.native_attack, F.charge_order, F.order = nil, nil, nil -- F.order: a unit of one's move order (move.lua single_order)
 		-- artillery too: its click is the gun's attack (combat.lua C.attack), the mode key CA's Manual fire (the author, 2026-10-18: "I am
 		-- only controlling the gunners, not the artillery piece itself")
 		F.ranged = E.can_shoot()

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (not on the Workshop)
+
+Build `6BD96B57`.
+
+- A unit of one walked or run on the keys no longer tramples infantry. With no order of its own, the game put it into
+  melee as soon as it touched enemies, and every bump then landed as a charge impact: a Khemrian Warsphinx run into a
+  block of 120 Orc Boyz killed 8 to 11 of them in 12 s. The game's own move order now rides along under the walk and
+  is cancelled when the keys are let go or third person is turned off. The same runs now kill none. Sprinting carries
+  no move order, so a sprint into enemies still charges.
+- In multiplayer, a spectator or a partner given units who presses F2 now logs what decides whether such a partner
+  could ever play those units. Nothing changes on screen.
+
 ## 2026-11-19
 
 Workshop manifest 6303581081662350632 (build `24187034`).

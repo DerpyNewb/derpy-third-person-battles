@@ -12,6 +12,9 @@ local STEER_LEAD = 15
 local LEAD_MIN, LEAD_RETRY, LEAD_BACK = 1.5, 0.5, 2
 local TOOK = 2 -- m between the engine's ordered position and ours: further, the order was dropped
 local WALK_1, UNLATCH_GAP = 42, 0.3 -- 9.0 slot id; s between two walking clips
+-- a unit of one walked on the keys keeps CA's move order (single_order): m ahead, re-sent past ORDER_DEG of turn or within
+-- ORDER_NEAR m of its point
+local ORDER_LEAD, ORDER_DEG, ORDER_NEAR = 30, 30, 12
 
 return function(E)
 	local F, P = E.F, E.P
@@ -89,7 +92,51 @@ return function(E)
 	end
 	M.ACTION_TURN = 2
 
+	-- A unit of one walked on the keys tramples (a player, 2026-11-20, bugs thread: chariots, the Warsphinx and Settra
+	-- "kill whole infantry models just by holding W"). Measured that day and 11-21 (probes/zz_tp_verify_20261120.lua): the
+	-- Khemrian Warsphinx run into a block of 120 Orc Boyz killed 8-11 in 12 s, every one knocked down (KNOCKDOWN_1, 153) by
+	-- a single 72-80 hp hit at 5-6 m/s, with no clip of his own playing: the charge impact CA's own charge deals. Under CA's
+	-- move order the same run killed 0-1. With no order of his own the engine puts him in melee as he touches them (it
+	-- orders his melee attack every tick, which P.guard stops) and his impacts then count; with CA's move order kept on the
+	-- unit under our walk of him, 0 killed and no knockdown, at 4.8-7.5 m/s. So the order rides along while the keys walk
+	-- him, and goes at their release. None at the sprint, whose charge order is meant to hit (combat.lua C.charge), and
+	-- none over another order: a charge, a native attack or a shot on the move, or one waiting its turn (F.queued).
+	-- None in the air: he touches nobody there. Spaced as every unit order is (F.last_order, STEER_GAP)
+	local function single_order(now, dx, dz, run)
+		local o = F.order
+		-- ours until another order takes its place (the engine's ordered position leaves our point): kept through a sprint
+		-- with no charge, so it is halted at the release or the stop, not left to walk him there after F2
+		if o then
+			local q = F.unit:ordered_position()
+			if (q:get_x() - o.x) ^ 2 + (q:get_z() - o.z) ^ 2 > TOOK * TOOK then F.order, o = nil, nil end
+		end
+		if F.sprinting or F.charge_order or F.native_attack or F.firing or F.move_fire or F.queued then return end
+		if now - (F.last_order or -1e9) < STEER_GAP then return end
+		if dx == 0 and dz == 0 then
+			if o then
+				F.uc:halt()
+				F.uc:release_control()
+				F.order, F.last_order = nil, now
+			end
+			return
+		end
+		if F.unit:is_currently_flying() then return end
+		local m = P.mount(F.single) or F.single
+		local x, _, z = P.model_pos(m)
+		if o and run == o.run and dx * o.dx + dz * o.dz >= math.cos(math.rad(ORDER_DEG))
+			and (x - o.x) ^ 2 + (z - o.z) ^ 2 > ORDER_NEAR * ORDER_NEAR then return end
+		local tx, tz = x + dx * ORDER_LEAD, z + dz * ORDER_LEAD
+		F.uc:goto_location(v(tx, bm:get_terrain_height(tx, tz), tz), run)
+		F.uc:release_control()
+		F.order, F.last_order = {x = tx, z = tz, dx = dx, dz = dz, run = run}, now
+	end
+
 	function M.halt()
+		if F.order then
+			F.order = nil
+			F.uc:halt()
+			F.uc:release_control()
+		end
 		local man = F.model or F.single
 		if man and P.alive(F.unit, man) then
 			local x, _, z = P.model_pos(man)
@@ -173,6 +220,7 @@ return function(E)
 		-- CA's order on a gate walks him to it: holding him on his spot each idle frame (man_drive) kept him 9 m out, the gate
 		-- untouched, for 40 s (measured 2026-11-08); left to the order he walked in and took it 1.00 -> 0.84. A step ends it
 		if F.single and F.native_attack == "building" and kf == 0 and kr == 0 then F.man_hold = nil return end
+		if F.single then single_order(now, dx, dz, run) end
 		if F.model or F.single then man_drive(now, dx, dz, run, speed) return end
 		if kf == 0 and kr == 0 then M.halt() return end
 		local q = F.unit:position()

@@ -34,16 +34,21 @@ local ok, res = pcall(function()
 	P.wheel = function() return 0 end
 	local function vk(action) local k = E.S.keys[action] return type(k) == "table" and k[1] or k end
 	local function now() return bm:time_elapsed_ms() / 1000 end
-	local function find(alliance, ty)
+	-- the nth unit of that type (_G.TP_CF_GUARD_NTH: a fresh regiment when earlier tests thinned the first)
+	local function find(alliance, ty, nth)
+		local k = 0
 		local armies = alliance:armies()
 		for a = 1, armies:count() do
 			local us = armies:item(a):units()
-			for i = 1, us:count() do local u = us:item(i) if u:type() == ty then return u, armies:item(a) end end
+			for i = 1, us:count() do
+				local u = us:item(i)
+				if u:type() == ty then k = k + 1 if k == (nth or 1) then return u, armies:item(a) end end
+			end
 		end
 	end
 	local me, my_army = find(bm:get_player_alliance(), _G.TP_CF_ME)
 	local lord, lord_army = find(bm:get_non_player_alliance(), _G.TP_CF_LORD)
-	local guard, guard_army = find(bm:get_non_player_alliance(), _G.TP_CF_GUARD)
+	local guard, guard_army = find(bm:get_non_player_alliance(), _G.TP_CF_GUARD, _G.TP_CF_GUARD_NTH)
 	if not (me and lord and guard) then return "missing: me " .. tostring(me ~= nil) .. ", lord " .. tostring(lord ~= nil) .. ", guard " .. tostring(guard ~= nil) end
 	local lord_men = {}
 	for _, m in ipairs(P.models(lord)) do lord_men[m] = true local mt = P.mount(m) if mt then lord_men[mt] = true end end

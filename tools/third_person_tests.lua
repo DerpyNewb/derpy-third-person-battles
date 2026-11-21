@@ -7527,7 +7527,8 @@ T.a_single_entity_is_steered_alone_and_sprints = function()
 	local guards = H.count("guard")
 	H.down("W") H.step(0.6)
 	local s = H.last("steer")
-	check(s and H.count("uc:goto_location") == 0, "W steers him: no move order")
+	-- the steer walks him; the one move order rides along under it (move.lua single_order, the trample fix)
+	check(s and H.count("uc:goto_location") == 1, "W steers him, one move order riding along: " .. H.count("uc:goto_location"))
 	check(near(s[4] - H.units[1]._models[1].z, 15, 0.01), "toward a point 15 m ahead: " .. tostring(s and s[4]))
 	check(H.count("guard") > guards, "his own unit's orders on him stopped as he walks")
 	H.down("Shift") H.step(0.6)
@@ -7542,7 +7543,106 @@ T.a_single_entity_is_steered_with_one_man_off = function()
 		mct = {combat_one_man = false}})
 	H.tap("F2") H.step(0.5)
 	H.down("W") H.step(0.6)
-	check(H.count("steer") > 0 and H.count("uc:goto_location") == 0, "steered: " .. H.count("steer"))
+	check(H.count("steer") > 0 and H.count("uc:goto_location") == 1, "steered, one move order riding along: " .. H.count("steer")
+		.. " steers, " .. H.count("uc:goto_location") .. " orders")
+	H.up("W")
+end
+
+-- A player, 2026-11-20 (bugs thread #82): a unit of one walked on the keys trampled infantry. Measured 2026-11-20 and 11-21
+-- (probes/zz_tp_verify_20261120.lua): a Khemrian Warsphinx run into 120 Orc Boyz killed 8-11 in 12 s, each knocked down
+-- by one 72-80 hp hit with no attack of his playing; under CA's move order 0-1; steered with CA's move order kept on the
+-- unit, 0 and no knockdown, at the same speed and the same stop. One order while he goes straight, a new one when he
+-- turns past 30 degrees, a halt when he is let go, none dropped
+T.a_unit_of_one_walking_keeps_a_move_order_so_it_does_not_trample = function()
+	general_on() H.step(0.5)
+	local halts = H.count("uc:halt")
+	H.down("W") H.step(2)
+	local g, m = H.last("uc:goto_location"), H.units[1]._models[1]
+	check(g and H.count("uc:goto_location") == 1, "one order while he walks straight: " .. H.count("uc:goto_location"))
+	check(near(g[3].z - m.z, 30, 0.5) and near(g[3].x, m.x, 0.5), "30 m ahead where the keys walk him: "
+		.. tostring(g[3].x) .. ", " .. tostring(g[3].z))
+	check(g[4] == true and H.E.F.order, "at the run, as he runs, and kept")
+	set_view(math.pi / 2) H.step(0.6)
+	local g2 = H.last("uc:goto_location")
+	check(H.count("uc:goto_location") == 2 and near(g2[3].x - m.x, 30, 0.5), "turned 90 degrees: a new order that way")
+	H.tap("Z") H.step(0.6)
+	check(H.count("uc:goto_location") == 3 and H.last("uc:goto_location")[4] == false, "the walk switch: an order at the walk")
+	H.up("W") H.step(0.6)
+	check(H.count("uc:halt") == halts + 1 and not H.E.F.order, "let go: the order halted")
+	H.step(1)
+	check(H.count("uc:halt") == halts + 1, "and once")
+	check(H.count("dropped_order") == 0, "no order inside the engine's 0.5 s: " .. H.count("dropped_order"))
+end
+
+-- the sprint is the charge, whose impacts are meant (combat.lua C.charge): no move order of ours under it, and the charge
+-- order that follows ours waits the engine's gap rather than being dropped. Replaced by it, ours is not halted at the release
+T.a_sprint_carries_no_move_order_and_its_charge_is_not_dropped = function()
+	H.fresh({enemies = {{x = 0, z = 20}}})
+	H.tap("F2") H.step(0.5)
+	H.down("W") H.step(0.2)
+	check(H.count("uc:goto_location") == 1, "walking: our order")
+	H.down("Shift") H.step(1)
+	check(H.count("uc:goto_location") == 1, "sprinting: none more")
+	check(H.count("uc:attack_unit") == 1 and H.count("dropped_order") == 0, "the charge order sent, not dropped: "
+		.. H.count("uc:attack_unit") .. " sent, " .. H.count("dropped_order") .. " dropped")
+	local halts = H.count("uc:halt")
+	H.up("Shift") H.up("W") H.step(1)
+	check(H.count("uc:halt") == halts, "the charge took its place: nothing of ours to halt")
+end
+
+-- a sprint with nobody to charge keeps our order on the unit, so the release still halts it: forgotten at the sprint, it
+-- would walk him to its point after F2
+T.a_sprint_with_no_charge_keeps_our_order_to_halt = function()
+	general_on() H.step(0.5)
+	H.down("W") H.step(0.6)
+	local halts = H.count("uc:halt")
+	H.down("Shift") H.step(0.6)
+	check(H.count("uc:attack_unit") == 0 and H.E.F.order, "no enemy: no charge, our order kept")
+	H.up("Shift") H.up("W") H.step(0.6)
+	check(H.count("uc:halt") == halts + 1 and not H.E.F.order, "let go: halted")
+	local gotos = H.count("uc:goto_location")
+	H.down("Shift") H.down("W") H.step(1)
+	check(H.count("uc:goto_location") == gotos, "a sprint from a standstill: none sent under it")
+	H.up("Shift") H.up("W")
+end
+
+-- an order the pack did not time (the start's halt, CA's) just before ours: the engine drops ours. It is seen gone (the
+-- ordered position is not its point) and sent again past the gap
+T.a_dropped_move_order_is_sent_again = function()
+	general_on() H.step(0.6)
+	H.E.F.uc:halt() -- unseen by F.last_order
+	H.down("W") H.step(0.2)
+	check(H.count("dropped_order") == 1, "the first, inside that halt's gap: dropped: " .. H.count("dropped_order"))
+	H.step(1)
+	local q = H.units[1]:ordered_position()
+	check(H.count("uc:goto_location") == 2 and H.E.F.order and near(q:get_z() - H.units[1]._models[1].z, 30, 0.5),
+		"sent again, and the engine has it: " .. H.count("uc:goto_location"))
+	H.up("W")
+end
+
+-- F2 off mid-walk halts the order, or the engine walks him on to its point
+T.f2_off_halts_a_unit_of_ones_move_order = function()
+	general_on() H.step(0.5)
+	H.down("W") H.step(0.6)
+	local halts = H.count("uc:halt")
+	H.tap("F2") H.step(0.1)
+	check(H.count("uc:halt") > halts and not H.E.F.order, "halted as third person ends")
+	H.up("W")
+end
+
+-- in the air he touches nobody: no order, which would also fly him at the ground's point
+T.a_unit_of_one_flying_gets_no_move_order = function()
+	playing({type = "wh_test_fly_mount", men = 1, can_fly = true, flying = true})
+	H.down("W") H.step(1)
+	check(H.count("steer") > 0 and H.count("uc:goto_location") == 0, "flying: steered, no order: " .. H.count("uc:goto_location"))
+	H.up("W")
+end
+
+-- one man of a regiment gives it no orders (the author's rule, 2026-10-19): no move order for him either
+T.one_man_of_a_regiment_gets_no_move_order = function()
+	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.down("W") H.step(1)
+	check(H.count("steer") > 0 and H.count("uc:goto_location") == 0, "one man: steered, no order")
 	H.up("W")
 end
 
