@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased (not on the Workshop)
+## 2026-11-21
 
-Build `6BD96B57`.
+Workshop manifest 885213940710864631 (build `6BD96B57`).
 
 - A unit of one walked or run on the keys no longer tramples infantry. With no order of its own, the game put it into
   melee as soon as it touched enemies, and every bump then landed as a charge impact: a Khemrian Warsphinx run into a
