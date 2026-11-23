@@ -1,11 +1,13 @@
-"""The third-person pack's mailbox: a code cave at the top of a man's update (exe+3086f04 on 6acec6f4) that stops,
-starts and steers the man played alone ON THE BATTLE THREAD, from requests the script thread posts into a block.
+"""The third-person pack's mailbox: a code cave at the top of a man's update (exe+308e448 on 6ae2a00b, 9.0.5;
+exe+3086f04 on 6acec6f4) that stops, starts and steers the man played alone ON THE BATTLE THREAD, from requests the
+script thread posts into a block. The exe addresses quoted below are 6acec6f4's unless they say otherwise.
 
     py tools/third_person_cave.py              write the cave's bytes and the block's offsets into platform.lua
     py tools/third_person_cave.py --check      exit 1 when platform.lua's bytes are not this file's assembly, or the
                                                site in the exe on disk is not the code the cave displaces
     py tools/third_person_cave.py --selftest   run the bytes platform.lua SHIPS under an x64 emulator (unicorn), then
-                                               break the assembly eight ways and prove each break is caught
+                                               break the assembly (25 update-cave and 18 carrier-cave mutants) and
+                                               prove each break is caught
 
 Why: the battle runs on worker threads while the script runs (docs/BATTLE_ENGINE_RE.md section 9). P.guard, P.hold and
 P.steer called the engine's stop (exe+306edd4) and its walk builder (exe+306f954) from the script thread; both destroy
