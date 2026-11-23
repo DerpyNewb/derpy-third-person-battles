@@ -590,6 +590,23 @@ T.f2_with_nobody_to_play_says_so = function()
 	check(H.E.F.on and H.E.F.unit == H.units[2], "a unit selected: it is played")
 end
 
+-- a player, 2026-11-22: "putting unit into group and then pressing F2, the mod runs into error and doesnt work anymore until
+-- you re-enter battle. it has to be Closed Group". Measured 2026-11-23: CA's add_units throws for a unit in a locked group
+T.f2_on_a_locked_group_says_so_and_stays_on = function()
+	H.fresh({units = {{general = true}, {men = 10, x = 20}}})
+	H.loc = {derpy_tp_locked_group = "A unit in a locked group can't be played. Unlock the group, then press %s."}
+	H.units[1]._locked_group = true
+	H.select(H.units[1])
+	for _ = 1, 3 do H.tap("F2") H.step(0.1) end
+	check(not H.E.F.on, "not played")
+	check(not H.E.disabled, "three presses do not switch it off")
+	local s = H.last("subtitle")
+	check(s and s[2] == "derpy_tp_locked_group", "the player is told: " .. tostring(s and s[2]))
+	H.units[1]._locked_group = nil
+	H.tap("F2") H.step(0.1)
+	check(H.E.F.on and H.E.F.unit == H.units[1], "unlocked: he is played")
+end
+
 T.replays_still_do_nothing = function()
 	H.fresh({replay = true})
 	H.tap("F2")
@@ -9863,6 +9880,24 @@ T.a_second_fly_press_takes_back_the_first = function()
 	H.cco.CanToggleFlying = true
 	H.step(1)
 	check(fly_clicks() == 0, "still flying, as asked last: " .. fly_clicks())
+end
+
+-- a player, 2026-11-21: "When taking off or landing I pressed the spacebar but it didn't register". Measured 2026-11-23: in a
+-- landing is_currently_flying stays true for its 3 s, so a press then to go back up was cleared the moment it was made
+T.a_fly_press_during_a_landing_takes_off_once_landed = function()
+	local u = flyer({flying = true, can = true, mode = true})
+	H.tap("Space") H.step(0.1)
+	check(fly_clicks() == 1, "the landing click: " .. fly_clicks())
+	H.cco.IsFlying, H.cco.CanToggleFlying = false, false -- landing, still in the air
+	H.step(0.5)
+	H.tap("Space") H.step(0.5)
+	u._flying = false H.step(0.5) -- landed
+	H.cco.CanToggleFlying = true
+	H.step(0.5)
+	check(fly_clicks() == 2, "back up once he can: " .. fly_clicks())
+	H.cco.IsFlying, H.cco.CanToggleFlying = true, false -- the button took it: taking off
+	H.step(1) u._flying = true H.step(1)
+	check(fly_clicks() == 2, "airborne, no more: " .. fly_clicks())
 end
 
 T.a_fly_press_on_the_ground_under_a_take_off_clicks_nothing = function()

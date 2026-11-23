@@ -279,7 +279,14 @@ return function(E)
 	local function fly(now)
 		local w = F.fly_want
 		if not w then return end
-		if F.unit:is_currently_flying() == w.up or now >= w.till then F.fly_want = nil return end
+		-- done once he is where the press asked, unless an order the other way is under way that we did not click: in a
+		-- landing he still reads as flying for its 3 s, and a press then to go back up was cleared on the spot (a player,
+		-- 2026-11-21; measured 2026-11-23)
+		local order = E.hud.value("IsFlying")
+		if (F.unit:is_currently_flying() == w.up and (w.clicked or order == nil or order == w.up)) or now >= w.till then
+			F.fly_want = nil
+			return
+		end
 		if now < (w.next or 0) or E.hud.value("CanToggleFlying") ~= true or E.hud.value("IsFlying") == w.up then return end
 		-- the button flies the selected unit, and multiplayer leaves the selection alone while he looks around (reselect)
 		if P.features.net and not (bm:num_units_selected() == 1 and selected(F.unit)) then
@@ -288,6 +295,7 @@ return function(E)
 			return
 		end
 		toggle_flying()
+		w.clicked = true
 		w.next = now + FLY_GAP
 	end
 
@@ -736,7 +744,14 @@ return function(E)
 		-- nobody to play: no one unit selected and his general dead. Said, or F2 did nothing a player could see (2026-11-08,
 		-- live: nothing on screen, nothing in the log)
 		if not unit or unit:number_of_men_alive() == 0 then E.say("derpy_tp_no_unit", E.S.names.toggle) return end
-		F.unit, F.uc, F.utype, F.arty = unit, create_unitcontroller(unit), unit:type(), unit:is_artillery()
+		-- CA's add_units throws for a unit in a locked group ("unit is already in another group", measured 2026-11-23). Said,
+		-- not counted as an error: three F2 presses on a locked group used to switch the mod off for the battle
+		local made, uc = pcall(create_unitcontroller, unit)
+		if not made then
+			if string.match(tostring(uc), "another group") then E.say("derpy_tp_locked_group", E.S.names.toggle) return end
+			error(uc, 0)
+		end
+		F.unit, F.uc, F.utype, F.arty = unit, uc, unit:type(), unit:is_artillery()
 		local men_ok, why = check("men", P.check_men, unit)
 		F.men_ok = men_ok
 		E.log("men check on " .. F.utype .. ": " .. tostring(men_ok))

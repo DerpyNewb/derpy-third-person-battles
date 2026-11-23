@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-23
+
+Workshop manifest 6295079254768579642 (build `70C6EEF4`).
+
+- F2 on a locked group no longer switches the mod off. The game refuses to hand a unit in a locked group to a script,
+  so F2 on a locked group holding the general failed every press, and the third press switched the mod off until the
+  battle ended. It now says to unlock the group, and doesn't count as an error.
+- Pressing Space during a landing is no longer ignored. He still counts as flying for the 3 s of a landing, so a press
+  then to go back up looked already done and was dropped. It now waits for him to land and takes off again.
+
 ## 2026-11-21
 
 Workshop manifest 885213940710864631 (build `6BD96B57`).

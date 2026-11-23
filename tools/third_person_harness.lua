@@ -207,7 +207,15 @@ UC.__index = function(self, name)
 	end
 end
 -- CA's lib_battle_misc.lua:188: units only, one or more, of one army
-function create_unitcontroller(...) return setmetatable({_us = {...}}, UC) end
+-- u._locked_group: the unit is in a locked group, and CA's add_units throws (measured 2026-11-23)
+function create_unitcontroller(...)
+	for _, u in ipairs({...}) do
+		if u._locked_group then
+			error('[string "script\\_lib\\lib_battle_misc.lua"]:215: calling \'add_units\' on bad self (unit is already in another group)', 0)
+		end
+	end
+	return setmetatable({_us = {...}}, UC)
+end
 
 -- the battle manager --------------------------------------------------------------------------------
 local function make_bm()

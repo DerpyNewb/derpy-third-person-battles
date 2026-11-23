@@ -49,6 +49,7 @@ LOC = {
     # main.lua M.start: no one unit selected and the general dead; F2 did nothing on screen or in the log (2026-11-08, live)
     # (%s: the toggle key as MCT has it)
     "derpy_tp_no_unit": "Select one unit to play, then press %s.",
+    "derpy_tp_locked_group": "A unit in a locked group can't be played. Unlock the group, then press %s.",
     # combat.lua C.attack: a gun's click with no enemy in its range ahead did nothing and said nothing (a player, 2026-10-30:
     # "artillery never fires")
     "derpy_tp_no_target": "No enemy in range ahead to fire at.",
