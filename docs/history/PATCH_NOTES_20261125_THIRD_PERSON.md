@@ -5,8 +5,8 @@ Item 3822187184. Two Workshop reports, from 11-23 and 11-25, both reproduced liv
 `THIRD_PERSON_BUGS_20261024.md`). Game `6ae2a00b` (9.0.5).
 
 Build `8CAE1C72`, saved to `Modding Files/Modpacks/derpy_third_person.pack` and deployed to the Workshop folder
-`3822187184` on 2026-11-25 at about 13:25. Its file list matches the published pack's, 43 entries. The build's own
-read-back verified 28 files, 127 loc rows and 11 stat tables. **Not uploaded.** The source before the edits is in
+`3822187184` on 2026-11-25 at about 13:25, then uploaded at 16:03 (manifest 8438297555638595597, Steam log "Upload finished ... : OK"; script and manifest in `Modding Files/Backup/pre_upload_20261125_third_person/`). Its file list matches the published pack's, 43 entries. The build's own
+read-back verified 28 files, 127 loc rows and 11 stat tables. The source before the edits is in
 `Modding Files/Backup/third_person_src_20261125_pre_splash/`.
 
 ## What changed
