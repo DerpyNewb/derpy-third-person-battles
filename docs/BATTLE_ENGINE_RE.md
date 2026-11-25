@@ -421,7 +421,13 @@ to 3829), and memreader Plus's caves were not disturbed: only hardware breakpoin
 The worker thread already existed when the breakpoint was set, so a thread started **afterwards** is still unchecked,
 as is a software breakpoint near a memreader pattern or patch.
 
-Three plugin traps from the same run:
+Three plugin traps from the same run, and a fourth from 2026-11-25:
+
+- **Never detach while the game is stopped at a hardware-breakpoint hit.** On 2026-11-25 `bphwc` then `detach` from a
+  hit on a turret's `+0xb0` left the breakpoint armed in the CPU: the next tick raised `0x80000004` at `exe+314e7c4`
+  with no debugger, the game's crash handler held the simulation (battle clock frozen, UI and bridge still answering,
+  no thread suspended), and the dump was only written when the process was killed. `run` first, then `bphwc`, then
+  `detach`.
 
 - **x64dbg keeps breakpoints in `x64\db\Warhammer3.exe.dd64` and sets them again on the next attach.** The main-menu
   test's execute breakpoint came back and stopped every frame.

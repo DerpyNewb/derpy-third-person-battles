@@ -1342,6 +1342,92 @@ T.the_cave_logs_a_blocked_blow_and_one_it_never_armed = function()
 	check(H.logged("blow 454 on a man 0 m from where it lands: not armed"), "not armed: " .. tostring(H.log[#H.log]))
 end
 
+-- a player, 2026-11-25: a common soldier "gets AoE and knockback attacks". A clip played here keeps its SPLASH_ATTACK
+-- metadata even on a weapon CA gives no splash (measured 2026-11-25: up to 4 victims a swing); the cave switches the
+-- splash off on him (P.nosplash) unless his weapon has one (data.lua splashers)
+T.one_mans_clip_splashes_only_where_his_weapon_does = function()
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.step(0.1)
+	local n = H.last("nosplash")
+	check(n and n[2] == true and n[3] == 2011, "off on him, a weapon with no splash: " .. tostring(n and n[2]))
+	check(H.count("nosplash") == 1, "once, not every frame: " .. H.count("nosplash"))
+	-- a weapon with a splash (a lord's, a giant's): left as CA has it
+	H.E.D.splashers = {wh_test_melee = true}
+	H.step(0.1)
+	n = H.last("nosplash")
+	check(n[2] == false and H.nosplash == nil, "back on for a weapon with one")
+	H.E.D.splashers = {}
+	H.step(0.1)
+	check(H.nosplash == true, "off again")
+	-- off with the mode: CA's own swings keep their splash
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.on and H.nosplash == nil, "on again once he is let go")
+	-- a regiment played whole: CA's melee, its splash untouched
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true}}},
+		enemies = {{x = 40, z = 2.5, men = 21}}, features = STRIKES, mct = {combat_one_man = false}})
+	H.select(H.units[2]) H.tap("F2") H.step(0.3)
+	check(H.count("nosplash") == 0, "nothing for a whole regiment")
+	-- multiplayer: the cave's strike half is off there, and the splash with it
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.P.features.net = true
+	H.E.F.nosplash = nil H.nosplash = nil
+	H.step(0.2)
+	check(H.nosplash == nil, "nothing in multiplayer")
+end
+
+-- a player, 2026-11-23: "attack animations sometimes get cancelled out of nowhere, dealing no damage". The engine's
+-- reaction to a blow on him (DEFEND, 474) cut the clip played here before its blow landed (2 of 20, measured
+-- 2026-11-25); the swing goes again after it, once
+local function cut(man, slot)
+	man.anim_slot, man.anim_end, man.report_at = slot or 474, H.model_ms() + 600, nil
+end
+T.a_swing_cut_by_a_reaction_before_its_blow_swings_again_once = function()
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	local man = H.E.F.model
+	H.tap("Left mouse") H.step(0.05)
+	check(H.E.P.anim_slot(man) == 454 and H.count("play") == 1, "the swing plays")
+	H.step(0.05)
+	check(man.blow ~= nil, "its blow armed, not yet landed")
+	cut(man) H.step(0.05)
+	check(H.count("unblow") == 1, "the armed blow taken back: " .. H.count("unblow"))
+	check(H.logged("swing 454 cut by 474 before its blow: swung again after it"), "logged: " .. tostring(H.log[#H.log]))
+	H.step(0.1)
+	check(H.count("play") == 2, "swung again with no click, inside the gap: " .. H.count("play"))
+	-- cut again: not swung a third time
+	H.step(0.1)
+	cut(man) H.step(0.8)
+	check(H.count("play") == 2, "once per click: " .. H.count("play"))
+	-- the next click is a new click, and may be given back again
+	past_swing_gap()
+	H.tap("Left mouse") H.step(0.1)
+	local n = H.count("play")
+	cut(man) H.step(0.2)
+	check(H.count("play") == n + 1, "a fresh click is given back once more")
+end
+
+T.a_swing_whose_blow_landed_or_found_nobody_is_not_swung_again = function()
+	-- landed: the engine clears the pending blow while the clip still plays
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	local man = H.E.F.model
+	H.tap("Left mouse") H.step(0.1)
+	check(man.blow ~= nil, "armed")
+	man.blow = nil H.step(0.05)
+	cut(man) H.step(0.8)
+	check(H.count("play") == 1 and H.count("unblow") == 0, "landed, then cut: not swung again: " .. H.count("play"))
+	-- nobody where it lands: a whiff stays a whiff
+	striking({{x = 40, z = 30, men = 3}}, {{0, 2.5}})
+	man = H.E.F.model
+	H.tap("Left mouse") H.step(0.1)
+	cut(man) H.step(0.8)
+	check(H.count("play") == 1, "nobody there, then cut: not swung again: " .. H.count("play"))
+	-- a clip of his own after it that is no reaction (a knock is C.knocked's, a walk his): not swung again
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	man = H.E.F.model
+	H.tap("Left mouse") H.step(0.1)
+	cut(man, 600) H.step(0.8)
+	check(H.count("play") == 1, "not a reaction: not swung again: " .. H.count("play"))
+end
+
 T.no_blow_is_struck_for_a_whole_unit_in_multiplayer_or_without_the_cave = function()
 	-- a unit played whole: CA's attack order (2026-11-02), the engine's melee does the fighting
 	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true}}},

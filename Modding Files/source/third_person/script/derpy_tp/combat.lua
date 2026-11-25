@@ -484,7 +484,12 @@ return function(E)
 			local p = held:position()
 			yaw = math.atan2(p:get_x() - mx, p:get_z() - mz)
 		end
-		if now then F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = yaw, turns = hold ~= nil, swing = attack} end
+		-- primary, retried: for a swing a reaction cuts (C.locked), swung again once and only once
+		if now then
+			F.lock = {from = now, till = now + (hold or LOCK_MAX), yaw = yaw, turns = hold ~= nil, swing = attack, primary = primary,
+				retried = attack and F.retry or nil}
+			if attack then F.retry = nil end
+		end
 		-- when the clip is given up on: the F.pending till C.locked sets for one never seen (multiplayer: nothing is sent
 		-- for him until then or until it shows, platform.lua M.net_rules)
 		local give_up = now and now + LOCK_MAX + late()
@@ -544,6 +549,18 @@ return function(E)
 		end
 	end
 
+	-- each tick: the splash off for a unit whose melee weapon has none in CA's tables (data.lua splashers, the cave's
+	-- nosplash). A clip played here splashes whatever its weapon says: one Greatsword's swing hurt 4 Orc Boyz and knocked
+	-- them down while its rolled blow was blocked (a player, 2026-11-25: "common units have aoe and knock back"; measured
+	-- that day). Only where blows are struck, so the rolled blow is the swing's damage; in multiplayer the splash is all a
+	-- played swing deals, and a regiment played whole fights by CA's order. Switched once, off again at the stop (main.lua)
+	function C.splash()
+		local want = strikes() and not (E.D.splashers and E.D.splashers[F.utype])
+		if want == (F.nosplash == true) then return end
+		-- he (a rider, not his mount): the posted man is the mount, so both bodies are covered
+		if P.nosplash(want, F.model or F.single) or not want then F.nosplash = want or nil end
+	end
+
 	-- each tick: a swing's blow posted the first tick its clip shows on him (the cave arms it only while he plays that
 	-- slot), on the man where it lands; and the blow the cave then armed, logged: blocked, a hit or a knock, and its damage
 	function C.strike(now)
@@ -562,7 +579,11 @@ return function(E)
 		end
 		F.strike = nil
 		local v, d = victim(s.m, s.slot)
-		if not v then E.log("blow " .. s.slot .. ": nobody where it lands") return end
+		if not v then
+			if F.lock and F.lock.m == s.m then F.lock.landed = true end -- nothing to lose to a reaction (C.locked)
+			E.log("blow " .. s.slot .. ": nobody where it lands")
+			return
+		end
 		if P.strike(s.m, v, s.slot) then F.blow = {m = s.m, slot = s.slot, d = math.floor(d * 10 + 0.5) / 10, n = P.struck(), till = now + 1} end
 	end
 
@@ -1093,9 +1114,26 @@ return function(E)
 		-- 3.9 s in a crowd, measured 2026-11-18). The blow waits on him armed until it lands (P.blow). A key held through it
 		-- from before is a click while walking, which plays out (the author, 2026-10-15: "melee should be prioritized")
 		if not F.moving then L.still = true end
+		-- the swing's blow: armed on him (P.blow), then landed while his clip still played
+		if L.swing and L.m and slot == L.slot and not L.landed then
+			if P.blow(L.m) ~= nil then L.armed = true elseif L.armed then L.landed = true end
+		end
 		local walked = L.strikes and L.still and L.seen and F.moving and not F.strike and not F.blow and P.blow(L.m) == nil
 		local over = walked or now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT + late())
 		if not over then return true end
+		-- The engine's own reaction to a blow on him (a defend, a hit reaction: reeling) cut the swing before its blow landed,
+		-- and the swing is lost: 2 of 20 cut at 0.1-0.3 s dealt nothing, one of them armed as a hit (a player, 2026-11-23:
+		-- "attack animations sometimes get cancelled out of nowhere, dealing no damage"; measured 2026-11-25). CA's own swing
+		-- is never cut so: the reaction (exe+307637c) is refused by his action state (+0x324), which a clip played here does
+		-- not set. So the swing goes again as the reaction ends, by the click held for it with its gap given back; once per
+		-- click, so a man under a rain of blows is not swung for ever. A blow armed and not yet landed is cleared first, or
+		-- the second swing's could land beside it
+		if L.swing and L.seen and slot ~= L.slot and reeling(slot) and not L.landed and not L.retried and strikes() then
+			if L.armed and P.blow(L.m) ~= nil then P.unblow(L.m) end
+			F.strike, F.blow = nil, nil
+			F.next_swing, F.held_click, F.retry = now, {L.primary}, true
+			E.log("swing " .. tostring(L.slot) .. " cut by " .. tostring(slot) .. " before its blow: swung again after it")
+		end
 		if walked then F.swung, F.held_click = nil, nil end -- nor its clip's turn, nor a click held for after it: he walks
 		-- a charge attack thrown on the run stays latched under the walk (measured 2026-10-16): freed here, or by the charge
 		-- (charge_run) when he sprints on

@@ -6,7 +6,7 @@ script thread posts into a block. The exe addresses quoted below are 6acec6f4's 
     py tools/third_person_cave.py --check      exit 1 when platform.lua's bytes are not this file's assembly, or the
                                                site in the exe on disk is not the code the cave displaces
     py tools/third_person_cave.py --selftest   run the bytes platform.lua SHIPS under an x64 emulator (unicorn), then
-                                               break the assembly (25 update-cave and 18 carrier-cave mutants) and
+                                               break the assembly (30 update-cave and 18 carrier-cave mutants) and
                                                prove each break is caught
 
 Why: the battle runs on worker threads while the script runs (docs/BATTLE_ENGINE_RE.md section 9). P.guard, P.hold and
@@ -34,6 +34,11 @@ from the cave's first instruction, mov rax, <block>):
     strike     1: a blow for strike_man (exchanged with 0 as it is read): if his clip is still strike_slot and both he
                and strike_victim live, the engine's melee roll (roll, exe+30a8ab0) and the pending hit it arms written
                on him as exe+3251af8 writes it (docs/BATTLE_ENGINE_RE.md section 12). struck counts the arms (probes)
+    nosplash   1: on every update of man or strike_man, before anything else, clear bit 0x10 of his +0xb12, so the splash
+               pass later in the same update (exe+3095cb0) lands nothing. A clip played here splashes whatever the
+               weapon's splash_attack_target_size says (a player, 2026-11-25: a played Greatsword hit 4 Orc Boyz in one
+               swing and knocked them down, though CA's tables give a Greatsword's weapon no splash at all); the
+               strike's rolled blow is the swing's damage instead. 0: untouched
 
 Two caves share this block. The UPDATE cave (ASM, exe+3086f04) guards the one man played in single player from man/guard/
 walk as it always has, and in multiplayer also scans the guard table and stops the engine's four orders on every man with
@@ -58,7 +63,7 @@ PLACEHOLDER = 0x1122334455667788
 
 MB = {"man": 0x00, "walk_a": 0x08, "move_a": 0x10, "move_b": 0x18, "melee": 0x20, "walk_b": 0x28, "walk_stop": 0x30,
       "walk_start": 0x38, "guard": 0x40, "walk": 0x44, "stops": 0x48, "met": 0x4c, "has_angle": 0x50, "near": 0x51,
-      "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "strike": 0x6c, "strike_man": 0x70,
+      "nosplash": 0x52, "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "strike": 0x6c, "strike_man": 0x70,
       "strike_victim": 0x78, "buf": 0x80, "strike_slot": 0xe0, "struck": 0xe4, "skip": 0xe8, "map_lookup": 0xf0,
       "roll": 0xf8, "guards": 0x100, "size": 0x200}
 # the fields a cave calls or jumps through: written over, never zeroed (a cave already past its match goes through
@@ -95,7 +100,12 @@ MAN = {"cmd": 0x330, "hp": 0xb1c, "x": 0x368, "z": 0x370, "surf": 0x378, "surf2"
        # the strike: his clip slot, whether one plays (+0x898 set or +0x284 not 0, P.anim_slot's test), the pointer
        # whose +0x440 is the battle, and the pending hit exe+32654d0 lands (type, damage, slot u16, victim, pending)
        "slot": 0x278, "busy": 0x284, "playing": 0x898, "world": 0x58,
-       "r_type": 0xaf0, "r_dmg": 0xaf4, "r_slot": 0xaf8, "r_victim": 0xb00, "r_pending": 0xb08}
+       "r_type": 0xaf0, "r_dmg": 0xaf4, "r_slot": 0xaf8, "r_victim": 0xb00, "r_pending": 0xb08,
+       # his flag byte: bit 0x10 asks his clip's SPLASH_ATTACK to land. The engine sets it as an attack clip starts
+       # (exe+3089284's callers, e.g. exe+3098219 on 6ae2a00b) and the splash pass exe+3095cb0 returns at once without
+       # it; that pass runs inside this same update, after the cave (exe+308e4e7, exe+308ea03)
+       "flags": 0xb12}
+SPLASH_BIT = 0x10
 # the roll's first argument, as exe+3251af8 finds it: [[[man + 0x58] + 0x440] + 0xf8]. Its result block (0x20 bytes:
 # type, 1, damage, a flag byte, attacker, victim) is given 0x30 on the cave's stack, so a roll that writes a little more
 # than its vanilla caller's locals show lands in the cave's own frame and not on the saved xmm registers
@@ -107,6 +117,15 @@ ROLL_RVA, ROLL_BYTES = 0x30b008c, bytes.fromhex("488bc4 55 53 56 57 4156 4157") 
 # touches it gives back. Every call is made with rsp on a 16-byte boundary and 32 bytes of shadow space.
 ASM = """
     mov rax, {placeholder}
+    cmp byte ptr [rax + {nosplash}], 0
+    je splashed
+    cmp rcx, qword ptr [rax + {man}]
+    je unsplash
+    cmp rcx, qword ptr [rax + {strike_man}]
+    jne splashed
+unsplash:
+    and byte ptr [rcx + {m_flags}], {not_splash}
+splashed:
     cmp rcx, qword ptr [rax + {strike_man}]
     je strike
 main:
@@ -581,7 +600,7 @@ def fields():
     f.update({"entries": hex(ENTRIES), "ge": hex(GE), "frag_row": hex(FRAG_ROW), "m_frag": hex(FRAG),
               "world_battle": hex(WORLD_BATTLE), "battle_resolver": hex(BATTLE_RESOLVER),
               "magic": hex(MAGIC), "rec_battle": hex(REC_BATTLE), "map_off": hex(MAP_OFF), "op_hello": hex(OPS["HELLO"]),
-              "hello_version": hex(HELLO_VERSION), "hello_slots": hex(HELLO_SLOTS)})
+              "hello_version": hex(HELLO_VERSION), "hello_slots": hex(HELLO_SLOTS), "not_splash": hex(0xff ^ SPLASH_BIT)})
     return f
 
 
@@ -976,6 +995,35 @@ def scenarios(code, at):
     kept(r, "strike and guard")
     expect([c[0] for c in r["calls"]] == ["roll", "stop"], "strike then guard: %r" % r["calls"])
 
+    # nosplash: bit 0x10 of +0xb12 cleared on man's and strike_man's updates, every other bit kept; nobody else touched,
+    # and nothing at all with the flag off. The rest of the update runs as before (a guard on the same update still stops)
+    def splash(flag=1, man=HIM, smn=0, flags=0xff, other_flags=0xff, vt="melee", guard=0):
+        def setup(q, d, uc):
+            cmd(vt, guard=guard)(q, d, uc)
+            q(BLOCK + MB["man"], man)
+            q(BLOCK + MB["strike_man"], smn)
+            uc.mem_write(BLOCK + MB["nosplash"], bytes([flag]))
+            uc.mem_write(HIM + MAN["flags"], bytes([flags]))
+            uc.mem_write(OTHER + MAN["flags"], bytes([other_flags]))
+        return setup
+    for name, kw, rcx, want in (("his update", {}, HIM, 0xef), ("the swing's carrier (a rider's mount is man)", dict(man=OTHER, smn=HIM), HIM, 0xef),
+                                ("bit already clear", dict(flags=0x2f), HIM, 0x2f), ("flag off", dict(flag=0), HIM, 0xff),
+                                ("another man", dict(smn=VICTIM), OTHER, None)):
+        r = run(code, at, splash(**kw), rcx=rcx)
+        kept(r, "nosplash, " + name)
+        if want is not None:
+            expect(r["rd"](HIM + MAN["flags"], 1) == want, "nosplash, %s: flags %02x, want %02x" % (name, r["rd"](HIM + MAN["flags"], 1), want))
+        else:
+            expect(r["rd"](OTHER + MAN["flags"], 1) == 0xff and r["rd"](HIM + MAN["flags"], 1) == 0xff,
+                   "nosplash, %s: nobody's flags touched" % name)
+    r = run(code, at, splash(guard=1))
+    expect([c[:2] for c in r["calls"]] == [("stop", HIM)] and r["rd"](HIM + MAN["flags"], 1) == 0xef,
+           "nosplash and a guard on one update: both done, got %r" % r["calls"])
+    r = run(code, at, lambda q, d, uc: (strike()(q, d, uc), uc.mem_write(BLOCK + MB["nosplash"], bytes([1])),
+                                        uc.mem_write(HIM + MAN["flags"], bytes([0x10]))))
+    expect(armed(r) == (1, 1, 37, 457, VICTIM) and r["rd"](HIM + MAN["flags"], 1) == 0,
+           "nosplash and a strike on one update: the blow armed, the splash bit off: %r" % (armed(r),))
+
     # the multiplayer table scan (the update cave's second half): man 0 (no single-man path), count > 0, entries at MB
     # guards. The man being updated is rcx; his entry stops the engine's four, a non-engine command runs, a dead man's
     # entry is freed, a man with no entry is untouched. Single player (count 0) never reaches the scan: the cases above
@@ -1294,6 +1342,13 @@ MUTANTS = [
     ("the hit never pending", "    mov dword ptr [rsi + {m_r_pending}], 1\n", ""),
     ("the victim not written", "    mov qword ptr [rsi + {m_r_victim}], rdi\n", ""),
     ("the strike loses the block", "    mov rax, rbx\n    add rsp, 0xa0\n", "    add rsp, 0xa0\n"),
+    # nosplash (2026-11-25)
+    ("the splash never cleared", "    and byte ptr [rcx + {m_flags}], {not_splash}\n", ""),
+    ("the splash cleared with the flag off", "    cmp byte ptr [rax + {nosplash}], 0\n    je splashed\n", ""),
+    ("every man's splash cleared", "    cmp rcx, qword ptr [rax + {strike_man}]\n    jne splashed\n", ""),
+    ("the swing's carrier left splashing", "    cmp rcx, qword ptr [rax + {strike_man}]\n    jne splashed\n",
+     "    jmp splashed\n"),
+    ("every flag cleared", "    and byte ptr [rcx + {m_flags}], {not_splash}\n", "    mov byte ptr [rcx + {m_flags}], 0\n"),
 ]
 
 # the carrier cave's own mistakes; each must be caught by carrier_scenarios()

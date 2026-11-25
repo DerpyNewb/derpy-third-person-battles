@@ -651,6 +651,18 @@ local function fake_platform()
 	end
 	function P.struck() return H.struck_n end
 	function P.blow(m) if m.blow then return m.blow[1], m.blow[2] end end
+	-- the clip's splash switched off for him (platform.lua P.nosplash): refused where the cave is not, as there
+	function P.nosplash(on, m)
+		if not P.features.strike or P.features.net then return false end
+		rec("nosplash", on, m and m.id) H.nosplash = on or nil
+		return true
+	end
+	-- an armed blow taken back (platform.lua P.unblow)
+	function P.unblow(m)
+		if not P.features.strike or P.features.net then return false end
+		rec("unblow", m and m.id) m.blow = nil
+		return true
+	end
 	-- the order gate (platform.lua P.gate): its state, and every time it was set with the model clock. In a lasting melee
 	-- the fake engine of tools/third_person_lockstep.lua starts a queued action for a man only while it is in.
 	-- H.net_gate == false: a gate that goes in and changes nothing (L.new's gate = false, the test of what it is for)

@@ -302,6 +302,13 @@ def check_data():
     if got != ["true", "nil", "0.5", "1.991", "-1.891", "2.234"]:
         bad.append("data.lua fire_moves, fires_moving: horse archers, crossbowmen, skirmishers' two clips, horse archers' "
                    "left %s - run --gen" % got)
+    # who splashes (read 2026-11-25): the Empire General's sword and the Orc Warboss's choppa have a splash target size,
+    # Greatswords and Orc Boyz none
+    probe = ('local d = dofile([[%s]]) local s = d.splashers or {} print(s["wh_main_emp_cha_general_0"], '
+             's["wh_main_grn_cha_orc_warboss_0"], s["wh_main_emp_inf_greatswords"], s["wh_main_grn_inf_orc_boyz"])' % DATA)
+    got = subprocess.run([LUA, "-e", probe], capture_output=True, text=True).stdout.split()
+    if got != ["true", "true", "nil", "nil"]:
+        bad.append("data.lua splashers: General, Warboss, Greatswords, Orc Boyz %s - run --gen" % got)
     return bad
 
 def exe_stamp():
@@ -417,6 +424,12 @@ def gen():
                         castes.setdefault(r["land_unit"], r["caste"])
         except Exception:  # a pack without the table, or a table version the schema does not know
             pass
+    # the units whose melee weapon splashes in CA's tables (melee_weapons.splash_attack_target_size set): lords, heroes,
+    # monsters. A clip played by the script splashes whatever the weapon says (a player, 2026-11-25: a played Greatsword
+    # hit 4 Orc Boyz in one swing and knocked them down); where the cave strikes, every other unit has it turned off
+    # (combat.lua C.splash, the cave's nosplash)
+    melee = keyed("melee_weapons")
+    splashers = sorted(k for k, land in lu.items() if (melee.get(land["primary_melee_weapon"]) or {}).get("splash_attack_target_size"))
     TF = third_person_fires
     raises, runs, charges, blanks, dulls, impacts = {}, {}, {}, {}, {}, {}
     impacts_fly, impacts_rider, impacts_rider_fly, movers, fires_moving = {}, {}, {}, set(), {}
@@ -457,6 +470,8 @@ def gen():
              "-- overcasts: spell key -> winds its <key>_upgraded overcast costs (abilities.lua)",
              "-- targets: ability key -> com, it lands on lords and heroes only, or not_com, never on them (its invalid",
              "--   target flags; abilities.lua)",
+             "-- splashers: land unit keys whose primary melee weapon has a splash_attack_target_size (combat.lua lets",
+             "--   only these splash when the script plays their swings)",
              "return {", "\tshots = {"]
     for k in sorted(shots):
         key, reload, n, bang = shots[k]
@@ -518,14 +533,18 @@ def gen():
     lines += ["\t},", "\ttargets = {"]
     for k in sorted(targets):
         lines.append('\t\t["%s"] = "%s",' % (k, targets[k]))
+    lines += ["\t},", "\tsplashers = {"]
+    for k in splashers:
+        lines.append('\t\t["%s"] = true,' % k)
     lines += ["\t},", "}", ""]
     with open(DATA, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
     print("wrote %s: %d unit types, %d abilities, %d fire clips, %d raises, %d charge attacks, %d charges, %d with blank "
           "slots, %d with dull swings, %d with impact points (%d flying, %d riders, %d riders flying), %d bodies, %d fire "
-          "on the move (%d with its clips)" % (DATA, len(shots), len(kinds), len(fires), len(raises), len(runs), len(charges),
-                                               len(blanks), len(dulls), len(impacts), len(impacts_fly), len(impacts_rider),
-                                               len(impacts_rider_fly), len(bodies), len(movers), len(fires_moving)))
+          "on the move (%d with its clips), %d splashers" % (DATA, len(shots), len(kinds), len(fires), len(raises), len(runs),
+                                               len(charges), len(blanks), len(dulls), len(impacts), len(impacts_fly),
+                                               len(impacts_rider), len(impacts_rider_fly), len(bodies), len(movers),
+                                               len(fires_moving), len(splashers)))
 
 
 # the HUD's words (a translator, 2026-11-01: plain strings in the Lua, out of a translation pack's reach): every

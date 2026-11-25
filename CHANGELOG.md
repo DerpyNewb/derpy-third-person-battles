@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-11-25
+
+Workshop manifest 8438297555638595597 (build `8CAE1C72`).
+
+- A common soldier played on his own no longer hits several enemies or knocks them down with each swing. A clip the
+  mod plays keeps its splash metadata, so the engine's splash pass hit everyone in the swing's cone as well as the
+  mod's own blow: one Greatsword swing hit up to 4 Orc Boyz. The update cave now turns his splash off while the mod
+  strikes for him, unless his weapon has a splash in CA's tables (`data.lua` `splashers`). Measured after the fix:
+  no Greatsword swing hit more than one man in 36, while the Empire General's sword still splashes. Multiplayer and a
+  regiment played whole are unchanged.
+- A swing cut short by the enemy's blow now swings again instead of dealing nothing. The engine skips a defend or
+  hit reaction during its own swing, but a swing the mod plays doesn't count as one, so a reaction could replace it
+  before its blow landed. When that happens, the blow is taken back and the swing goes again at once, once per
+  click. Measured after the fix: 5 swings were cut, and all 5 went again and landed as a hit, a block or a
+  knockdown.
+
 ## 2026-11-23
 
 Workshop manifest 6295079254768579642 (build `70C6EEF4`).

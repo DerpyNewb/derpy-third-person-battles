@@ -542,6 +542,7 @@ return function(E)
 				if c == pd.slot then pd.seen = true end
 				if pd.seen and c ~= pd.slot or not pd.seen and gnow >= pd.till then F.pending = nil end
 			end
+			E.combat.splash() -- his clip's splash off where his weapon has none (combat.lua)
 			E.combat.strike(gnow) -- a swing's blow, once its clip shows (combat.lua)
 			-- one man of a regiment: none of its volleys either, armed only for his own shot (F.shot); a unit of one keeps his
 			-- shot clips, the engine's own order fires him (combat.lua C.ground)
@@ -891,6 +892,7 @@ return function(E)
 		end)
 		F.shot, F.want_shot = nil, false
 		F.strike, F.blow = nil, nil -- a blow not yet posted is dropped; one posted lands as the engine's would
+		if F.nosplash then F.nosplash = nil try(function() P.nosplash(false) end) end -- his clips splash as CA's tables say
 		-- his swings back; nothing written to a dead man, whose model may be gone
 		if F.disarmed then try(function() if P.alive(F.unit, F.disarmed) then P.arm(F.disarmed) end end) F.disarmed = nil end
 		if F.guarded and P.features.net then try(P.unguard) end -- by its id: nothing read off a dead man

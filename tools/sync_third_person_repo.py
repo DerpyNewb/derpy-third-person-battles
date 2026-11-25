@@ -87,7 +87,7 @@ HISTORY = ["HANDOFF_20261008_THIRD_PERSON_LORD_CONTROL.md", "HANDOFF_20261013_TH
            "PATCH_NOTES_20261111_THIRD_PERSON.md", "PATCH_NOTES_20261112_THIRD_PERSON.md",
            # THIRD_PERSON_BUGS_20261024.md is left out: it names Steam commenters
            "PATCH_NOTES_20261118_THIRD_PERSON.md", "PATCH_NOTES_20261121_THIRD_PERSON.md",
-           "PATCH_NOTES_20261123_THIRD_PERSON.md"]
+           "PATCH_NOTES_20261123_THIRD_PERSON.md", "PATCH_NOTES_20261125_THIRD_PERSON.md"]
 # reference docs, at the same path in the repo
 REFERENCE = ["BATTLE_ENGINE_RE.md"]
 LEDGER = ".superpowers/sdd/2026-10-14-third-person-hud/progress.md"
