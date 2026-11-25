@@ -1344,19 +1344,27 @@ end
 
 -- a player, 2026-11-25: a common soldier "gets AoE and knockback attacks". A clip played here keeps its SPLASH_ATTACK
 -- metadata even on a weapon CA gives no splash (measured 2026-11-25: up to 4 victims a swing); the cave switches the
--- splash off on him (P.nosplash) unless his weapon has one (data.lua splashers)
+-- splash off on him (P.nosplash) when CA's tables list his weapon as having none (data.lua no_splash). Four players,
+-- 2026-11-25/26: the 11-25 build switched it off for any unit missing from a list of splashers, so every lord, hero and
+-- monster from a mod lost his splash. A unit the list has never seen is left as CA has it
 T.one_mans_clip_splashes_only_where_his_weapon_does = function()
+	-- a unit from a mod: not on the list, his splash untouched
+	H.E.D.no_splash = {}
 	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.step(0.2)
+	check(H.count("nosplash") == 0 and H.nosplash == nil, "a unit not on the list keeps his splash: " .. H.count("nosplash"))
+	-- CA's weapon with no splash (a Greatsword's)
+	H.E.D.no_splash = {wh_test_melee = true}
 	H.step(0.1)
 	local n = H.last("nosplash")
 	check(n and n[2] == true and n[3] == 2011, "off on him, a weapon with no splash: " .. tostring(n and n[2]))
 	check(H.count("nosplash") == 1, "once, not every frame: " .. H.count("nosplash"))
 	-- a weapon with a splash (a lord's, a giant's): left as CA has it
-	H.E.D.splashers = {wh_test_melee = true}
+	H.E.D.no_splash = {}
 	H.step(0.1)
 	n = H.last("nosplash")
 	check(n[2] == false and H.nosplash == nil, "back on for a weapon with one")
-	H.E.D.splashers = {}
+	H.E.D.no_splash = {wh_test_melee = true}
 	H.step(0.1)
 	check(H.nosplash == true, "off again")
 	-- off with the mode: CA's own swings keep their splash
@@ -1365,10 +1373,12 @@ T.one_mans_clip_splashes_only_where_his_weapon_does = function()
 	-- a regiment played whole: CA's melee, its splash untouched
 	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40, slots = {[454] = true}}},
 		enemies = {{x = 40, z = 2.5, men = 21}}, features = STRIKES, mct = {combat_one_man = false}})
+	H.E.D.no_splash = {wh_test_melee = true}
 	H.select(H.units[2]) H.tap("F2") H.step(0.3)
 	check(H.count("nosplash") == 0, "nothing for a whole regiment")
 	-- multiplayer: the cave's strike half is off there, and the splash with it
 	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.E.D.no_splash = {wh_test_melee = true}
 	H.P.features.net = true
 	H.E.F.nosplash = nil H.nosplash = nil
 	H.step(0.2)

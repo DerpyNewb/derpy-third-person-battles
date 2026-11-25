@@ -549,13 +549,15 @@ return function(E)
 		end
 	end
 
-	-- each tick: the splash off for a unit whose melee weapon has none in CA's tables (data.lua splashers, the cave's
+	-- each tick: the splash off for a unit whose melee weapon has none in CA's tables (data.lua no_splash, the cave's
 	-- nosplash). A clip played here splashes whatever its weapon says: one Greatsword's swing hurt 4 Orc Boyz and knocked
 	-- them down while its rolled blow was blocked (a player, 2026-11-25: "common units have aoe and knock back"; measured
 	-- that day). Only where blows are struck, so the rolled blow is the swing's damage; in multiplayer the splash is all a
 	-- played swing deals, and a regiment played whole fights by CA's order. Switched once, off again at the stop (main.lua)
+	-- Off only for a unit LISTED: the 11-25 build turned it off for any unit missing from a list of splashers, and every
+	-- lord, hero and monster from a mod not in that list lost his splash (four players, 2026-11-25/26)
 	function C.splash()
-		local want = strikes() and not (E.D.splashers and E.D.splashers[F.utype])
+		local want = strikes() and (E.D.no_splash and E.D.no_splash[F.utype]) == true
 		if want == (F.nosplash == true) then return end
 		-- he (a rider, not his mount): the posted man is the mount, so both bodies are covered
 		if P.nosplash(want, F.model or F.single) or not want then F.nosplash = want or nil end

@@ -9,8 +9,11 @@ MUTANTS = [
     # the splash: never switched; switched off for a weapon with one too; off for a regiment; posted for nobody;
     # sent every frame; left off at F2
     (MAIN, "E.combat.splash()", "", SPLASH),
-    (COMBAT, "and not (E.D.splashers and E.D.splashers[F.utype])", "", SPLASH),
-    (COMBAT, "local want = strikes() and not", "local want = not", SPLASH),
+    (COMBAT, "and (E.D.no_splash and E.D.no_splash[F.utype]) == true", "", SPLASH),
+    # 2026-11-26, the 11-25 build's own slip: off for a unit the list has never seen (a modded lord lost his splash)
+    (COMBAT, "and (E.D.no_splash and E.D.no_splash[F.utype]) == true", "and (E.D.no_splash and E.D.no_splash[F.utype]) ~= false", SPLASH),
+    (COMBAT, "and (E.D.no_splash and E.D.no_splash[F.utype]) == true", "and not (E.D.no_splash and E.D.no_splash[F.utype] == nil)", SPLASH),
+    (COMBAT, "local want = strikes() and (E.D.no_splash", "local want = (E.D.no_splash", SPLASH),
     (COMBAT, "P.nosplash(want, F.model or F.single)", "P.nosplash(want, nil)", SPLASH),
     (COMBAT, "if want == (F.nosplash == true) then return end", "", SPLASH),
     (MAIN, "if F.nosplash then F.nosplash = nil try(function() P.nosplash(false) end) end", "", SPLASH),

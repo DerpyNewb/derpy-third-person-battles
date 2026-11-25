@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-26
+
+Workshop manifest 4159669248539880597 (build `122E9008`).
+
+- Splash attacks and jump attacks work again for lords, heroes and monsters from other mods. The 11-25 fix turned the
+  splash off for every unit missing from a list of splashers, and that list was built from CA's tables plus the mods
+  installed on the author's machine, so a unit from any other mod hit one man per swing and its jump attack hit
+  nobody. The list is now the other way round: `data.lua` `no_splash` holds the 713 vanilla units whose weapon has no
+  splash, read from CA's `db.pack` alone, and a unit not on it keeps CA's splash. Measured in game: a modded lord
+  (Reinhardt von Mackensen) hit up to 6 Orc Boyz a swing, a modded monster (the Rotblood Bile Giant) killed 54 in 10
+  swings and 7 with 3 jump attacks, and a modded lord on a monster (Bodvarr) hit 10 to 17 men every swing. The same
+  units put on the list, as the 11-25 build did, hit one man a swing and the Giant's jumps did no damage. A Greatsword
+  still hits one man a swing.
+
 ## 2026-11-25
 
 Workshop manifest 8438297555638595597 (build `8CAE1C72`).
