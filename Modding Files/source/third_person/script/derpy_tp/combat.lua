@@ -559,7 +559,7 @@ return function(E)
 	-- his collisions off while one of his own clips is locked or waits to play (platform.lua P.steady): the engine's
 	-- collision with an enemy not fighting him cut a swing on its first tick, and it dealt nothing (2026-11-27)
 	function C.steady()
-		local want = F.lock ~= nil or F.pending ~= nil
+		local want = (F.model or F.single) ~= nil and (F.lock ~= nil or F.pending ~= nil)
 		if want == (F.steady == true) then return end
 		if P.steady(want, F.model or F.single) or not want then F.steady = want or nil end
 	end

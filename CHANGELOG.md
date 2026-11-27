@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased (not on the Workshop)
+## 2026-11-27
 
-Build `33447FB5`.
+Workshop manifest 7692593176784460855 (build `CBBDC8EA`).
 
 - A unit of one's swings at an enemy who isn't fighting him no longer get cut on their first tick with no damage.
   Walking into such an enemy, the engine hangs a collision interaction on him at `+0xb20`, and while it is set his
@@ -13,6 +13,8 @@ Build `33447FB5`.
   after, with a blow rolled for every click; a held enemy and one entity of a regiment are unchanged. The
   engine side is in `docs/BATTLE_ENGINE_RE.md` section 12. One new harness test (755 + 49), ten new cave
   mutants (58).
+- The fix switches on only while one man or a unit of one is played. The first build, `33447FB5`, also switched
+  it on for a whole regiment's cheer or jump, for whatever man the block last named.
 
 ## 2026-11-26
 

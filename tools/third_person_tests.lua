@@ -1412,6 +1412,15 @@ T.his_collisions_go_only_while_a_clip_of_his_own_plays = function()
 	check(H.steady, "off for a swing")
 	H.tap("F2") H.step(0.1)
 	check(not H.E.F.on and H.steady == nil, "on again once he is let go")
+	-- a regiment played whole: its cheer takes the lock as a swing does, but nobody is played alone, so nothing is
+	-- posted (the block's man can still be a lord played earlier in the battle, now under CA's orders)
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = 21, x = 40}}, enemies = {{x = 40, z = 2.5, men = 21}},
+		features = STRIKES, mct = {combat_one_man = false}})
+	H.P.features.steady, H.steady = true, nil
+	H.select(H.units[2]) H.tap("F2") H.step(0.3)
+	H.tap("O") H.step(0.1)
+	check(H.E.F.lock ~= nil and H.count("steady") == 0, "nothing for a whole regiment's cheer: lock " .. tostring(H.E.F.lock ~= nil)
+		.. ", " .. H.count("steady"))
 	-- multiplayer: never
 	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
 	H.P.features.steady, H.P.features.net, H.steady = true, true, nil

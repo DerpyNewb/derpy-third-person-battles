@@ -69,6 +69,40 @@ PLAIN_FIND = re.compile(
     r"""|[\w\]\)"']\s*:\s*find\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)""")
 
 
+SUB_CALL = re.compile(
+    r"""\bstring\s*\.\s*sub\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)"""
+    r"""|[\w\]\)"']\s*:\s*sub\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)""")
+LEN_GUARD = re.compile(r"#[\w.\[\]]+\s*>=|>=\s*#")
+
+
+def _sub_negative(call_args, dotted, line):
+    """True when string.sub starts from a negative index that can pass the string's start.
+
+    WH3's string.sub (exe+135de90 on 6ae2a00b) adds the length to a negative start and does
+    NOT clamp it: sub(s, -13) on an 8-letter key gives -5, which is zero-extended and copied
+    from 8 GB past the string - an access violation. Great Guilds' spawned-army test crashed
+    a Dread King campaign at its first tick this way (2026-11-27). -1 cannot pass the start
+    and an empty string returns early, so it is exempt, as is a line that tests the length.
+    """
+    depth, parts, cur = 0, [], []
+    for ch in call_args:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    want = 2 if dotted else 1
+    if len(parts) < want:
+        return False
+    start = parts[want - 1].strip()
+    return start.startswith("-") and start != "-1" and not LEN_GUARD.search(line)
+
+
 def _plain_flag(call_args, dotted):
     """True when the plain argument is present and not nil/false.
 
@@ -251,6 +285,13 @@ def check(path, docs):
                                  "string.find init argument - WH3's find silently returns "
                                  "nil from an offset; walk the string with string.gmatch "
                                  "(\"([^|]*)|\" over s .. \"|\") instead"))
+            for dotted_args, method_args in SUB_CALL.findall(line):
+                args, dotted = (dotted_args, True) if dotted_args else (method_args, False)
+                if _sub_negative(args, dotted, line):
+                    hits.append((n, "sub-negative",
+                                 "string.sub with a negative start - WH3's does not clamp "
+                                 "it and crashes the game on a shorter string; use "
+                                 "string.sub(s, #s - n + 1) behind #s >= n"))
     return hits
 
 
@@ -370,6 +411,11 @@ def selftest():
         # and the third-person HUD's id:find("^slot_%d+_key") shipped past it (2026-10-23)
         'local m = id:find("^a")\n'                      # 13 caught, anchored
         'local o = name:find(p, 1, true)\n'              # 14 caught, plain flag
+        'local q = string.sub(k or "", -13) == t\n'      # 15 caught, negative start
+        'local r = g:sub(-#t) == t\n'                    # 16 caught, negative start
+        'local u = string.sub(id, -1) == "|"\n'          # 17 clean, -1 cannot pass the start
+        'local v = #id >= #t and id:sub(-#t) == t\n'     # 18 clean, length tested
+        'local w = string.sub(s, #s - #t + 1) == t\n'    # 19 clean, positive start
     )
     try:
         found = [(n, k) for n, k, _ in check(tmp2, docs)]
@@ -381,7 +427,7 @@ def selftest():
     assert found == [(1, "string-corruption"), (2, "string-corruption"),
                      (5, "find-init"), (6, "find-init"), (7, "find-init"),
                      (9, "find-anchor"), (10, "find-anchor"), (13, "find-anchor"),
-                     (14, "string-corruption")], found
+                     (14, "string-corruption"), (15, "sub-negative"), (16, "sub-negative")], found
 
     # explain() must reach BOTH doc shapes, and must carry the parameter text -
     # the half a signature-only read drops.
