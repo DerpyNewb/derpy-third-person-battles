@@ -120,7 +120,7 @@ Offsets on the model object (the man; for a rider, his mount is a model too, at 
 | `+0x27c` | ticks into his clip; a pending hit lands when it reaches the impact frame (section 12) | live / code, 2026-10-29 |
 | `+0xaf0..+0xb08` | **the pending hit** (section 12): `+0xaf0` result type, `+0xaf4` damage, `+0xaf8` the swing's slot u16, `+0xb00` the victim, `+0xb08` pending | live / code, 2026-10-29 |
 | `+0xb18` / `+0xb1c` | hit points max / current, int32. Subtracted by `exe+310157c(man + 0xb18, n)` | live / code |
-| `+0xb20` | when set, the update calls his virtual `+0x490` instead of the command/action path | code |
+| `+0xb20` | when set, the update calls his virtual `+0x490` instead of the command/action path. It holds a **collision interaction** (section 12) while he is pressed against a man not fighting him | code / live, 2026-11-27 |
 | `+0xb64` / `+0xb68` | child count / array (the subclass's `+0x4a8` repeats the clip on them) | code |
 
 ## 4. The man's virtual methods
@@ -326,6 +326,13 @@ victim (`+0x78`) is non-null with hit points above 0, `+0x278` equals `strike_sl
 is set. The roll is `call [block+0xf8]` (`exe+30a8ab0`) with a 0x20-byte result block on its own stack frame and
 xmm0-3 saved. Then it writes the record and counts the roll at `struck` (`+0xe4`). It ends by jumping back to the
 played man's path, so a strike and a stop on one update both run.
+
+**Steady** (2026-11-27, section 12, "The collision interaction") runs first of all, before the splash test. While the
+block's `steady` byte (`+0x53`) is set and rcx is `man` or `strike_man`, it reads `+0xb20`. When that is non-null and its
+vtable is `collide_vt` or `collide_vt2` (`+0x200`, `+0x208`, the two classes' vtables written from the BUILDS row), it
+writes `+0xb20` = 0 and counts the clear at `steadies` (`+0x210`). It uses only r10, which is volatile and carries no
+argument at a function's entry, so it saves nothing. It never writes the interaction itself. The block grew to 0x218
+bytes for it; `check_mailbox` zeroes the guard table up to `collide_vt`, then writes the two vtables.
 
 **Recipes that made the measurement work** (all in `Modding Files/source/lord_control/probes/`, test scaffolding):
 
@@ -539,6 +546,37 @@ played man (type 1, damage 35, his slot, a victim) under the forced clip, it lan
 - Live, the roll answered about 0.1 s after the post. The struck man lost exactly the rolled damage at the impact
   frame (a hit for 32: 81 -> 49), and a blocked roll moved no hit points.
 - Single player only. In multiplayer the roll would advance one machine's RNG.
+
+**The collision interaction at `+0xb20`** (2026-11-27, 6ae2a00b; the runs are in the 2026-11-27 entry of
+`sessions/THIRD_PERSON_BUGS_20261024.md`). A unit of one played with F2 had his swings at a walking enemy cut on their
+first tick, with no blow armed, in 3 to 9 swings of 12. The cause is an engine object the man's update obeys over his
+clip:
+
+- **What it is.** A collision manager (vtable `exe+3ad58d0`) runs a per-tick pass, vslot `+0x30` = `exe+2f89f14`, over
+  pairs of men in contact. For a man whose bit is clear in its bitset at `+0xc8` (bit = man `+0x60`) and who passes
+  its filter (vslot `+0x28` = `exe+2f96120`), it makes an interaction with vslot `+0x10` = `exe+2f7b418`. That is class
+  `exe+3ad5850` (`exe+2f6de00` / `exe+2f7b32c`), or `exe+39169e0` when the man's `+0x155` is negative, pool-allocated.
+  The interaction keeps its two men at `+0x28`/`+0x30`, a count at `+0x78`, a mode at `+0x88`, an interrupt byte at
+  `+0x98` (vslot `+0x18` = `exe+8fa180` sets it) and a done byte at `+0x20` (vslot `+0x20` = `exe+2f8da34` checks it).
+  On the man it writes `+0xb20` = itself, `+0xb28` a mode, `+0xb2c` 8 or 0x23, `+0xb30` = 1, `+0xb38/+0xb40` the other
+  man and `+0xb44` a heading. Its own tick (vslot `+0x78` = `exe+2f93098`) writes `+0xb20` back every tick until it
+  ends. The release (manager vslot `+0x18` = `exe+2f7dbc8`, then the interaction's `+0x68`, base `exe+2f6ed18`, then
+  `exe+2f899f8`) clears `+0xb20`, clears his bit and takes him off the list.
+- **The filter.** `exe+3073030` refuses a man already in one. `exe+2f9616c` wants `+0x108` bits 4 and 8 clear, `+0x30`
+  null, no clip or a clip that `exe+3060bdc` does not exempt, and an order kind not in {4, 0xc, 0xe, 0xf, 0x10, 0x11}.
+  `exe+3060bdc` exempts slots 1016, 191, 979-981, 988, 989, 1035-1038, 1041 and 1042, and any slot whose category (the
+  32-byte rows at `exe+36d3b20`) is 29. The attack slots 454-463 are not exempt. A man in CA's melee is spared by his
+  order kind 0xe. A man played here has neither, so walking into an enemy who is not fighting him attaches one.
+- **What it does to a clip played here.** With `+0xb20` set, the update takes the vtable `+0x490` branch (section 7),
+  which resets the clip action the play command parks and drops the clip one tick after it shows. Posting an action
+  calls `exe+307c734`, which interrupts the interaction through `+0xb20` (vslot `+0x18`), but the next manager pass
+  makes a new one, because his bit was cleared and he still passes the filter.
+- **The pack's answer: the cave's `steady`** (section 9). While one of his own clips is locked or waits to play
+  (`combat.lua` `C.steady`: `F.lock` or `F.pending`), the update cave clears `+0xb20` at the top of his update when it
+  holds either class. The interaction is left alone, so it keeps his bit, no new one is made, and it ends through its
+  own release. Single player only, like the strike. Live on the fix: 12 of 12 swings played in full and rolled a blow
+  in each of the two walking-enemy passes that cut 9 and 3 before. The held pass and one entity of a regiment never
+  set `+0xb20`, so `steady` cleared nothing there.
 
 ## 13. Multiplayer and the command queue
 

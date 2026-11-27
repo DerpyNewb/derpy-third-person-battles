@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (not on the Workshop)
+
+Build `33447FB5`.
+
+- A unit of one's swings at an enemy who isn't fighting him no longer get cut on their first tick with no damage.
+  Walking into such an enemy, the engine hangs a collision interaction on him at `+0xb20`, and while it is set his
+  update takes a branch that drops a clip the mod played one tick after it shows, so the blow was never rolled.
+  The update cave's new `steady` request clears that pointer at the top of his update while one of his own clips
+  is locked or waiting to play (`combat.lua` `C.steady`), and leaves the interaction itself to end on its own.
+  Single player only. Measured in game against a walking enemy: 9 and 3 swings cut of 12 before, none of 12
+  after, with a blow rolled for every click; a held enemy and one entity of a regiment are unchanged. The
+  engine side is in `docs/BATTLE_ENGINE_RE.md` section 12. One new harness test (755 + 49), ten new cave
+  mutants (58).
+
 ## 2026-11-26
 
 Workshop manifest 4159669248539880597 (build `122E9008`).

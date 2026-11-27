@@ -90,9 +90,9 @@ row is for 9.0.5 (exe build `6ae2a00b`, 2026-11-03).
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 5,700 lines of Lua, plus the generated data), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 754 tests, the two-machine simulation and its 49, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 755 tests, the two-machine simulation and its 49, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 389 probe scripts run against the live game, and 99 mutation sets (1352 mutants) |
+| `Modding Files/source/lord_control/probes/` | 390 probe scripts run against the live game, and 99 mutation sets (1352 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs, the core plan and the multiplayer plan |
 | `docs/history/` | the handoffs written as each part was measured in game, the working ledger, and the multiplayer decision record |
 
@@ -114,7 +114,7 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 754 tests.
+  frame by frame and asserts on the commands the modules sent: 755 tests.
 - **Two machines, simulated.** `tools/third_person_lockstep.lua` runs two copies of the shipped
   modules side by side, each with its own globals, and hands every queued command to both two
   ticks late, as a multiplayer battle does. `third_person_lockstep_tests.lua` fails if the two
@@ -130,12 +130,12 @@ There is no test framework.
 - **The pattern check.** `third_person_patterns.py` checks the byte pattern `platform.lua`
   relies on against `Warhammer3.exe` on disk, and prints the row to add for a build it does not
   know.
-- **The code cave.** The engine's stop and walk calls for the man played, and the roll of his
-  melee blows, run inside his own update on the battle thread, from a small machine-code cave
-  (`third_person_cave.py` holds its assembly). `--check` matches the bytes in `platform.lua` and
-  the site in the exe; `--selftest` runs those bytes under an x64 emulator through every path,
-  and breaks them 48 ways. A second cave reads the multiplayer mode's messages on every machine,
-  and is checked the same way.
+- **The code cave.** The engine's stop and walk calls for the man played, the roll of his melee
+  blows, and clearing the collision that would cut his own swings run inside his own update on
+  the battle thread, from a small machine-code cave (`third_person_cave.py` holds its assembly).
+  `--check` matches the bytes in `platform.lua` and the site in the exe; `--selftest` runs those
+  bytes under an x64 emulator through every path, and breaks them 58 ways. A second cave reads
+  the multiplayer mode's messages on every machine, and is checked the same way.
 - **The HUD.** `gen_third_person_hud.py --check` validates the generated layout.
   `preview_third_person_hud.py` draws the HUD from the shipped Lua at three resolutions, and with
   `--bars` the unit bars for each side at three health levels.

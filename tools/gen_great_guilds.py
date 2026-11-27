@@ -232,11 +232,18 @@ SERVICES = [
          # The Undivided EARN from Chaos corruption (woc spec §3.3): the Chaos Dwarfs' +5.
          "_chs": {
          "effects": [("wh3_main_effect_corruption_chaos_events", "faction_to_province_own", 5)],
+         "text": '{v0:+d} Chaos corruption in every province you own for {turns} turns.'},
+         # NORSCA: CA's own commandment raises Chaos corruption (RACE_UNWANTED_EFFECTS).
+         "_nor": {
+         "effects": [("wh3_main_effect_corruption_chaos_events", "faction_to_province_own", 5)],
          "text": '{v0:+d} Chaos corruption in every province you own for {turns} turns.'}}},
     {"key": "mercenary_contract", "guild": "brass", "rank": 2, "cost": 50, "cd": 8,
      "kind": "bundle", "turns": 6, "name": "Hobgoblin Contracts",
      "effects": [("wh_main_effect_force_all_campaign_recruitment_cost_all", "faction_to_force_own", -15)],
-     "text": '{v0:+d}% recruitment cost in all your armies for {turns} turns.'},
+     "text": '{v0:+d}% recruitment cost in all your armies for {turns} turns.',
+     "for_tag": {"_tmb": {
+         "effects": [("wh_main_effect_agent_recruitment_cost_mod", "faction_to_province_own", -15)],
+         "text": '{v0:+d}% hero recruitment cost in every province you own for {turns} turns.'}}},
     {"key": "guild_loan", "guild": "brass", "rank": 3, "cost": 150, "cd": 12,
      "kind": "gold", "value": 6000, "turns": 10, "with_bundle": True, "drawback": True,
      "name": "Brass Loan",
@@ -249,7 +256,10 @@ SERVICES = [
     {"key": "treasury_seal", "guild": "brass", "rank": 4, "cost": 400, "cd": 16,
      "kind": "bundle", "turns": 12, "name": "The Tablet Seal",
      "effects": [("wh_main_effect_force_all_campaign_upkeep", "faction_to_force_own", -20)],
-     "text": '{v0:+d}% upkeep for all your units for {turns} turns.'},
+     "text": '{v0:+d}% upkeep for all your units for {turns} turns.',
+     "for_tag": {"_tmb": {
+         "effects": [("wh3_main_tmb_rite_cost_mod_crafting", "faction_to_faction_own_unseen", -20)],
+         "text": '{v0:+d}% Mortuary Cult crafting cost for {turns} turns.'}}},
     {"key": "bought_peace", "guild": "brass", "rank": 4, "cost": 400, "cd": 16,
      "kind": "bundle", "turns": 12, "name": "Bought Obedience",
      "effects": [("wh_main_effect_public_order_events", "faction_to_province_own", 3)],
@@ -562,6 +572,8 @@ SERVICES = [
                   "text": '{v0:+d}% spell cost for the army you select for {turns} turns.'},
          "_chs": {"effects": [("wh_main_effect_force_stat_ward_save", "force_to_force_own", 10)],
                   "text": '{v0:+d}% ward save for the army you select for {turns} turns.'},
+         "_nor": {"effects": [("wh_main_effect_force_stat_ward_save", "force_to_force_own", 10)],
+                  "text": '{v0:+d}% ward save for the army you select for {turns} turns.'},
          "": {"effects": [("wh_main_effect_force_stat_physical_resistance", "force_to_force_own", 10)],
                   "text": '{v0:+d}% physical resistance for the army you select for {turns} turns.'}}},
     {"key": "forge_sermons", "guild": "temple", "rank": 2, "cost": 50, "cd": 8,
@@ -640,6 +652,9 @@ SERVICES = [
          "_chs": {"effects": [("wh_main_effect_force_stat_melee_attack", "faction_to_force_own", 4),
                      ("wh_main_effect_force_stat_leadership", "faction_to_force_own", 6)],
                   "text": '{v0:+d} melee attack and {v1:+d} leadership in all your armies for {turns} turns.'},
+         "_nor": {"effects": [("wh_main_effect_force_stat_melee_attack", "faction_to_force_own", 4),
+                     ("wh_main_effect_force_stat_leadership", "faction_to_force_own", 6)],
+                  "text": '{v0:+d} melee attack and {v1:+d} leadership in all your armies for {turns} turns.'},
          "": {"effects": [("wh3_main_effect_winds_of_magic_events", "faction_to_force_own", 5),
                      ("wh_main_effect_force_stat_leadership", "faction_to_force_own", 6)],
                   "text": '{v0:+d} Winds of Magic power reserve each turn and {v1:+d} leadership in all your armies for {turns} turns.'}}},
@@ -691,13 +706,48 @@ SERVICES = [
      "effects": [("wh_main_effect_force_stat_melee_attack", "faction_to_force_own", 6),
                  ("wh3_dlc20_effect_xp_gain_all_units", "faction_to_force_own", 25)],
      "text": '{v0:+d} melee attack and {v1:+d}% experience from battle in all your armies for {turns} turns.'},
+    {"key": "canopic_offering", "guild": "brass", "rank": 2, "cost": 50, "cd": 8,
+     "kind": "resource", "race": "wh2_dlc09_tmb_tomb_kings", "resource": "tmb_canopic_jars",
+     "factor": "missions", "value": 50, "name": "The Royal Offering",
+     "text": "Adds {value} Canopic Jars."},
+    {"key": "the_awakening", "guild": "daemonsmiths", "rank": 3, "cost": 150, "cd": 12,
+     "kind": "race_army", "room": True, "race": "wh2_dlc09_tmb_tomb_kings",
+     "units": "wh2_dlc09_tmb_inf_skeleton_warriors_0,wh2_dlc09_tmb_inf_skeleton_spearmen_0",
+     "name": "The Awakening",
+     "text": 'A unit of Skeleton Warriors and one of Skeleton Spearmen join the army you select, if there is room.'},
+    {"key": "kings_legions", "guild": "immortals", "rank": 4, "cost": 400, "cd": 16,
+     "kind": "bundle", "turns": 10, "race": "wh2_dlc09_tmb_tomb_kings",
+     "name": "The King's Legions",
+     "effects": [("wh3_dlc29_effect_unit_cap_tmb_all", "faction_to_faction_own_unseen", 1)],
+     "text": '{v0:+d} unit capacity for every unit for {turns} turns.'},
+    # NORSCA'S RACE SERVICES (2026-11-26), AFTER the Warriors of Chaos rows: cooldowns are
+    # saved by position. Tithe of Spoils: CA's default hunt-stage payload (200), through
+    # `events`, the factor CA's own victory payload uses. The Wolf-Kin: the Muster's grant,
+    # like Shadows of Eshin. The Hunters' Charge: keyed monster_hunt and not named "The
+    # Great Hunt", because great_hunt is a shared pool row and that is its name; charge
+    # bonus, not CA's monster melee pair, which misses mammoths, giants, dragons,
+    # manticores, chimeras and Ettins (norsca spec plan-time check 6).
+    {"key": "spoils_tithe", "guild": "slavers", "rank": 2, "cost": 50, "cd": 8,
+     "kind": "resource", "race": "wh_dlc08_nor_norsca", "resource": "wh3_dlc27_nor_spoils",
+     "factor": "events", "value": 200, "name": "Tithe of Spoils",
+     "text": "Adds {value} Spoils."},
+    {"key": "wolf_kin", "guild": "khanate", "rank": 3, "cost": 150, "cd": 12,
+     "kind": "race_army", "room": True, "race": "wh_dlc08_nor_norsca",
+     "units": "wh_dlc08_nor_mon_skinwolves_0,wh_dlc08_nor_mon_warwolves_0",
+     "name": "The Wolf-Kin",
+     "text": 'A unit of Skin Wolves and one of Norscan Ice Wolves join the army you select, if there is room.'},
+    {"key": "monster_hunt", "guild": "brass", "rank": 4, "cost": 400, "cd": 16,
+     "kind": "bundle", "turns": 10, "race": "wh_dlc08_nor_norsca",
+     "name": "The Hunters' Charge",
+     "effects": [("wh_main_effect_force_stat_charge_bonus_pct", "faction_to_force_own", 15)],
+     "text": '{v0:+d}% charge bonus in all your armies for {turns} turns.'},
 ]
 # THE GREY SEERS EARN FROM SKAVEN CORRUPTION (skaven spec §4.1), and the Undivided from
 # Chaos corruption (woc spec §3.3), so the two temple services that reduce corruption take
 # the Chaos Dwarf override for both: public order only.
 for _s in SERVICES:
     if _s["key"] in ("purge_unclean", "consecration"):
-        for _t in ("_skv", "_chs"):
+        for _t in ("_skv", "_chs", "_nor"):
             _s["for_tag"][_t] = _s["for_tag"][""]
 
 
@@ -1202,7 +1252,9 @@ RIVAL_PAIRS = [("brass", "khanate"), ("immortals", "daemonsmiths"),
 # A RACE'S OWN PAIRS, mirrored from GG.RIVALS_RACE (woc spec §4.1): the Warriors of Chaos
 # follow the gods' feuds. check_rival_mirror() compares the two.
 RIVAL_PAIRS_RACE = {"_chs": [("immortals", "slavers"), ("overseers", "daemonsmiths"),
-                             ("brass", "khanate")]}
+                             ("brass", "khanate")],
+                    "_tmb": [("khanate", "temple"), ("immortals", "daemonsmiths"),
+                             ("overseers", "slavers")]}
 
 
 def rival_pairs(tag):
@@ -1886,6 +1938,166 @@ FLAVOURS = {
                         "holds."),
         },
     },
+    "_tmb": {
+        "culture": "wh2_dlc09_tmb_tomb_kings", "pics": "tmb", "feed": 110,
+        "guilds": {
+            "brass": "The Royal Treasury",
+            "immortals": "The Tomb Guard",
+            "daemonsmiths": "The Liche Priesthood",
+            "khanate": "The Lahmian Sisterhood",
+            "overseers": "The Necrotects",
+            "slavers": "The Charioteer Nobles",
+        },
+        "ranks": ["Peasant", "Scribe", "Vizier", "Prince", "Priest King"],
+        "services": {
+            "caravan_levy": "Tribute of the Cities",
+            "writ_monopoly": "The Royal Tax",
+            "long_ledger": "Wealth of Nehekhara",
+            "oathbound_draft": "Mend the Ranks",
+            "hire_immortals": "Hire the Tomb Guard",
+            "astragoths_levy": "Muster of the Dead",
+            "forge_rite": "Recovered Scrolls",
+            "bound_blueprint": "Forgotten Lore",
+            "bound_ordnance": "Secrets of Undeath",
+            "hobgoblin_eyes": "Eyes of the Sisterhood",
+            "knife_in_dark": "A Quiet Word",
+            "khans_price": "Neferata's Price",
+            "lash_the_gangs": "Drive the Work Gangs",
+            "raise_ziggurat": "Raise the Monument",
+            "works_of_zharr": "Works of the Kings",
+            "coffle_drive": "Hunt the Tomb Robbers",
+            "slave_tithe": "Plunder Reclaimed",
+            "great_coffle": "The Great Reclamation",
+        },
+        "blurbs": {
+            "caravan_levy": "The Royal Treasury calls in the tribute of the cities. Adds 2,500 gold to your treasury now.",
+            "hire_immortals": "The king's own guard, who stand between him and every blade. Adds one unit of Tomb Guard to the army you select.",
+            "bound_blueprint": "The Liche Priesthood unseals a forgotten tomb of lore. Finishes your current research at once.",
+            "hobgoblin_eyes": "The Sisterhood's agents tell you what they have seen. Reveals one region through the shroud this turn.",
+            "raise_ziggurat": "The Necrotects drive the work gangs through the night. Upgrades one of your buildings to its next level now, at no cost.",
+            "slave_tithe": "The Charioteer Nobles bring back what the tomb robbers stole. "
+                           "Adds 150 Canopic Jars.",
+        },
+        "desc": {
+            "brass": "The royal treasuries, which kept count of every king's wealth in life "
+                     "and keep counting in death.",
+            "immortals": "The kings' own guard, entombed beside them to protect them in "
+                         "death. They remember their duty when they remember little else.",
+            "daemonsmiths": "The undying priests of the Mortuary Cult, keepers of the lore of "
+                            "awakening. They promised the kings eternal life, and the kings "
+                            "have not forgotten how that turned out.",
+            "khanate": "Neferata's daughters, the vampires the kings once marched against. "
+                       "Every king despises them, and every king has used them.",
+            "overseers": "The architects of Nehekhara, who raised its cities and pyramids. In "
+                         "death they still cannot stop building, and still drive the legions "
+                         "like work gangs.",
+            "slavers": "The nobles who ride to war in chariots, as the kings always have. "
+                       "They hunt down tomb robbers and bring back everything that was "
+                       "stolen.",
+        },
+        "bounties": {
+            "brass": ("Tribute Unpaid",
+                      "The Royal Treasury wants that town's wealth in its vaults. Take it "
+                      "intact."),
+            "immortals": ("Guard the King",
+                          "A general threatens the king's lands. The Tomb Guard want that "
+                          "general dead."),
+            "daemonsmiths": ("Lost Lore",
+                             "Whatever that place has learned, the Liche Priesthood wants "
+                             "it. Take it and its scholars."),
+            "khanate": ("A Quiet Death",
+                        "The Sisterhood wants that name silenced, and asks no questions "
+                        "about the method."),
+            "overseers": ("Ground to Build On",
+                          "Take it whole. The Necrotects want walls to rebuild, not rubble."),
+            "slavers": ("Reclaim the Plunder",
+                        "Sack it. The tomb robbers' loot is in that place, and the "
+                        "Charioteer Nobles want it back."),
+        },
+    },
+    # NORSCA (norsca spec, 2026-11-26): the warrior cults, raiders and captives of the
+    # North. No word pass (spec §2.3): Reputation, Favour and "the Great Guilds" stay.
+    "_nor": {
+        "culture": "wh_dlc08_nor_norsca", "pics": "nor", "feed": 120,
+        "guilds": {
+            "brass": "The Monster Hunters",
+            "immortals": "The Berserkers",
+            "daemonsmiths": "The Shaman-Sorcerers",
+            "khanate": "The Skin Wolves",
+            "overseers": "The Thralls",
+            "slavers": "The Reavers",
+        },
+        "ranks": ["Bondsman", "Marauder", "Huskarl", "Chieftain", "Champion"],
+        "services": {
+            "caravan_levy": "Hides and Horns",
+            "writ_monopoly": "The Trophy Trade",
+            "long_ledger": "The Ivory Trade",
+            "oathbound_draft": "Oath on the Axe",
+            "hire_immortals": "Call the Champions",
+            "astragoths_levy": "The War-Horn Sounds",
+            "forge_rite": "Read the Bones",
+            "bound_blueprint": "A Vision in the Smoke",
+            "bound_ordnance": "The Shamans' Council",
+            "hobgoblin_eyes": "Eyes of the Pack",
+            "knife_in_dark": "Kin of the Pack",
+            "khans_price": "Fear of the Pack",
+            "lash_the_gangs": "Work the Thralls",
+            "raise_ziggurat": "Raise the Longhouse",
+            "works_of_zharr": "A Winter of Labour",
+            "coffle_drive": "Raiding Season",
+            "slave_tithe": "The Reavers' Share",
+            "great_coffle": "Fire in the South",
+        },
+        "blurbs": {
+            "caravan_levy": "The Monster Hunters sell what the hunts brought home: furs, "
+                            "horns and ivory. Adds 2,500 gold to your treasury now.",
+            "hire_immortals": "Marauders who have caught the eye of the gods, and want more "
+                              "of it. Adds one unit of Marauder Champions to the army you "
+                              "select.",
+            "bound_blueprint": "The Shaman-Sorcerers see the answer in the smoke before "
+                               "anyone asks the question. Finishes your current research "
+                               "at once.",
+            "hobgoblin_eyes": "The Skin Wolves run far ahead of the warband and come back "
+                              "with news. Reveals one region through the shroud this turn.",
+            "raise_ziggurat": "The Thralls work through the long night. Upgrades one of "
+                              "your buildings to its next level now, at no cost.",
+            "slave_tithe": "The Reavers send back your share of the plunder. Adds 3,000 "
+                           "gold to your treasury.",
+        },
+        "desc": {
+            "brass": "Hunters of the Monstrous Arcanum, who come home with hides, horns and "
+                     "heads.",
+            "immortals": "Warriors who fight in a red frenzy, without armour and without "
+                         "fear, until nothing is left standing.",
+            "daemonsmiths": "Seers who read the Winds of Magic and steer the tribes towards "
+                            "war.",
+            "khanate": "Fallen champions who tear free of their own skins as wolves. The "
+                       "tribes fear them, and use them all the same.",
+            "overseers": "Captives carried home from the raids and worked until they drop. "
+                         "What the North builds, thralls build.",
+            "slavers": "Raiders who fall on the lands to the south and carry off everything "
+                       "worth taking, captives first.",
+        },
+        "bounties": {
+            "brass": ("Furs and Ivory",
+                      "The Monster Hunters want that town's furs and ivory for their own "
+                      "trade. Take it intact."),
+            "immortals": ("Test the Boast",
+                          "A general is said to be the greatest warrior in the south. The "
+                          "Berserkers want that boast tested in blood."),
+            "daemonsmiths": ("The Smoke Has Spoken",
+                             "The Shaman-Sorcerers saw that place burn in the smoke. Make "
+                             "the vision true and leave nothing standing."),
+            "khanate": ("The Pack Is Hungry",
+                        "The Skin Wolves have caught a scent. They want that name silenced, "
+                        "and they leave the method to you."),
+            "overseers": ("More Hands",
+                          "Take it whole. The Thralls want more hands to share the work, "
+                          "not ashes."),
+            "slavers": ("A Raid Worth Telling",
+                        "Sack it. The Reavers want a raid the tribes will sing about."),
+        },
+    },
     # EVERY OTHER RACE. One race-neutral flavour for each culture this mod ships none for.
     # Since 2026-09-24 those races get no guilds and no button, so it is read only by an
     # unsupported human that a hostile service hits in multiplayer. The names say what
@@ -2078,6 +2290,28 @@ POOL_NAMES = {
              "The Grandfather's Builders", "The Garden of Nurgle", "Raids of Excess",
              "Spoils of Excess", "Thralls for the Warbands", "Pits of Delight",
              "The Great Revel", "Despoil Their Pleasures"],
+    "_tmb": ["Offerings to the Temples", "Paid Retainers", "A Loan from the Vaults",
+             "Quarry Charter", "Jars from the Treasury", "The King's Decree",
+             "The Endless March", "Drilled Legions", "Standard of the King",
+             "Rites of Restoration", "Veteran Legions", "The King's Honours",
+             "Hieratic Wards", "Winds of Nehekhara", "Bronze Blades", "Catapult Crews",
+             "Lore of Ages", "The Royal Armoury", "Charmed Sentries", "Lahmian Tutelage",
+             "A Sister's Lessons", "Seeds of Discord", "The Sisterhood's Web",
+             "Poisoned Wells", "Stone from the Quarries", "Desert Roads", "Tomb Wardens",
+             "Raise the Walls", "Master Necrotects", "Monuments to the Kings",
+             "Desert Raids", "Spoils of the Robbers", "Call the Legions", "Chariot Races",
+             "The Great Hunt", "Bury Them in Sand"],
+    "_nor": ["Smoke from the Pyres", "Sellswords from the Wastes", "A Hunter's Debt",
+             "Tanners and Carvers", "Fed by the Hunt", "Feasts in the Hall",
+             "The Red Trail", "Blooded Young", "The War Totem", "Bind the Wounds",
+             "Veteran Huskarls", "Glory in the Sagas", "Charms of Bone", "Call the Winds",
+             "Blessed Blades", "The Hellcannon's Fury", "The Great Seeing",
+             "Guided Throws", "Scent of the Prey", "Whelps of the Pack",
+             "A Werekin's Lessons", "Howls in the Night", "The Pack Grows",
+             "Savaged Herds", "Full Larders", "Cleared Trails", "Troll Wardens",
+             "Raise the Palisade", "Thrall Gangs", "Mead Halls", "Raiding Bands",
+             "Plunder of the Field", "Young Raiders", "Blood on the Ice", "The Long Raid",
+             "Burn the South"],
     "_gen": [
         "Alms and Bribes", "Mercenary Contract", "Guild Loan", "Industry Charter",
         "Treasury Seal", "Bought Peace", "Forced March", "Drillmasters", "Battle Standard",
@@ -2126,6 +2360,12 @@ TEMPLE_NAMES = {
     "_chs": ["The Gods' Regard", "Sermons of Ruin", "The Dark Tithe", "Fervour of the Faithful",
              "Cull the Weak", "Curse of the Gods", "The Incursion", "Flesh Remade",
              "The Star of Chaos"],
+    "_tmb": ["Blessing of Ptra", "Sermons of the Priests", "Temple Offerings",
+             "Wrath of Geheb", "Purifying Rites", "The Gods' Curse", "War of the Gods",
+             "The Gods' Mercy", "Consecrated Sands"],
+    "_nor": ["Eyes of the Four", "Words at the Totem", "Offerings to the Four",
+             "Fury of the Four", "Burn the Weak", "Cursed by the Four", "War on the South",
+             "The Gods' Gift", "Raise the Monoliths"],
     "_gen": ["Blessing", "Sermons", "Tithe", "Zeal", "Purge the Unclean", "Anathema",
              "The Holy War", "Miracle", "Consecration"],
 }
@@ -2201,6 +2441,23 @@ TEMPLE_FLAVOUR = {
               "Undivided want that general's skull. Take it."),
              "Earn Reputation from provinces where Chaos Undivided corruption spreads, victories over the Empire, Kislev and Cathay, successful actions by your unmarked Sorcerers, and the Undivided's buildings.",
              "corrupted provinces, wins over the Empire, Kislev and Cathay"),
+    "_tmb": ("The Cults of the Gods",
+             "The priests of Ptra, Asaph, Djaf and the rest of Nehekhara's gods, who blessed "
+             "the kings in life and still keep their temples in death.",
+             ("Judgement of the Gods",
+              "A vampire general or one of Nagash's servants leads an army in the open. The "
+              "temples want that general destroyed."),
+             "Earn Reputation from provinces in good order, victories over the Vampire Counts and Nagash, and the temples' buildings.",
+             "loyal provinces, wins over vampires and Nagash"),
+    # THE FOUR (norsca spec §3.3): one guild for all four gods, paid by the altars.
+    "_nor": ("The Four",
+             "The Hound, the Eagle, the Serpent and the Crow. Every Northman hopes to catch "
+             "the eye of one of them.",
+             ("A Gift for the Four",
+              "A general of the Empire, Kislev, Bretonnia or Cathay leads an army in the "
+              "open. The Four want that general's head. Take it."),
+             "Earn Reputation from altars to the god you favour most and to Chaos Undivided, victories over the Empire, Kislev, Bretonnia and Cathay, successful actions by Kihar and Killgore Slaymaim, and the Four's buildings.",
+             "altars, wins over the southern realms"),
     "_gen": ("The Faith Guild",
              "The priests and holy orders of the land, whose word moves crowds and whose "
              "blessings move armies.",
@@ -2247,6 +2504,15 @@ TEMPLE_ROUTES = {
                                       "wh_main_chs_chaos_sorcerer_death",
                                       "wh_main_chs_chaos_sorcerer_metal",
                                       "wh_dlc07_chs_chaos_sorcerer_shadow"]},
+    "wh2_dlc09_tmb_tomb_kings": {"devout": True,
+                                 "holy": ["wh_main_vmp_vampire_counts",
+                                          "wh3_dlc29_nag_undead_legions"]},
+    # THE FOUR (norsca spec §3.3): the most-favoured god's altars and every Undivided one.
+    "wh_dlc08_nor_norsca": {"altars": True,
+                            "holy": ["wh_main_emp_empire", "wh3_main_ksl_kislev",
+                                     "wh_main_brt_bretonnia", "wh3_main_cth_cathay"],
+                            "priests": ["wh_dlc08_nor_kihar",
+                                        "wh3_main_ie_nor_killgore_slaymaim"]},
 }
 
 # RECRUITING (2026-10-11): the troops each race's recruiting pays a guild for, in that
@@ -2329,6 +2595,25 @@ RECRUIT_SAYS = {
                           "Nurgle",
              "slavers": "units and characters with the Mark of Slaanesh",
              "temple": "unmarked units and characters"},
+    "_tmb": {"brass": "Nehekharan Horsemen",
+             "immortals": "the Tomb Guard, Nehekharan Warriors, Tomb Heralds and the other "
+                          "infantry",
+             "daemonsmiths": "Necropolis Knights, war machines, Liche Priests and Khatep",
+             "khanate": "Sepulchral Stalkers",
+             "overseers": "the skeleton legions, Tomb Scorpions, sphinxes, titans, Bone "
+                          "Giants and Necrotects",
+             "slavers": "chariots, skeleton cavalry, Tomb Princes and the kings",
+             "temple": "Ushabti, Carrion and Khalida"},
+    "_nor": {"brass": "Marauder Hunters, Fimir, giants, Ettins and the monsters of the hunt",
+             "immortals": "Berserkers, Marauder Champions, Spearmen, Bearmen, Flayerkin, "
+                          "lords and champions",
+             "daemonsmiths": "mammoths, Shaman-Sorcerers and Sayl",
+             "khanate": "Skin Wolves, Ice Wolves, Warhounds, Werekin, Fimir Balefiends and "
+                        "Beorg",
+             "overseers": "trolls",
+             "slavers": "Marauders, horsemen and chariots",
+             "temple": "Chaos Warriors and spawn from the altars and the gods' own "
+                       "champions"},
 }
 
 
@@ -2402,6 +2687,17 @@ RACE_UNWANTED_EFFECTS = {
             "the Undivided earn from Chaos corruption; reducing it works against their "
             "own route",
     },
+    "_tmb": {
+        "wh_main_effect_force_all_campaign_recruitment_cost_all":
+            "no Tomb Kings unit costs gold to recruit (main_units.recruitment_cost 0)",
+        "wh_main_effect_force_all_campaign_upkeep":
+            "no Tomb Kings unit pays upkeep (main_units.upkeep_cost 0)",
+    },
+    "_nor": {
+        "wh3_main_effect_corruption_reduction_events":
+            "CA's own Norscan commandment (wh3_main_ie_edict_nor_corruption) raises Chaos "
+            "corruption +3 on purpose; lowering it works against the race's design",
+    },
 }
 
 # EFFECTS THIS PACK MINTS, where vanilla has none. Each is a clone of the donor named
@@ -2437,7 +2733,7 @@ def minted_tables():
 # Spec: docs/superpowers/specs/2026-10-04-great-guilds-halls-design.md. Mirrored by the
 # GG.HALL_* block in zzz_derpy_guilds.lua; check_hall_mirror() compares the two.
 HALL_TAGS = ["", "_emp", "_dwf", "_brt", "_cth", "_ksl", "_def", "_hef",
-             "_skv", "_chs"]   # races with halls
+             "_skv", "_chs", "_tmb", "_nor"]   # races with halls
 HALL_RANK = [2, 4, 5]            # rank needed for level 0, 1, 2 (level 2 also needs the lead)
 HALL_REP = [4, 8, 15]            # reputation per turn, per hall, by level
 HALL_OFF_MAX = 15                # most % a guild's halls take off its services
@@ -2504,6 +2800,34 @@ HALL_EXTRA = {
     ("khanate", "_chs"): ("wh_main_effect_agent_action_success_chance_enemy_building",
                           "region_to_character_enemy", [-10, -15, -20],
                           "Enemy heroes' actions here: success chance %d%%"),
+    ("immortals", "_tmb"): ("wh2_dlc09_effect_unit_cap_tmb_inf_tomb_guard_0",
+                            "building_to_faction_own", [1, 1, 2],
+                            "Unit capacity for Tomb Guard +%d"),
+    ("temple", "_tmb"): ("wh2_dlc09_effect_unit_cap_tmb_mon_ushabti_0",
+                         "building_to_faction_own", [1, 1, 2],
+                         "Unit capacity for Ushabti +%d"),
+    ("slavers", "_tmb"): ("wh2_dlc09_effect_unit_cap_tmb_veh_skeleton_chariot_0",
+                          "building_to_faction_own", [1, 2, 2],
+                          "Unit capacity for Skeleton Chariots +%d"),
+    ("overseers", "_tmb"): ("wh2_dlc09_effect_unit_cap_tmb_mon_tomb_scorpion_0",
+                            "building_to_faction_own", [1, 2, 2],
+                            "Unit capacity for Tomb Scorpions +%d"),
+    ("brass", "_tmb"): ("wh2_dlc09_effect_unit_cap_tmb_cav_nehekhara_horsemen_0",
+                        "building_to_faction_own", [1, 1, 1],
+                        "Unit capacity for Nehekharan Horsemen +%d"),
+    ("daemonsmiths", "_tmb"): ("wh3_main_effect_unit_cap_tmb_cavalry_3_1",
+                               "building_to_faction_own", [1, 1, 1],
+                               "Unit capacity for Necropolis Knights and Sepulchral "
+                               "Stalkers +%d"),
+    ("khanate", "_tmb"): ("wh_main_effect_agent_action_success_chance_enemy_building",
+                          "region_to_character_enemy", [-10, -15, -20],
+                          "Enemy heroes' actions here: success chance %d%%"),
+    # NORSCA (norsca spec §7): the Shaman-Sorcerers' hall trains no unit and raises the
+    # Shaman-Sorcerer cap instead, on CA's own chaos-chain pair (1-2 in vanilla), like the
+    # Empire's College.
+    ("daemonsmiths", "_nor"): ("wh_dlc08_effect_agent_cap_increase_wizard",
+                               "faction_to_faction_own_unseen", [1, 2, 3],
+                               "Shaman-Sorcerers you may recruit +%d"),
 }
 
 # THE TEMPLE BY ITS OWN LORE (2026-10-09 spec, docs/superpowers/specs/
@@ -2526,6 +2850,13 @@ TEMPLE_LORE = {
     # THE UNDIVIDED (woc spec §6): the Sorcerers are its priests, so the Winds ladder, like
     # the Chaos Dwarfs' and the Skaven's.
     "_chs": dict(_WINDS_LORE),
+    "_tmb": {"rank": ("wh_main_effect_force_stat_ward_save", "faction_to_force_own"),
+             "ladder": _TEMPLE_FLAT, "lead": 5, "sign": 1,
+             "blurb": ("%+d%% ward save", "for every army")},
+    # THE FOUR (norsca spec §6): a warrior's faith with no priestly order, so leadership.
+    "_nor": {"rank": ("wh_main_effect_force_stat_leadership", "faction_to_force_own"),
+             "ladder": _TEMPLE_FLAT, "lead": 5, "sign": 1,
+             "blurb": ("%+d leadership", "for every army")},
     "_dwf": {"rank": ("wh_main_effect_force_stat_magic_resistance", "faction_to_force_own"),
              "ladder": _TEMPLE_PCT, "lead": 10, "sign": 1,
              "blurb": ("%+d%% spell resistance", "for every army")},
@@ -2600,6 +2931,15 @@ _TEMPLE_HALL_SEAT = {
              [2, 4, 6], "Chaos Undivided corruption +%d in this settlement",
              ("wh3_main_effect_corruption_chaos_events", "faction_to_province_own", 2),
              "Chaos Undivided corruption %+d in every province"),
+    "_tmb": ("wh_main_effect_public_order_base", "province_to_province_own_unseen",
+             [2, 4, 6], "Public order +%d in this province",
+             ("wh_main_effect_public_order_events", "faction_to_province_own", 1),
+             "Public order %+d in every province"),
+    # NORSCA (norsca spec §6): CA's own worship chain puts this pair at 2/4/6.
+    "_nor": ("wh3_main_effect_corruption_chaos_buildings", "region_to_region_own",
+             [2, 4, 6], "Chaos Undivided corruption +%d in this settlement",
+             ("wh3_main_effect_corruption_chaos_events", "faction_to_province_own", 2),
+             "Chaos Undivided corruption %+d in every province"),
 }
 for _t, (_he, _hs, _hv, _ht, _seat, _st) in _TEMPLE_HALL_SEAT.items():
     TEMPLE_LORE[_t].update(hall=(_he, _hs, _hv), hall_text=_ht, seat=_seat, seat_text=_st)
@@ -2667,7 +3007,7 @@ HALL_ICON = {(g, t): "derpy_gg_hall_%s%s" % (g, t)
              for g in ("brass", "immortals", "daemonsmiths", "khanate", "overseers", "slavers",
                        "temple")
              for t in ["", "_emp", "_dwf", "_brt", "_cth", "_ksl", "_def", "_hef", "_skv",
-                       "_chs"]}
+                       "_chs", "_tmb", "_nor"]}
 # Races whose halls draw one icon PER LEVEL (2026-10-08, Medieval II-style: the building
 # grows with each upgrade), staged by make_guild_icons.py under the level's own key.
 # Empty since 2026-10-21: the author asked for CA's own building icons back on every race.
@@ -2806,6 +3146,36 @@ HALL_RACES = {
              # overflows the page's 21.
              "where": "Only a Dark Fortress or the Glottkin's Gardens of Nurgle can hold "
                       "one; a Chaos Altar is too small."},
+    "_tmb": {"set": "wh2_dlc09_bas_tmb",
+             "nouns": ("Sepulchre", "Mausoleum", "Necropolis"),
+             "units": {"brass": "wh2_dlc09_tmb_cav_nehekhara_horsemen_0",
+                       "immortals": "wh2_dlc09_tmb_inf_tomb_guard_0",
+                       "daemonsmiths": "wh2_dlc09_tmb_cav_necropolis_knights_0",
+                       "khanate": None,
+                       "overseers": "wh2_dlc09_tmb_mon_tomb_scorpion_0",
+                       "slavers": "wh2_dlc09_tmb_veh_skeleton_chariot_0",
+                       "temple": "wh2_dlc09_tmb_mon_ushabti_0"},
+             "temple_nouns": ("Shrine of the Gods", "Temple of the Gods",
+                              "Great Temple of the Gods")},
+    # NORSCA (norsca spec §7). The donor is found by rule. SETTLEMENT TYPES: since 9.0 a
+    # Norscan settlement is typed, and its slots offer only the chains listed for that type
+    # (as the Chaos Dwarfs'). Never the god altars' types: an altar's main building has two
+    # levels and a hall's first needs a third.
+    "_nor": {"set": "wh_main_bas_nor",
+             # Sayl's and Throgg's own sets (still Norsca).
+             "extra_sets": ["wh3_dlc27_nor_sayl", "wh3_dlc27_nor_throgg"],
+             "settlement_types": ["wh3_dlc27_norsca_core_settlement"],
+             "nouns": ("Lodge", "Longhouse", "Great Hall"),
+             "units": {"brass": "wh_dlc08_nor_inf_marauder_hunters_1",
+                       "immortals": "wh_dlc08_nor_inf_marauder_berserkers_0",
+                       "daemonsmiths": None,
+                       "khanate": "wh_dlc08_nor_mon_skinwolves_0",
+                       "overseers": None,
+                       "slavers": "wh_main_nor_inf_chaos_marauders_0",
+                       "temple": None},
+             "temple_nouns": ("Totem of the Four", "Altar of the Four",
+                              "Monolith of the Four"),
+             "where": "An altar to the gods is too small to hold one."},
 }
 # An availability set a faction of a hall race uses INSTEAD of its race's set, deliberately
 # left without halls (check_halls -> _set_problems), with the reason.
@@ -3464,11 +3834,12 @@ def help_pages(tag=""):
                                   if gk == "temple" else EARN_SHORT[gk]))
     page2 += [
         # Derived per flavour, so an Empire page names the Engineers' School and not the
-        # Daemonsmiths. Same three guilds, same order as the Chaos Dwarf sentence.
+        # Daemonsmiths. Same three guilds, same order as the Chaos Dwarf sentence, unless
+        # the race's own building words send a forge or a dock elsewhere (HELP_BUILDINGS).
         "-Completing a building pays its guild: a forge the %s, a dock the %s, a "
         "barracks the %s. Higher levels pay more. The building card names its guild."
-        % (short_name("daemonsmiths", tag), short_name("brass", tag),
-           short_name("immortals", tag)),
+        % tuple(short_name(g, tag) for g in HELP_BUILDINGS.get(
+            tag, ("daemonsmiths", "brass", "immortals"))),
         # ONE LINE, NOT TWO (2026-09-23). The Empire's rivalry bullet below wraps where
         # ours does not and put this page at 22 of the panel's 21 slots; shortening this
         # bullet is the fix the flavours spec names, and it applies to every race. Its
@@ -3935,6 +4306,9 @@ def _build_one(tag):
                       ("src_court", "court actions"),
                       ("src_undercity", "under-cities founded"),
                       ("src_gifts", "Souls given"),
+                      ("src_crafted", "crafting rituals"),
+                      ("src_spoils", "Spoils from the hunts"),
+                      ("src_altars", "altars to the gods"),
                       # THE TEMPLE'S ROUTES (2026-10-04).
                       ("src_devout", "provinces in good order"),
                       ("src_chaos", "provinces free of corruption"),
@@ -4014,6 +4388,8 @@ def _build_one(tag):
                       ("log_earn_court", "a court action succeeded"),
                       ("log_earn_undercity", "an under-city was founded"),
                       ("log_earn_gifts", "Souls were given to a god"),
+                      ("log_earn_crafted", "a crafting ritual was completed"),
+                      ("log_earn_spoils", "Spoils came back from a hunt"),
                       ("log_ai_bounty", "finished a bounty and earned"),
                       ("log_your_char", "one of your lords or heroes"),
                       ("take", "Take"), ("bounty_none", "No bounties this turn."),
@@ -4093,6 +4469,8 @@ def _build_one(tag):
                       # have a unit mapped. Refusing is right - the old fallback would
                       # have dropped a Chaos Dwarf regiment into an Araby army.
                       ("no_unit", 'This guild has no regiment available for your race. You can use its other services.'),
+                      ("capped_short", "No room"),
+                      ("capped", 'You already have as many of these units as your unit capacity allows.'),
                       # THE LEAGUE TABLE. The Standings tab printed one name per guild
                       # and threw the other five away, so nobody could see second place
                       # or their own position.
@@ -5185,7 +5563,7 @@ def check_mct_names():
 # Their labels name the route after the role name and a colon; GGUI.name_mct renames only
 # cap_temple, since a route is not a guild name.
 TEMPLE_RATE_KEYS = ("rate_temple_devout", "rate_temple_chaos", "rate_temple_holy",
-                    "rate_temple_taint")
+                    "rate_temple_taint", "rate_temple_altar")
 
 
 def _mct_label_problem(mct, key, g):
@@ -5306,10 +5684,10 @@ def check_hire_units():
 def _route_line(culture, r):
     # THE TAINT NAMES A RESOURCE (woc spec §3.3): compared as its key, never as a flag, or a
     # race counting the wrong corruption passes.
-    return "%s|%d|%d|%d|%s|%s|%s" % (culture, bool(r.get("devout")), bool(r.get("chaos")),
-                                     bool(r.get("vampiric")), ",".join(sorted(r.get("holy", []))),
-                                     ",".join(sorted(r.get("priests", []))),
-                                     r.get("taint") or "")
+    return "%s|%d|%d|%d|%s|%s|%s|%d" % (culture, bool(r.get("devout")), bool(r.get("chaos")),
+                                        bool(r.get("vampiric")), ",".join(sorted(r.get("holy", []))),
+                                        ",".join(sorted(r.get("priests", []))),
+                                        r.get("taint") or "", bool(r.get("altars")))
 
 
 # The Lua's test for "this foreign slot is an under-city" (gg_undercity_building).
@@ -5384,7 +5762,7 @@ def check_temple_routes():
             "  local function b(x) return x and 1 or 0 end\n"
             "  io.write(c, '|', b(r.devout), '|', b(r.chaos), '|', b(r.vampiric), '|',\n"
             "           table.concat(h, ','), '|', table.concat(p, ','), '|',\n"
-            "           tostring(r.taint or ''), '\\n')\n"
+            "           tostring(r.taint or ''), '|', b(r.altars), '\\n')\n"
             "end\n")
     fd, path = tempfile.mkstemp(suffix=".lua")
     try:
@@ -6949,12 +7327,16 @@ EARN_ROUTES = {"caravan": "brass", "grudges": "immortals", "reclaimed": "immorta
                "motherland": "daemonsmiths", "chivalry": "immortals",
                "captives": "slavers", "court": "khanate", "undercity": "khanate",
                # GIFTS OF THE GODS (woc spec §3.2): no single guild - the pool names the god.
-               "gifts": None}
+               "gifts": None,
+               "crafted": "daemonsmiths",
+               # SPOILS OF THE HUNT (norsca spec §3.2).
+               "spoils": "brass"}
 EARN_OF = {"wh3_dlc23_chd_chaos_dwarfs": "caravan", "wh3_main_cth_cathay": "caravan",
            "wh_main_dwf_dwarfs": "grudges", "wh_main_emp_empire": "reclaimed",
            "wh3_main_ksl_kislev": "motherland", "wh_main_brt_bretonnia": "chivalry",
            "wh2_main_def_dark_elves": "captives", "wh2_main_hef_high_elves": "court",
-           "wh2_main_skv_skaven": "undercity", "wh_main_chs_chaos": "gifts"}
+           "wh2_main_skv_skaven": "undercity", "wh_main_chs_chaos": "gifts",
+           "wh2_dlc09_tmb_tomb_kings": "crafted", "wh_dlc08_nor_norsca": "spoils"}
 
 
 # EACH RACE BENDS ONE RULE, mirrored from GG.TWISTS (whole percentages).
@@ -6969,6 +7351,8 @@ TWISTS = {
     "wh2_main_hef_high_elves": {"favour_cap": 150},
     "wh2_main_skv_skaven": {"rate_rivalry": 150, "demand_penalty": 0},
     "wh_main_chs_chaos": {"rate_decay": 150, "demand_reward": 150},
+    "wh2_dlc09_tmb_tomb_kings": {"rate_rivalry": 150, "rate_decay": 50},
+    "wh_dlc08_nor_norsca": {"rate_bounty_fail": 200, "demand_reward": 150},
 }
 
 # THE DOUBTER ASKS NOTHING, mirrored from GG.NO_DEMAND (woc spec §4.4).
@@ -6986,6 +7370,11 @@ def check_no_demand_mirror(lua=None):
             got[culture] = sorted(re.findall(r"(\w+)\s*=\s*true", body))
     want = dict((c, sorted(g)) for c, g in NO_DEMAND.items())
     return [] if got == want else ["GG.NO_DEMAND is %r and this file says %r" % (got, want)]
+
+# WHO A FORGE, A DOCK AND A BARRACKS PAY on Help page 2, where a race's building words
+# (GG.BUILDING_THEME_RACE) send them somewhere other than the shared words do. Norsca's
+# smithy is the Thralls' and its ports are the Reavers' (norsca spec §3.6).
+HELP_BUILDINGS = {"_nor": ("overseers", "slavers", "immortals")}
 
 # EACH RACE'S OWN WORDS for its page and its cards: the label on a race card, how its
 # guilds earn ({g} is that guild's short name in this flavour, after "the"), and the rule
@@ -7035,6 +7424,16 @@ RACE_TEXT = {
              "earn": "Spending Souls on a god's gifts pays that god: one Reputation for every "
                      "25 Souls.",
              "twist": ("The Fickle Gods", "each god charges half again as much upkeep, and a "
+                       "demand you pay is worth half again as much.")},
+    "_tmb": {"label": "Tomb Kings",
+             "earn": "Completing a Mortuary Cult crafting ritual pays the {g}.",
+             "twist": ("The dead remember", "earning with a guild takes half again as much "
+                       "from its rival, and each guild charges half the upkeep.")},
+    # BOASTS (norsca spec §2.1): Wulfrik's curse came from a boast made in sight of the gods.
+    "_nor": {"label": "Norsca",
+             "earn": "Spoils from the hunts of the Monstrous Arcanum pay the {g}: one "
+                     "Reputation for every 25 Spoils.",
+             "twist": ("Boasts", "a bounty you fail costs twice as much Reputation, and a "
                        "demand you pay is worth half again as much.")},
     "_gen": {"label": "Own", "earn": None, "twist": None},
 }
@@ -7411,6 +7810,13 @@ def _stype_problems(ht):
         own = [c for c, s in avail.items() if s and s <= sets]
         used = collections.Counter(t for c in own for t in st.get(c, ()))
         need = {t for t, n in used.items() if n * 2 > len(own)}
+        # NORSCA (2026-11-26): half its own chains are altar chains, listed per god's altar
+        # type, so the core settlement's type is on 42 of its 91 own chains - just short -
+        # but on 77 of the 127 chains its sets offer. A type most of either count carries
+        # is one the halls need. Every other race's answer is unchanged by the second count.
+        offered = [c for c, s in avail.items() if s & sets]
+        used_all = collections.Counter(t for c in offered for t in st.get(c, ()))
+        need |= {t for t, n in used_all.items() if n * 2 > len(offered)}
         for g in GUILDS:
             ch = hall_chain(g, tag)
             for t in sorted(need - have[ch]):
@@ -8067,8 +8473,8 @@ def selftest():
             assert not re.search(r"%[-+]?n", r["text"]),                 "a bundle description has no value to substitute: " + r["key"]
     shared = [s for s in SERVICES if not s.get("race")]
     assert len(shared) == 63, "63 shared services, got %d" % len(shared)
-    assert len(SERVICES) - len(shared) == 35, (
-        "35 race services, got %d" % (len(SERVICES) - len(shared)))
+    assert len(SERVICES) - len(shared) == 41, (
+        "41 race services, got %d" % (len(SERVICES) - len(shared)))
     assert len(set(s["key"] for s in SERVICES)) == len(SERVICES), "service keys unique"
     for g in GUILDS:
         mine = [s for s in shared if s["guild"] == g]
@@ -8105,7 +8511,7 @@ def selftest():
     assert len(hostile) == 1, "exactly one outward-facing service, got %d" % len(hostile)
     # ------------------------------------------------------------ the flavours ---
     assert list(FLAVOURS) == ["", "_emp", "_dwf", "_brt", "_cth", "_ksl", "_def", "_hef",
-                             "_skv", "_chs", "_gen"], list(FLAVOURS)
+                             "_skv", "_chs", "_tmb", "_nor", "_gen"], list(FLAVOURS)
     full = build()
     n = len(FLAVOURS)
     assert len(full["missions"]) == want_rows * n, len(full["missions"])
@@ -8413,7 +8819,7 @@ def selftest():
     # the old public order hall effect - that is what every race matched before TEMPLE_LORE.
     for _t in HALL_TAGS:
         _why = _cai_donor(HALL_RACES[_t], "temple", True)[1]
-        if _t in ("_dwf", "_brt", "_ksl", "_skv", "_chs"):
+        if _t in ("_dwf", "_brt", "_ksl", "_skv", "_chs", "_tmb", "_nor"):
             assert "carries the hall's own effect " + hall_effect("temple", _t)[0] in _why, \
                 (_t, _why)
         else:
@@ -8472,7 +8878,8 @@ def selftest():
     for _t, _set in (("_emp", "wh_main_bas_emp"), ("_dwf", "wh_main_bas_dwf"),
                      ("_brt", "wh_main_bas_brt"), ("_cth", "wh3_main_bas_cth"),
                      ("_ksl", "wh3_main_bas_ksl"), ("_def", "wh2_main_bas_def"),
-                     ("_hef", "wh2_main_bas_hef"), ("_skv", "wh2_main_bas_skv")):
+                     ("_hef", "wh2_main_bas_hef"), ("_skv", "wh2_main_bas_skv"),
+                     ("_nor", "wh_main_bas_nor")):
         _old_r = HALL_RACES.get(_t)
         HALL_RACES[_t] = {"set": _set, "nouns": ("a", "b", "c"), "units": {}}
         try:
@@ -8522,11 +8929,11 @@ def selftest():
     for breakage in ("placement", "unit", "value", "instance", "dlc", "desc", "panel", "score",
                      "set", "seticon", "seticon_case", "setloc", "stype"):
         assert check_halls(_break=breakage), "check_halls missed " + breakage
-    # THE GUILD HALLS TAB: each of the 10 races has its own shown set, a lowercase full-path
+    # THE GUILD HALLS TAB: each of the 11 races has its own shown set, a lowercase full-path
     # icon, a name and a description, every hall chain is junctioned to it and nothing else,
     # and no set key collides with a CA one.
     _hs = {r["key"]: r for r in ht["building_sets"]}
-    assert sorted(_hs) == sorted(hall_set_key(t) for t in HALL_TAGS) and len(_hs) == 10
+    assert sorted(_hs) == sorted(hall_set_key(t) for t in HALL_TAGS) and len(_hs) == 12
     _ca_keys = {r["key"] for r in live_rows("building_sets")}
     assert not (set(_hs) & _ca_keys), "a hall set key is one of CA's"
     assert all(r["show_in_ui"] == "true" and r["icon"] == r["icon"].lower()
@@ -8571,6 +8978,8 @@ def selftest():
         "_hef": ("wh2_main_effect_agent_recruitment_xp_hef_mage", [1, 2, 3]),
         "_skv": ("wh3_main_effect_corruption_skaven_buildings", [2, 4, 6]),
         "_chs": ("wh3_main_effect_corruption_chaos_buildings", [2, 4, 6]),
+        "_tmb": ("wh_main_effect_public_order_base", [2, 4, 6]),
+        "_nor": ("wh3_main_effect_corruption_chaos_buildings", [2, 4, 6]),
         "": ("wh3_dlc23_effect_pooled_resource_conclave_influence_gain_temples", [5, 10, 15]),
     }
     for t, (ek, vals) in want_hall.items():
@@ -8579,8 +8988,9 @@ def selftest():
             assert len(got) == 1 and got[0]["value"] == str(vals[n]), (t, n, hj[hall_key("temple", n, t)])
             # A damaged hall pays half, toward zero: the Dark Elf 1s pay nothing damaged.
             assert got[0]["value_damaged"] == str(int(vals[n] / 2)), got
-        assert not any(r["effect"] == "wh_main_effect_public_order_base"
-                       for n in range(3) for r in hj[hall_key("temple", n, t)]), t
+        if t != "_tmb":
+            assert not any(r["effect"] == "wh_main_effect_public_order_base"
+                           for n in range(3) for r in hj[hall_key("temple", n, t)]), t
     # The Empire keeps its wizard cap; the Skaven extra became the main effect, once.
     assert sum(r["effect"] == "wh_main_effect_agent_cap_increase_wizard_empire"
                for r in hj[hall_key("temple", 2, "_emp")]) == 1
@@ -8610,6 +9020,41 @@ def selftest():
     chs_halls = {hall_key(g, n, "_chs") for g in GUILDS for n in range(3)}
     assert not [r for r in ht2["building_units_allowed"] if r["building"] in chs_halls], \
         "a Warriors of Chaos hall trains a unit"
+    want_tmb = {
+        "immortals": ("wh2_dlc09_effect_unit_cap_tmb_inf_tomb_guard_0", [1, 1, 2]),
+        "temple": ("wh2_dlc09_effect_unit_cap_tmb_mon_ushabti_0", [1, 1, 2]),
+        "slavers": ("wh2_dlc09_effect_unit_cap_tmb_veh_skeleton_chariot_0", [1, 2, 2]),
+        "overseers": ("wh2_dlc09_effect_unit_cap_tmb_mon_tomb_scorpion_0", [1, 2, 2]),
+        "brass": ("wh2_dlc09_effect_unit_cap_tmb_cav_nehekhara_horsemen_0", [1, 1, 1]),
+        "daemonsmiths": ("wh3_main_effect_unit_cap_tmb_cavalry_3_1", [1, 1, 1]),
+    }
+    for g, (ek, vals) in want_tmb.items():
+        for n in range(3):
+            rows = hj[hall_key(g, n, "_tmb")]
+            got = [r for r in rows if r["effect"] == ek]
+            assert (len(got) == 1 and got[0]["effect_scope"] == "building_to_faction_own"
+                    and got[0]["value"] == str(vals[n])), (g, n, rows)
+    tmb_trains = {r["building"] for r in ht2["building_units_allowed"]
+                  if r["building"].endswith("_tmb")}
+    assert not any(hall_key("khanate", n, "_tmb") in tmb_trains for n in range(3)), \
+        "the Sisterhood's hall trains a unit"
+    assert all(hall_key(g, 2, "_tmb") in tmb_trains for g in want_tmb), tmb_trains
+    # NORSCA'S HALLS (norsca spec §7): four train their unit at every level; the Thralls, the
+    # Four and the Shaman-Sorcerers train none, and the Shaman-Sorcerers' raises the cap.
+    nor_units = {(r["building"], r["unit"]) for r in ht2["building_units_allowed"]
+                 if r["building"].endswith("_nor")}
+    assert nor_units == {(hall_key(g, n, "_nor"), u) for n in range(3) for g, u in (
+        ("brass", "wh_dlc08_nor_inf_marauder_hunters_1"),
+        ("immortals", "wh_dlc08_nor_inf_marauder_berserkers_0"),
+        ("khanate", "wh_dlc08_nor_mon_skinwolves_0"),
+        ("slavers", "wh_main_nor_inf_chaos_marauders_0"))}, sorted(nor_units)
+    for n in range(3):
+        got = [r for r in hj[hall_key("daemonsmiths", n, "_nor")]
+               if r["effect"] == "wh_dlc08_effect_agent_cap_increase_wizard"]
+        assert (len(got) == 1 and got[0]["effect_scope"] == "faction_to_faction_own_unseen"
+                and got[0]["value"] == str(n + 1)), (n, got)
+    assert {r["settlement_type"] for r in ht2["settlement_type_to_building_chains_junctions"]
+            if r["building_chain"].endswith("_nor")} == {"wh3_dlc27_norsca_core_settlement"}
     sj = {r["effect_bundle_key"]: r for r in ht2["effect_bundles_to_effects_junctions"]}
     want_seat = {
         "_emp": ("wh2_dlc14_effect_magic_cost_all_lores_percentage", "-5"),
@@ -8621,6 +9066,8 @@ def selftest():
         "_hef": ("wh_main_effect_force_stat_magic_resistance", "5"),
         "_skv": ("wh3_main_effect_corruption_skaven_events", "2"),
         "_chs": ("wh3_main_effect_corruption_chaos_events", "2"),
+        "_tmb": ("wh_main_effect_public_order_events", "1"),
+        "_nor": ("wh3_main_effect_corruption_chaos_events", "2"),
         "": ("wh_main_effect_force_stat_magic_resistance", "5"),
     }
     for t, (ek, v) in want_seat.items():
@@ -8641,7 +9088,9 @@ def selftest():
         "_dwf": ("wh_main_effect_force_stat_magic_resistance", [3, 6, 10, 15], 10),
         "_brt": ("wh_main_effect_force_stat_ward_save", [2, 4, 6, 8], 5),
         "_hef": ("wh_main_effect_force_stat_ward_save", [2, 4, 6, 8], 5),
+        "_tmb": ("wh_main_effect_force_stat_ward_save", [2, 4, 6, 8], 5),
         "_ksl": ("wh_main_effect_force_stat_leadership", [2, 4, 6, 8], 5),
+        "_nor": ("wh_main_effect_force_stat_leadership", [2, 4, 6, 8], 5),
         "_gen": ("wh_main_effect_force_stat_leadership", [2, 4, 6, 8], 5),
         "_def": ("wh_main_effect_force_stat_melee_attack", [2, 3, 4, 6], 4),
     }
@@ -8682,6 +9131,20 @@ def selftest():
     assert _svc("holy_war", "_skv") == sorted([(WE, FAC, "5"),
                                               ("wh_main_effect_character_stat_miscast", FAC, "-10")])
     assert _svc("hashut_blessing", "") == [("wh_main_effect_force_stat_physical_resistance", F2F, "10")]
+    # NORSCA (norsca spec §6): the Warriors of Chaos' ward and holy war, Chaos corruption
+    # for Temple Bribes, and public order only where a service would lower corruption.
+    MA = "wh_main_effect_force_stat_melee_attack"
+    assert _svc("hashut_blessing", "_nor") == [(WS, F2F, "10")]
+    assert _svc("holy_war", "_nor") == sorted([(MA, FAC, "4"), (LD, FAC, "6")])
+    assert _svc("alms_and_bribes", "_nor") == [
+        ("wh3_main_effect_corruption_chaos_events", "faction_to_province_own", "5")]
+    for _k in ("purge_unclean", "consecration"):
+        assert not any(e[0] == "wh3_main_effect_corruption_reduction_events"
+                       for e in _svc(_k, "_nor")), _k
+    assert _svc("monster_hunt", "_nor") == [
+        ("wh_main_effect_force_stat_charge_bonus_pct", FAC, "15")]
+    assert "a forge the Thralls, a dock the Reavers, a barracks the Berserkers" in \
+        " ".join(help_pages("_nor")[1]), "Norsca's smithy and ports have their own guilds"
     assert _svc("zeal", "_dwf") == _svc("zeal", "_gen"), "Slayer's Oath keeps the shared zeal"
     assert _svc("holy_war", "_gen") == sorted([(LD, FAC, "6"),
         ("wh_main_effect_force_all_campaign_replenishment_rate", FAC, "10")]), "_gen unchanged"

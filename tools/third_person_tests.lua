@@ -1385,6 +1385,40 @@ T.one_mans_clip_splashes_only_where_his_weapon_does = function()
 	check(H.nosplash == nil, "nothing in multiplayer")
 end
 
+-- a player, 2026-11-27: a lord's swings at an enemy not fighting him were cut and dealt nothing. The engine's collision
+-- with that enemy (his +0xb20) dropped the clip played here one tick in; the cave clears it on him while a clip of his own
+-- is locked or waits to play (P.steady), and only then, so he meets other men as CA has it
+T.his_collisions_go_only_while_a_clip_of_his_own_plays = function()
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.P.features.steady, H.steady = true, nil
+	H.step(0.2)
+	check(H.count("steady") == 0, "nothing with no clip of his")
+	H.tap("Left mouse") H.step(0.05)
+	local s = H.last("steady")
+	check(s and s[2] == true and s[3] == 2011 and H.steady, "off on him as the swing is sent: " .. tostring(s and s[2]))
+	H.step(1)
+	check(H.count("steady") == 1 and H.steady, "once, and through the clip: " .. H.count("steady"))
+	H.step(3.5)
+	check(H.steady == nil and H.count("steady") == 2, "on again once it is over: " .. H.count("steady"))
+	-- a clip the engine reports past LOCK_WAIT waits to play (F.pending): still off until it has played
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {report_ms = 1500})
+	H.P.features.steady, H.steady = true, nil
+	H.tap("Left mouse") H.step(1.2)
+	check(H.E.F.lock == nil and H.E.F.pending and H.steady, "waiting to play: still off")
+	H.step(3.5)
+	check(H.E.F.pending == nil and H.steady == nil, "on again once it has played")
+	-- off with the mode
+	H.tap("Left mouse") H.step(0.1)
+	check(H.steady, "off for a swing")
+	H.tap("F2") H.step(0.1)
+	check(not H.E.F.on and H.steady == nil, "on again once he is let go")
+	-- multiplayer: never
+	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}})
+	H.P.features.steady, H.P.features.net, H.steady = true, true, nil
+	H.tap("Left mouse") H.step(0.1)
+	check(H.steady == nil, "nothing in multiplayer")
+end
+
 -- a player, 2026-11-23: "attack animations sometimes get cancelled out of nowhere, dealing no damage". The engine's
 -- reaction to a blow on him (DEFEND, 474) cut the clip played here before its blow landed (2 of 20, measured
 -- 2026-11-25); the swing goes again after it, once
@@ -3560,7 +3594,8 @@ T.platform_net_the_next_battle_starts_with_an_empty_guard_table = function()
 	local M, mr, put = N.M, N.mr, N.put
 	local block = N.P.mailbox.addr
 	-- the last battle's: a man in every entry, a count, a copy table
-	for o = M.MB.guards, M.MB.size - 8, 8 do put(block + o, N.BASE + 0x6000000 + o, 8) end
+	for o = M.MB.guards, M.MB.collide_vt - 8, 8 do put(block + o, N.BASE + 0x6000000 + o, 8) end
+	put(block + M.MB.steadies, 7, 4)
 	put(block + M.MB.count, 16, 4) put(block + M.MB.nfrags, 9, 4) put(block + M.MB.fragtab, N.BASE + 0x6f00000, 8)
 	put(block + M.MB.hello, 3, 4) -- and its HELLO mask: a stale bit would count a player of that battle as heard
 	mr.wrote = {}
@@ -3568,8 +3603,8 @@ T.platform_net_the_next_battle_starts_with_an_empty_guard_table = function()
 	check(P2.features.net and P2.mailbox.addr == block, "the next battle, the same block: " .. table.concat(P2.problems, "; "))
 	local left = {}
 	local function zeroed(o) if mr.wrote[block + o] ~= 0 then left[#left + 1] = string.format("+0x%x", o) end end
-	for o = M.MB.guards, M.MB.size - 4, 4 do zeroed(o) end
-	for _, o in ipairs({M.MB.count, M.MB.nfrags, M.MB.fragtab, M.MB.fragtab + 4, M.MB.hello}) do zeroed(o) end
+	for o = M.MB.guards, M.MB.collide_vt - 4, 4 do zeroed(o) end
+	for _, o in ipairs({M.MB.count, M.MB.nfrags, M.MB.fragtab, M.MB.fragtab + 4, M.MB.hello, M.MB.steadies}) do zeroed(o) end
 	check(#left == 0, "not zeroed at the build: " .. table.concat(left, " "))
 end
 

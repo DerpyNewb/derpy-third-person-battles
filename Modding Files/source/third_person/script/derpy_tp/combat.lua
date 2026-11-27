@@ -556,6 +556,14 @@ return function(E)
 	-- played swing deals, and a regiment played whole fights by CA's order. Switched once, off again at the stop (main.lua)
 	-- Off only for a unit LISTED: the 11-25 build turned it off for any unit missing from a list of splashers, and every
 	-- lord, hero and monster from a mod not in that list lost his splash (four players, 2026-11-25/26)
+	-- his collisions off while one of his own clips is locked or waits to play (platform.lua P.steady): the engine's
+	-- collision with an enemy not fighting him cut a swing on its first tick, and it dealt nothing (2026-11-27)
+	function C.steady()
+		local want = F.lock ~= nil or F.pending ~= nil
+		if want == (F.steady == true) then return end
+		if P.steady(want, F.model or F.single) or not want then F.steady = want or nil end
+	end
+
 	function C.splash()
 		local want = strikes() and (E.D.no_splash and E.D.no_splash[F.utype]) == true
 		if want == (F.nosplash == true) then return end

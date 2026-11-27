@@ -657,6 +657,12 @@ local function fake_platform()
 		rec("nosplash", on, m and m.id) H.nosplash = on or nil
 		return true
 	end
+	-- his collisions off (platform.lua P.steady): refused where the cave is not, as there
+	function P.steady(on, m)
+		if not P.features.steady or P.features.net then return false end
+		rec("steady", on, m and m.id) H.steady = on or nil
+		return true
+	end
 	-- an armed blow taken back (platform.lua P.unblow)
 	function P.unblow(m)
 		if not P.features.strike or P.features.net then return false end

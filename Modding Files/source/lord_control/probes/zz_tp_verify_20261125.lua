@@ -4,7 +4,9 @@
 -- Loaded after zz_tp_live_20261108.lua (_G.TPT, T.stub and T.static first). No string library calls and no
 -- s:method(); every per-frame read is in a pcall. Times are battle time.
 --
--- Y.swing{me = type, k = enemy index in T.enemy, swings = n, gap = s, moving = bool, vanilla = bool, secs = s, back = m}
+-- Y.swing{me = type, k = enemy index in T.enemy, swings = n, gap = s, moving = bool, vanilla = bool, secs = s, back = m,
+--   still = s (2026-11-27: forward released for s after each click, to tell a swing cut by the walk from one cut otherwise),
+--   trace = n (2026-11-27: every frame for 0.8 s after each of the first n clicks - his clip, command, lock, speed)}
 --   third person: my unit `me` stands `back` m behind the enemy's front (the enemy held, fearless, NOT invincible for
 --   the pass), is played (E.main.start; MCT's default plays one entity), walks to the nearest enemy man and clicks every
 --   `gap` s. vanilla: third person off, CA's attack order on the enemy unit for `secs` s.
@@ -82,8 +84,44 @@ function Y.swing(o)
 	local mine = {}
 	local strike_was, log_was = P.strike, E.log
 	local t0, step, n, next_click, leg = now(), "settle", 0, 0, 0
+	local wrapped = {}
+	if o.trace then
+		for _, name in ipairs({"play", "hold", "steer", "guard", "unblow"}) do
+			local f = P[name]
+			wrapped[name] = f
+			P[name] = function(m, a, b, ...)
+				local tt = now() - t0 - (rec.go or 0)
+				rec.tr_calls = rec.tr_calls or {}
+				if rec.tr_until and tt < rec.tr_until and rec.tr_calls[name] ~= tt then
+					rec.tr_calls[name] = tt
+					rec.trace[#rec.trace + 1] = "    call " .. name .. " " .. tostring(a) .. " " .. tostring(b) .. " at " .. math.floor((tt - rec.tr_from) * 100 + 0.5) / 100
+				end
+				return f(m, a, b, ...)
+			end
+		end
+	end
+	local locked_was = E.combat.locked
+	if o.trace then
+		E.combat.locked = function(gnow)
+			local L = F.lock
+			local before = L and {slot = L.m and P.anim_slot(L.m), seen = L.seen, from = L.from, till = L.till, still = L.still,
+				strikes = L.strikes, moving = F.moving, strike = F.strike ~= nil, blow = F.blow ~= nil, armed = L.armed}
+			local r = locked_was(gnow)
+			local tt = now() - t0 - (rec.go or 0)
+			if L and not r and rec.tr_until and tt < rec.tr_until then
+				rec.trace[#rec.trace + 1] = "    unlock at " .. math.floor((tt - rec.tr_from) * 100 + 0.5) / 100 .. ": slot " .. tostring(before.slot)
+					.. " want " .. tostring(L.slot) .. " seen " .. tostring(before.seen) .. " age " .. math.floor((gnow - before.from) * 100) / 100
+					.. " till " .. math.floor((before.till - gnow) * 100) / 100 .. " still " .. tostring(before.still) .. " strikes "
+					.. tostring(before.strikes) .. " moving " .. tostring(before.moving) .. " strike " .. tostring(before.strike)
+					.. " blow " .. tostring(before.blow) .. " armed " .. tostring(before.armed) .. " pblow " .. tostring(L.m and P.blow(L.m))
+			end
+			return r
+		end
+	end
 	local function finish(why)
 		rec.why, rec.done = why, true
+		E.combat.locked = locked_was
+		for name, f in pairs(wrapped) do P[name] = f end
 		for k in pairs(T.keys or {}) do T.keys[k] = nil end
 		if F.on then pcall(E.main.stop, "verify swing") end
 		P.strike, E.log = strike_was, log_was
@@ -175,14 +213,57 @@ function Y.swing(o)
 						local tx, _, tz = P.model_pos(target)
 						local yaw = math.atan2(tx - x, tz - z)
 						E.rig.yaw, E.rig.want_yaw = yaw, yaw
-						T.key("forward", d > (o.reach or 2.2))
+						local still = o.still and rec.clicks and (tt - rec.clicks[#rec.clicks]) < o.still
+						T.key("forward", d > (o.reach or 2.2) and not still)
 						rec.d_min = math.min(rec.d_min or 99, r1(d))
+					end
+					if o.trace and n < o.trace and not (rec.tr_until and tt < rec.tr_until) and tt >= math.max(next_click, o.first or 3) - 0.5 then
+						rec.trace = rec.trace or {}
+						rec.trace[#rec.trace + 1] = "click " .. (n + 1)
+						rec.tr_from = math.max(next_click, o.first or 3)
+						rec.tr_until, rec.tr_last = rec.tr_from + 0.8, nil
+					end
+					if o.trace and rec.tr_until and tt < rec.tr_until and tt ~= rec.tr_tick then
+						rec.tr_tick = tt
+						local mr = _G.memreader_plus
+						local m = P.mount(b) or b
+						local cmd = mr and mr.tostring(mr.read_pointer(m, 0x330)) or "?"
+						local function hs(has, act)
+							if mr.read_uint8(m, has) ~= 1 then return "-" end
+							return mr.tostring(mr.read_pointer(m, act)) .. ":" .. mr.read_uint8(m, has + 1) .. mr.read_uint8(m, act + 0x20)
+						end
+						rec.trace[#rec.trace + 1] = "  cmd " .. tostring(cmd) .. " melee " .. tostring(F.unit:is_in_melee())
+							.. " enemy melee " .. tostring(e.u:is_in_melee()) .. " word " .. mr.read_uint32(m, 0x324)
+							.. " q " .. hs(0x6f8, 0x5e0) .. " r " .. hs(0x5c0, 0x4a8)
+							.. (mr.is_null(mr.read_pointer(m, 0xb20)) and "" or " B") .. (mr.is_null(mr.read_pointer(m, 0x128)) and "" or " Q")
+						local mco = mr.read_pointer(m, 0xb20)
+						if not mr.is_null(mco) then
+							local cnt = mr.read_uint32(mco, 0xa0)
+							local parts = {}
+							for i = 0, math.min(cnt, 2) - 1 do
+								local p = mr.read_pointer(mco, 0x90 + i * 8)
+								parts[#parts + 1] = (mr.eq(p, m) and "me" or "other") .. "@" .. mr.read_uint16(mco, 0xf0 + i * 8)
+							end
+							rec.trace[#rec.trace + 1] = "  mc vt " .. mr.tostring(mr.read_pointer(mco, 0)) .. " n " .. cnt .. " " .. table.concat(parts, ",")
+								.. " frame " .. mr.read_uint32(mco, 0x328) .. " f551 " .. mr.read_uint8(mco, 0x551) .. " f555 " .. mr.read_uint8(mco, 0x555)
+								.. " f557 " .. mr.read_uint8(mco, 0x557) .. " f55a " .. mr.read_uint8(mco, 0x55a) .. " my b30 " .. mr.read_uint16(m, 0xb30)
+								.. " b28 " .. mr.read_uint32(m, 0xb28) .. " b2c " .. mr.read_uint32(m, 0xb2c)
+						end
+						local body = P.mount(b) or b
+						local bx, _, bz = P.model_pos(body)
+						local sp = rec.tr_last and math.sqrt((bx - rec.tr_last[1]) ^ 2 + (bz - rec.tr_last[2]) ^ 2) / math.max(tt - rec.tr_last[3], 0.001) or 0
+						rec.tr_last = {bx, bz, tt}
+						local Lk = F.lock
+						rec.trace[#rec.trace + 1] = math.floor((tt - rec.tr_from) * 100 + 0.5) / 100 .. " s" .. tostring(P.anim_slot(body))
+							.. " " .. tostring(P.command(body)) .. " lk" .. tostring(Lk and (Lk.slot or "pre") or "-")
+							.. " mv" .. (F.moving and 1 or 0) .. " v" .. r1(sp) .. " d" .. r1(d or 0)
 					end
 					if n < (o.swings or 12) and tt >= next_click and tt >= (o.first or 3) then
 						T.tap("attack", 120)
 						n, next_click = n + 1, tt + (o.gap or 2)
 						rec.clicks = rec.clicks or {}
 						rec.clicks[#rec.clicks + 1] = r1(tt)
+						if o.trace and n <= o.trace then rec.tr_from, rec.tr_until = tt, tt + 0.8 end
 					end
 					if n >= (o.swings or 12) and tt >= next_click + 1 then finish("time") end
 				elseif tt >= (o.secs or 20) then finish("time") end
@@ -198,7 +279,7 @@ function Y.read()
 	if not r then return "not run" end
 	local out = {done = r.done, why = r.why, err = r.err, start_err = r.start_err, played = r.played, me = r.me, enemy = r.enemy,
 		vanilla = r.vanilla, moving = r.moving, killed = (r.men_end or r.men0) - r.men0, strikes = r.strikes, d_min = r.d_min,
-		drops = #r.drops, knocks = #r.knocks}
+		drops = #r.drops, knocks = #r.knocks, trace = r.trace}
 	-- distinct enemy men hit, and knocks that came within 0.6 s of a drop on the same man
 	local hit = {}
 	for _, d in ipairs(r.drops) do hit[d.man] = true end

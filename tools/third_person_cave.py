@@ -6,7 +6,7 @@ script thread posts into a block. The exe addresses quoted below are 6acec6f4's 
     py tools/third_person_cave.py --check      exit 1 when platform.lua's bytes are not this file's assembly, or the
                                                site in the exe on disk is not the code the cave displaces
     py tools/third_person_cave.py --selftest   run the bytes platform.lua SHIPS under an x64 emulator (unicorn), then
-                                               break the assembly (30 update-cave and 18 carrier-cave mutants) and
+                                               break the assembly (40 update-cave and 18 carrier-cave mutants) and
                                                prove each break is caught
 
 Why: the battle runs on worker threads while the script runs (docs/BATTLE_ENGINE_RE.md section 9). P.guard, P.hold and
@@ -15,7 +15,7 @@ the command at +0x328/+0x330 that a worker may be running. Crashes exe+0x305B39A
 (2026-10-17, reading FFFFFFFFFFFFFFFF in a command's destructor, the script log's last line P.guard). The cave makes the
 same calls, with the same tests, from the start of his own update, where the engine itself changes his command.
 
-The block (game_alloc, 0x200 bytes, kept for the session: the cave holds its address, and a later battle reads it back
+The block (game_alloc, 0x218 bytes, kept for the session: the cave holds its address, and a later battle reads it back
 from the cave's first instruction, mov rax, <block>):
 
     man        the model the requests are for (the mount of a rider); 0 nobody
@@ -39,6 +39,14 @@ from the cave's first instruction, mov rax, <block>):
                weapon's splash_attack_target_size says (a player, 2026-11-25: a played Greatsword hit 4 Orc Boyz in one
                swing and knocked them down, though CA's tables give a Greatsword's weapon no splash at all); the
                strike's rolled blow is the swing's damage instead. 0: untouched
+    steady     1: on every update of man or strike_man, before anything else, clear his +0xb20 when it points at one of
+               the engine's two collision interactions (collide_vt, collide_vt2: exe+3ad5850 and exe+39169e0 on
+               6ae2a00b, made by exe+2f7b32c / exe+2f7b418). Set, his update takes the branch through his command's
+               vtable +0x490, which resets the clip action a clip played here parks and drops the clip one tick after it
+               starts: a swing at an enemy who is not fighting him was cut on its first tick and dealt nothing (a
+               player, 2026-11-27; measured the same day). The interaction keeps his bit in its manager, so none is made
+               again, and its own tick (exe+2f93098) sets +0xb20 back every tick until it ends. steadies counts the
+               clears (probes). Never in multiplayer: it changes one machine's simulation
 
 Two caves share this block. The UPDATE cave (ASM, exe+3086f04) guards the one man played in single player from man/guard/
 walk as it always has, and in multiplayer also scans the guard table and stops the engine's four orders on every man with
@@ -63,9 +71,9 @@ PLACEHOLDER = 0x1122334455667788
 
 MB = {"man": 0x00, "walk_a": 0x08, "move_a": 0x10, "move_b": 0x18, "melee": 0x20, "walk_b": 0x28, "walk_stop": 0x30,
       "walk_start": 0x38, "guard": 0x40, "walk": 0x44, "stops": 0x48, "met": 0x4c, "has_angle": 0x50, "near": 0x51,
-      "nosplash": 0x52, "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "strike": 0x6c, "strike_man": 0x70,
+      "nosplash": 0x52, "steady": 0x53, "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "strike": 0x6c, "strike_man": 0x70,
       "strike_victim": 0x78, "buf": 0x80, "strike_slot": 0xe0, "struck": 0xe4, "skip": 0xe8, "map_lookup": 0xf0,
-      "roll": 0xf8, "guards": 0x100, "size": 0x200}
+      "roll": 0xf8, "guards": 0x100, "collide_vt": 0x200, "collide_vt2": 0x208, "steadies": 0x210, "size": 0x218}
 # the fields a cave calls or jumps through: written over, never zeroed (a cave already past its match goes through
 # them), so platform.lua keeps them outside every range check_mailbox zeroes; a harness test pins it
 FUNCS = ("walk_a", "move_a", "move_b", "melee", "walk_b", "walk_stop", "walk_start", "skip", "map_lookup", "roll")
@@ -104,7 +112,7 @@ MAN = {"cmd": 0x330, "hp": 0xb1c, "x": 0x368, "z": 0x370, "surf": 0x378, "surf2"
        # his flag byte: bit 0x10 asks his clip's SPLASH_ATTACK to land. The engine sets it as an attack clip starts
        # (exe+3089284's callers, e.g. exe+3098219 on 6ae2a00b) and the splash pass exe+3095cb0 returns at once without
        # it; that pass runs inside this same update, after the cave (exe+308e4e7, exe+308ea03)
-       "flags": 0xb12}
+       "flags": 0xb12, "collide": 0xb20}
 SPLASH_BIT = 0x10
 # the roll's first argument, as exe+3251af8 finds it: [[[man + 0x58] + 0x440] + 0xf8]. Its result block (0x20 bytes:
 # type, 1, damage, a flag byte, attacker, victim) is given 0x30 on the cave's stack, so a roll that writes a little more
@@ -117,6 +125,25 @@ ROLL_RVA, ROLL_BYTES = 0x30b008c, bytes.fromhex("488bc4 55 53 56 57 4156 4157") 
 # touches it gives back. Every call is made with rsp on a 16-byte boundary and 32 bytes of shadow space.
 ASM = """
     mov rax, {placeholder}
+    cmp byte ptr [rax + {steady}], 0
+    je steadied
+    cmp rcx, qword ptr [rax + {man}]
+    je steady_him
+    cmp rcx, qword ptr [rax + {strike_man}]
+    jne steadied
+steady_him:
+    mov r10, qword ptr [rcx + {m_collide}]
+    test r10, r10
+    je steadied
+    mov r10, qword ptr [r10]
+    cmp r10, qword ptr [rax + {collide_vt}]
+    je unsteady
+    cmp r10, qword ptr [rax + {collide_vt2}]
+    jne steadied
+unsteady:
+    mov qword ptr [rcx + {m_collide}], 0
+    inc dword ptr [rax + {steadies}]
+steadied:
     cmp byte ptr [rax + {nosplash}], 0
     je splashed
     cmp rcx, qword ptr [rax + {man}]
@@ -717,6 +744,7 @@ def check():
 
 # -- the emulator ----------------------------------------------------------------------------------------------------
 CODE, STUBS, BLOCK, HIM, OTHER, STACK = 0x10000000, 0x20000000, 0x30000000, 0x40000000, 0x41000000, 0x50000000
+COLLIDE = 0x44000000
 STOP, START, ROLL = STUBS, STUBS + 0x100, STUBS + 0x200
 # the strike's world: him +0x58 -> WORLD, whose +0x440 is the battle (WORLD + 0x1000), whose +0xf8 is the resolver
 # the roll is given; VICTIM the man struck. ROLL_OUT: the type and damage the roll stub reports, set per run
@@ -727,7 +755,7 @@ ROLL_HEAD = ("mov eax, dword ptr [%d]; mov dword ptr [rdx], eax; mov eax, dword 
              "mov qword ptr [rdx + 0x20], -1; mov qword ptr [rdx + 0x28], -1; " % (ROLL_OUT, ROLL_OUT + 4))
 VT = {"walk_a": 0x143919350, "move_a": 0x1439199f8, "move_b": 0x143ae1928, "melee": 0x143ad24b8,
       "walk_b": 0x143ae2400, "clip": 0x143911fb0, "stand": 0x1439126f0, "idle": 0x143919b28, "fight": 0x143ae2b38,
-      "fight2": 0x143ae2a08, "fight3": 0x143912820}
+      "fight2": 0x143ae2a08, "fight3": 0x143912820, "collide": 0x143ad5850, "collide2": 0x1439169e0, "action": 0x143917848}
 KEEP = ["rcx", "rdx", "r8", "r9", "rbx", "rsi", "rdi", "rbp", "r12", "r13", "r14", "r15", "rsp"]
 # a callee may wreck every volatile register: the stubs do, so a cave that leans on one is caught
 WRECK = ("mov rcx, -1; mov rdx, -2; mov r8, -3; mov r9, -4; mov r10, -5; mov r11, -6; mov rax, -7; "
@@ -761,7 +789,7 @@ def run(code, at, setup, rcx=HIM, race=None):
     import unicorn
     from unicorn import x86_const as X
     uc = unicorn.Uc(unicorn.UC_ARCH_X86, unicorn.UC_MODE_64)
-    for base in (CODE, STUBS, BLOCK, HIM, OTHER, STACK, WORLD, VICTIM):
+    for base in (CODE, STUBS, BLOCK, HIM, OTHER, STACK, WORLD, VICTIM, COLLIDE):
         uc.mem_map(base, 0x10000)
     ks = keystone.Ks(keystone.KS_ARCH_X86, keystone.KS_MODE_64)
     stub = bytes(ks.asm(WRECK, 0)[0])
@@ -778,6 +806,8 @@ def run(code, at, setup, rcx=HIM, race=None):
     q(BLOCK + MB["walk_stop"], STOP)
     q(BLOCK + MB["walk_start"], START)
     q(BLOCK + MB["roll"], ROLL)
+    q(BLOCK + MB["collide_vt"], VT["collide"])
+    q(BLOCK + MB["collide_vt2"], VT["collide2"])
     q(BLOCK + MB["man"], HIM)
     d(HIM + MAN["hp"], 80)
     for m in (HIM, OTHER):
@@ -1023,6 +1053,47 @@ def scenarios(code, at):
                                         uc.mem_write(HIM + MAN["flags"], bytes([0x10]))))
     expect(armed(r) == (1, 1, 37, 457, VICTIM) and r["rd"](HIM + MAN["flags"], 1) == 0,
            "nosplash and a strike on one update: the blow armed, the splash bit off: %r" % (armed(r),))
+
+    # steady: +0xb20 cleared on man's and strike_man's updates while it holds one of the two collision interactions,
+    # counted; any other object there, the flag off, or another man's update leaves it. The interaction itself is never
+    # written (its interrupt byte +0x98 and its vtable stay), and the rest of the update runs as before
+    def steady(flag=1, vt="collide", b20=COLLIDE, man=HIM, smn=0, cvt="clip", guard=0):
+        def setup(q, d, uc):
+            cmd(cvt, guard=guard)(q, d, uc)
+            q(BLOCK + MB["man"], man)
+            q(BLOCK + MB["strike_man"], smn)
+            uc.mem_write(BLOCK + MB["steady"], bytes([flag]))
+            q(COLLIDE, VT[vt])
+            for m in (HIM, OTHER):
+                q(m + MAN["collide"], b20)
+        return setup
+
+    def collided(r, m): return r["rd"](m + MAN["collide"], 8)
+    for name, kw, rcx, cleared in (("his update", {}, HIM, True), ("the other class", dict(vt="collide2"), HIM, True),
+                                   ("the swing's carrier (a rider's mount is man)", dict(man=OTHER, smn=HIM), HIM, True),
+                                   ("not a collision", dict(vt="action"), HIM, False), ("flag off", dict(flag=0), HIM, False),
+                                   ("another man", dict(smn=VICTIM), OTHER, False), ("none", dict(b20=0), HIM, False)):
+        r = run(code, at, steady(**kw), rcx=rcx)
+        kept(r, "steady, " + name)
+        b20 = kw.get("b20", COLLIDE)
+        expect(collided(r, rcx) == (0 if cleared else b20), "steady, %s: +0xb20 %x" % (name, collided(r, rcx)))
+        other = OTHER if rcx == HIM else HIM
+        expect(collided(r, other) == b20, "steady, %s: the other man's +0xb20 untouched" % name)
+        expect(r["rd"](BLOCK + MB["steadies"], 4) == (1 if cleared else 0), "steady, %s: counted %d"
+               % (name, r["rd"](BLOCK + MB["steadies"], 4)))
+        expect(r["rd"](COLLIDE, 8) == VT[kw.get("vt", "collide")] and r["rd"](COLLIDE + 0x98, 1) == 0,
+               "steady, %s: the interaction itself untouched" % name)
+    r = run(code, at, steady(cvt="melee", guard=1))
+    expect([c[:2] for c in r["calls"]] == [("stop", HIM)] and collided(r, HIM) == 0,
+           "steady and a guard on one update: both done, got %r" % r["calls"])
+    r = run(code, at, lambda q, d, uc: (strike()(q, d, uc), uc.mem_write(BLOCK + MB["steady"], bytes([1])),
+                                        q(COLLIDE, VT["collide"]), q(HIM + MAN["collide"], COLLIDE)))
+    expect(armed(r) == (1, 1, 37, 457, VICTIM) and collided(r, HIM) == 0,
+           "steady and a strike on one update: the blow armed, +0xb20 cleared: %r" % (armed(r),))
+    r = run(code, at, lambda q, d, uc: (steady()(q, d, uc), uc.mem_write(BLOCK + MB["nosplash"], bytes([1])),
+                                        uc.mem_write(HIM + MAN["flags"], bytes([0xff]))))
+    expect(collided(r, HIM) == 0 and r["rd"](HIM + MAN["flags"], 1) == 0xef,
+           "steady and nosplash on one update: both done")
 
     # the multiplayer table scan (the update cave's second half): man 0 (no single-man path), count > 0, entries at MB
     # guards. The man being updated is rcx; his entry stops the engine's four, a non-engine command runs, a dead man's
@@ -1349,6 +1420,19 @@ MUTANTS = [
     ("the swing's carrier left splashing", "    cmp rcx, qword ptr [rax + {strike_man}]\n    jne splashed\n",
      "    jmp splashed\n"),
     ("every flag cleared", "    and byte ptr [rcx + {m_flags}], {not_splash}\n", "    mov byte ptr [rcx + {m_flags}], 0\n"),
+    # steady (2026-11-27)
+    ("the collision never cleared", "    mov qword ptr [rcx + {m_collide}], 0\n", ""),
+    ("the collision cleared with the flag off", "    cmp byte ptr [rax + {steady}], 0\n    je steadied\n", ""),
+    ("every man's collision cleared", "    cmp rcx, qword ptr [rax + {strike_man}]\n    jne steadied\n", ""),
+    ("the swing's carrier left colliding", "    cmp rcx, qword ptr [rax + {strike_man}]\n    jne steadied\n",
+     "    jmp steadied\n"),
+    ("any object cleared", "    cmp r10, qword ptr [rax + {collide_vt2}]\n    jne steadied\n", ""),
+    ("the other class left", "    cmp r10, qword ptr [rax + {collide_vt2}]\n    jne steadied\n", "    jmp steadied\n"),
+    ("a null collision read", "    test r10, r10\n    je steadied\n", ""),
+    ("the interaction interrupted", "unsteady:\n",
+     "unsteady:\n    mov r10, qword ptr [rcx + {m_collide}]\n    mov byte ptr [r10 + 0x98], 1\n"),
+    ("the clears not counted", "    inc dword ptr [rax + {steadies}]\n", ""),
+    ("the block lost to the rest of the update", "    mov r10, qword ptr [r10]\n", "    mov rax, qword ptr [r10]\n"),
 ]
 
 # the carrier cave's own mistakes; each must be caught by carrier_scenarios()
