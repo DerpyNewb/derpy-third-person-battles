@@ -41,6 +41,10 @@ engine, and the design record.
     whole attacks by the game's own order, on the enemy unit under the crosshair or nearest the
     aim. One entity in multiplayer is as before: only swings whose animation carries a splash
     attack hit.
+  - In single player, a lord, hero or monster you play gets the game's sync kills: half of his
+    clicks on an enemy in reach let the game's own melee try a paired kill animation first, only
+    where the game has one for his animation table and the enemy's. A matchup that never starts
+    one is given up after three tries. "Sync kills" in MCT turns them off.
 - **Shooting.** A click fires one shot from the man himself: the raise, the shot and the reload.
   Hold the button and he keeps firing. Thrown bombs leave the hand late in the throw, as the
   animation does. A lord or monster fires at the crosshair through the game's own ground fire,
@@ -90,9 +94,9 @@ row is for 9.0.5 (exe build `6ae2a00b`, 2026-11-03).
 | Path | What |
 |---|---|
 | `Modding Files/source/third_person/` | the pack's files: the battle script, the `derpy_tp` modules (about 5,700 lines of Lua, plus the generated data), the MCT page and the HUD layout |
-| `tools/` | the build, the Lua harness and its 755 tests, the two-machine simulation and its 49, the HUD generator and preview, and the checks |
+| `tools/` | the build, the Lua harness and its 761 tests, the two-machine simulation and its 49, the HUD generator and preview, and the checks |
 | `tools/exe_re.py`, `tools/ghidra_decompile.py`, `docs/BATTLE_ENGINE_RE.md` | reading `Warhammer3.exe` from disk (who calls, who writes a field, which vtable slot; Ghidra headless for C), and what that found about a battle soldier |
-| `Modding Files/source/lord_control/probes/` | 390 probe scripts run against the live game, and 99 mutation sets (1352 mutants) |
+| `Modding Files/source/lord_control/probes/` | 392 probe scripts run against the live game, and 100 mutation sets (1368 mutants) |
 | `docs/design/`, `docs/plans/` | the two specs, the core plan and the multiplayer plan |
 | `docs/history/` | the handoffs written as each part was measured in game, the working ledger, and the multiplayer decision record |
 
@@ -114,7 +118,7 @@ There is no test framework.
 - **The shipped modules run.** `tools/third_person_harness.lua` loads the real `derpy_tp` files
   under Lua 5.1.5 against a stubbed battle: units, models, animation slots with clip lengths,
   the camera, keys, the UI tree and the MCT. `tools/third_person_tests.lua` then presses keys
-  frame by frame and asserts on the commands the modules sent: 755 tests.
+  frame by frame and asserts on the commands the modules sent: 761 tests.
 - **Two machines, simulated.** `tools/third_person_lockstep.lua` runs two copies of the shipped
   modules side by side, each with its own globals, and hands every queued command to both two
   ticks late, as a multiplayer battle does. `third_person_lockstep_tests.lua` fails if the two
@@ -122,7 +126,7 @@ There is no test framework.
 - **Every rule is proven to be caught.** `probes/tp_mutate.py` plants one plausible mistake at a
   time in the shipped Lua, runs the suite, and restores the file byte for byte. It might be a
   guard dropped, a constant changed, or a branch inverted. A mutant the tests do not catch is a
-  finding, and so is an anchor that no longer matches the code. 1352 mutants in 99 sets; 15 of
+  finding, and so is an anchor that no longer matches the code. 1368 mutants in 100 sets; 15 of
   the oldest sets still carry stale anchors from code that was rewritten since.
 - **Measured, not assumed.** Animation slot ids, clip lengths, the camera's floor and the
   projectile release point were each read from the running game through the probes, or from
@@ -134,7 +138,7 @@ There is no test framework.
   blows, and clearing the collision that would cut his own swings run inside his own update on
   the battle thread, from a small machine-code cave (`third_person_cave.py` holds its assembly).
   `--check` matches the bytes in `platform.lua` and the site in the exe; `--selftest` runs those
-  bytes under an x64 emulator through every path, and breaks them 58 ways. A second cave reads
+  bytes under an x64 emulator through every path, and breaks them 72 ways. A second cave reads
   the multiplayer mode's messages on every machine, and is checked the same way.
 - **The HUD.** `gen_third_person_hud.py --check` validates the generated layout.
   `preview_third_person_hud.py` draws the HUD from the shipped Lua at three resolutions, and with

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-27, second update
+
+Workshop manifest 6639109647013672360 (build `1F016454`).
+
+- Sync kills for a unit of one (a lord, hero or monster played with F2). They never happened for the played entity:
+  CA's pair pick (`exe+30af180`) refuses a man on the disarm copy of his fragment, and a man outside CA's own melee,
+  which the update cave's guard keeps him out of. A click with an enemy in the blow's reach now rolls CA's own 50%,
+  arms him, gives CA's attack order on that enemy's unit (which drops the guard) and asks the cave for CA's
+  kill-move check every frame until the pair shows, for 1.5 s at most. With none by then, the order ends and his own
+  swing plays. The cave gained the kill-move check call (72 cave mutants).
+- A sync kill is tried only where the game has one: `data.lua`'s new `mc_*` sections are the game's pair table
+  (`animations/matched_combat/attila_generated*.bin`) by battle animation table, and `platform.lua` `P.anim_table`
+  reads the table off his fragment. A ridden man pairs only through entries naming his mount's attack clip and his
+  own `RIDER_COMBAT` clip together, never through his mount's feral pairs (Dieter Helsnicht on his manticore has the
+  feral manticore's and none ridden, and CA's own melee never paired him). A pair that has not started in 3 tries is
+  not tried again that battle, because some monster pairs on infantry are in the table and almost never played. A
+  pair holds him to its end, 30 s at most (one of Kroll's ran 15.6 s).
+- A new MCT checkbox, "Sync kills", on by default. Not in multiplayer.
+- Measured in game against held, mortal Empire Swordsmen, 10 clicks each: Vraznak paired on 5 of 5 tries, a Sorceress
+  on a Cold One 3 of 4, Kroll (OvN's Fimir) 4 of 4; Ghorth on foot and a Supreme Sorceress on a manticore made no
+  tries; a feral manticore stopped after 3 failed tries. A Lord Magistrate made 6 sync kills in 16 clicks against Orc
+  Boyz. An invincible enemy gets no lethal pair, so a test has to make the enemy mortal. The engine side is in
+  `docs/BATTLE_ENGINE_RE.md` section 12b. Six new harness tests (761 + 49), mutants round 77 (16).
+
 ## 2026-11-27
 
 Workshop manifest 7692593176784460855 (build `CBBDC8EA`).

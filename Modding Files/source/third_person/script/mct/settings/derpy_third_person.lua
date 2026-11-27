@@ -98,6 +98,11 @@ slider("combat", "combat_spread", "Volley scatter",
 checkbox("combat", "combat_one_man", "Play one entity of a regiment",
 	"On, you play the regiment's front entity: it walks, swings and shoots alone while the rest hold. Off, you move the "
 	.. "whole regiment as before.", true)
+checkbox("combat", "combat_sync", "Sync kills",
+	"On, half of your attacks on an enemy in reach try one of the game's paired kill animations, as the game's own "
+	.. "melee does, when the game has one for you against that enemy. You can't move or attack until it ends, and an "
+	.. "attack that can't start one goes after a short pause. "
+	.. "Only for a lord, hero or monster you play, and not in multiplayer.", true)
 
 m:add_new_section("display", "On the battlefield")
 local bars = m:add_new_option("display_bars_show", "dropdown")

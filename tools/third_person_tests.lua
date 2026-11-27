@@ -1504,6 +1504,191 @@ T.no_blow_is_struck_for_a_whole_unit_in_multiplayer_or_without_the_cave = functi
 	check(H.count("play") == 1 and H.count("strike") == 0, "no strike for a jump attack: " .. H.count("play"))
 end
 
+-- the players' sync kills (four asks, 10-28 to 11-27): a click with an enemy where the blow lands asks the cave for CA's
+-- kill-move check first (P.sync), on CA's odds for a unit of one. CA pairs him only inside its own melee, so the click
+-- gives CA's attack order on that enemy's unit and asks again each frame until the pair shows on him. Shown, he is the
+-- pair's until it lets him go; none by the end of the wait, the order ends and his own swing plays
+local SYNCS = {input = true, anim = true, wheel = true, strike = true, sync = true}
+local function syncing(o)
+	o = o or {}
+	H.fresh({units = {{general = true}, {type = "wh_test_melee", men = o.men or 1, x = 40, slots = {[42] = true, [454] = true, [455] = true},
+		table = o.table or "hu1e_sword_lord"}},
+		enemies = o.enemies or {{x = 40, z = 2.5, men = 3, table = o.foe or "hu2_orc_sword_and_shield"}}, features = o.features or SYNCS, mct = o.mct or {debug_log = true},
+		sync_out = o.out, sync_drop = o.drop, sync_secs = o.secs, fight_after = o.fight_after})
+	H.select(H.units[2]) H.tap("F2") H.step(0.6)
+	H.E.D.impacts = {wh_test_melee = {{0, 2.5}, {1.5, 1.5}}}
+end
+local function drives()
+	local n = H.count("steer") + H.count("hold") + H.count("face")
+	for _, c in ipairs(H.calls) do if type(c[1]) == "string" and c[1]:sub(1, 3) == "uc:" then n = n + 1 end end
+	return n
+end
+-- the odds' roll: r for every math.random() in fn
+local function rolling(r, fn)
+	local was = math.random
+	math.random = function() return r end
+	local ok, err = pcall(fn)
+	math.random = was
+	if not ok then error(err, 0) end
+end
+
+T.a_click_tries_a_sync_kill_inside_cas_melee_and_waits_out_the_pair = function()
+	syncing()
+	rolling(0, function()
+		local halts = H.count("uc:halt")
+		H.tap("Left mouse")
+		local s = H.last("sync")
+		check(s and s[2] == 2001 and s[3] == 3002, "CA's check asked for him on the man ahead: " .. tostring(s and s[3]))
+		local o = H.last("uc:attack_unit")
+		check(H.count("uc:attack_unit") == 1 and o[3] == H.enemies[1], "CA's attack order on that man's unit")
+		check(H.count("play") == 0, "no swing of his own before the answer")
+		H.step(0.2)
+		check(H.synced_n == 0 and H.sync_tries > 2 and H.E.F.lock.sync ~= nil, "asked again each frame until CA's melee has him: "
+			.. H.sync_tries)
+		H.step(0.3)
+		check(H.synced_n == 1 and H.logged("sync kill started"), "started once CA's melee has him")
+		local d, n, pair = drives(), H.count("sync"), H.E.F.lock
+		H.down("W") H.step(1)
+		H.tap("Left mouse") H.step(1)
+		H.up("W") H.step(0.5)
+		check(H.count("play") == 0 and H.count("strike") == 0 and H.count("sync") == n, "no swing, blow or try in the pair: "
+			.. H.count("play") .. " " .. (H.count("sync") - n))
+		check(drives() == d, "nothing turned or moved him in the pair: " .. (drives() - d))
+		check(H.E.F.lock and H.E.F.lock.sync and H.E.F.lock.sync.on, "still locked, the pair on him")
+		H.step(1)
+		check(H.E.F.lock ~= pair and H.logged("sync kill over after 3"), "let go once the pair ends")
+		check(H.count("uc:halt") == halts + 1, "the order ended with the pair: " .. (H.count("uc:halt") - halts))
+		-- the click made in the pair is held for after it, as one in his own swing is (C.melee), and tries again
+		H.step(1)
+		check(H.count("sync") > n, "the click held in the pair asks again after it")
+	end)
+end
+
+T.a_sync_kill_not_rolled_or_not_paired_swings_his_own = function()
+	-- the odds against: no try, no order, his swing at once and its blow
+	syncing()
+	rolling(0.99, function()
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == 0 and H.count("uc:attack_unit") == 0 and H.count("play") == 1 and H.last("play")[3] == 454,
+			"odds against: ATTACK_1 at once: " .. H.count("play"))
+		H.step(0.3)
+		check(H.count("strike") == 1, "its blow struck")
+	end)
+	-- tried and never paired (CA's pick found no clips), never taken (his update never came), or CA's melee slower than the
+	-- wait: the order ends and his swing plays once the wait is over, not before
+	-- the last with swings 1 s apart, shorter than the wait
+	for _, o in ipairs({{out = false}, {drop = true}, {fight_after = 2}, {out = false, mct = {debug_log = true, combat_swing_cooldown = 10}}}) do
+		syncing(o)
+		rolling(0, function()
+			local halts = H.count("uc:halt")
+			H.tap("Left mouse") H.step(1.3)
+			check(H.count("play") == 0 and H.E.F.native_attack == "sync", "still waiting at 1.3 s")
+			H.step(0.4)
+			check(H.count("play") == 1 and H.count("uc:halt") == halts + 1 and H.E.F.native_attack == nil,
+				"the order ended, his swing after the wait: " .. H.count("play") .. " " .. (H.count("uc:halt") - halts))
+			local at = {}
+			for i, c in ipairs(H.calls) do if c[1] == "uc:halt" or c[1] == "play" then at[c[1]] = i end end
+			check(at["uc:halt"] < at.play, "the order ended before his swing went: an order after it can cut it")
+			check(H.E.F.lock and H.E.F.lock.m and not H.logged("never played"), "his swing's lock timed from the wait's end")
+			H.step(0.4)
+			check(H.count("strike") == 1 and not H.logged("sync kill"), "its blow struck, nothing logged of a pair")
+		end)
+	end
+end
+
+T.no_sync_kill_is_tried_where_it_cannot_be = function()
+	rolling(0, function()
+		-- the setting off
+		syncing({mct = {combat_sync = false}})
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == 0 and H.count("play") == 1, "setting off: his swing at once")
+		-- nobody where the blow lands
+		syncing({enemies = {{x = 40, z = 30, men = 3}}})
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == 0 and H.count("play") == 1, "nobody in reach: his swing at once")
+		-- a build without CA's check
+		syncing({features = STRIKES})
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == 0 and H.count("play") == 1, "no check on this build: his swing at once")
+		-- multiplayer: the check rolls one machine's battle RNG
+		syncing()
+		H.P.features.net = true
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == 0 and H.count("play") == 1, "multiplayer: his swing at once")
+		-- a regiment played whole fights by CA's own melee, which has its sync kills
+		syncing({men = 21, mct = {combat_one_man = false}})
+		H.tap("Left mouse") H.step(0.6)
+		check(H.count("sync") == 0 and H.count("uc:attack_unit") == 1, "a whole regiment: CA's order, no try")
+		-- one man of a regiment: CA's melee is his regiment's order, never his
+		syncing({men = 21})
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == 0 and H.count("play") == 1 and H.count("uc:attack_unit") == 0, "one man of a regiment: his swing at once")
+		-- CA has no pair for the two: an Orc Warboss's table has no paired attack, a Lord Magistrate's none on goblins, and a
+		-- table this build never read (a mod not installed where it was built) has none either, on either side
+		for _, o in ipairs({{table = "hu2_orc_sword_and_shield"}, {foe = "hu5_goblin_spear_and_shield"}, {table = "derpy_test_unknown"},
+				{foe = "derpy_test_unknown"}}) do
+			syncing(o)
+			H.tap("Left mouse") H.step(0.1)
+			check(H.count("sync") == 0 and H.count("uc:attack_unit") == 0 and H.count("play") == 1,
+				"no pair for " .. tostring(o.table or o.foe) .. ": his swing at once")
+		end
+	end)
+end
+
+-- ridden, the pair is his mount's clip and his own together: a Supreme Sorceress on a Cold One has one on Swordsmen, on a
+-- manticore none though the feral manticore has (Dieter Helsnicht on his, never paired by CA, 2026-11-27), and a rider
+-- table this build never read has none on the Cold One
+T.a_ridden_sync_kill_needs_his_mount_and_him_together = function()
+	rolling(0, function()
+		for _, o in ipairs({{"hu1b_elf_rp3_cold_one_staff_and_sword", "rp3_cold_one", true}, {"bc3_manticore", nil, true},
+				{"hu1b_elf_bc3_manticore_wb_staff_and_sword", "bc3_manticore", false}, {"derpy_test_rider", "rp3_cold_one", false}}) do
+			syncing({table = o[1], foe = "hu1_empire_sword_and_shield"})
+			if o[2] then
+				H.units[2]._models[1].mount = {id = 999, x = 40, y = 0, z = 0, hp = 100, hp_max = 100, slots = {[454] = true, [455] = true},
+					table = o[2]}
+			end
+			H.tap("Left mouse") H.step(0.1)
+			check((H.count("sync") >= 1) == o[3] and (H.count("play") == 0) == o[3],
+				o[1] .. " on " .. tostring(o[2]) .. ": " .. H.count("sync") .. " " .. H.count("play"))
+		end
+	end)
+end
+
+-- a long pair keeps him to its end: Kroll's ran 15.6 s under CA's own melee (2026-11-27)
+T.a_long_sync_kill_keeps_him_to_its_end = function()
+	rolling(0, function()
+		syncing({secs = 16})
+		H.tap("Left mouse") H.step(0.5)
+		check(H.synced_n == 1 and H.logged("sync kill started"), "started")
+		H.step(15)
+		check(H.E.F.lock and H.E.F.lock.sync and H.E.F.lock.sync.on and not H.logged("sync kill over"), "still his pair's at 15.5 s")
+		H.step(1.5)
+		check(H.logged("sync kill over after 16"), "let go as it ended")
+	end)
+end
+
+-- a pair CA never started for him in three tries is given up for the battle; one it started once is always tried
+T.a_pair_never_started_in_three_tries_is_given_up = function()
+	rolling(0, function()
+		syncing({out = false})
+		for _ = 1, 3 do H.tap("Left mouse") H.step(6) end
+		local n = H.count("sync")
+		check(H.count("play") == 3, "three tries, each his swing after the wait: " .. H.count("play"))
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") == n and H.count("play") == 4 and H.count("uc:attack_unit") == 3,
+			"the fourth click swings at once: " .. (H.count("sync") - n) .. " " .. H.count("play"))
+		syncing()
+		H.tap("Left mouse") H.step(0.5)
+		check(H.synced_n == 1, "started")
+		H.step(3.5)
+		H.sync_out = false
+		for _ = 1, 3 do H.tap("Left mouse") H.step(6) end
+		n = H.count("sync")
+		H.tap("Left mouse") H.step(0.1)
+		check(H.count("sync") > n and H.E.F.lock and H.E.F.lock.sync, "started once: still tried after three misses")
+	end)
+end
+
 -- a blow not yet posted goes with a stop, and with his death
 T.a_blow_waiting_for_its_clip_goes_with_a_stop_or_his_death = function()
 	striking({{x = 40, z = 2.5, men = 3}}, {{0, 2.5}}, {report_ms = 300})

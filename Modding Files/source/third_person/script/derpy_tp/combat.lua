@@ -108,6 +108,9 @@ local AIM_LEAD = 0.15
 return function(E)
 	local F, P = E.F, E.P
 	local C = {}
+	-- SYNC_CHANCE: CA's own for a unit of one, matched_combat_percentage 50 over its 1 entity. SYNC_MAX: only for a pair that
+	-- never lets him go; Kroll's ran 15.6 s (measured 2026-11-27). Locals here: the function is at Lua 5.1's 60 upvalues
+	local SYNC_CHANCE, SYNC_WAIT, SYNC_MAX, SYNC_TRIES = 0.5, 1.5, 30, 3
 	local aim_len = {} -- unit type and raise slot -> s the raise runs, measured on the first whole one
 	local turn = {} -- slot list -> the next in its rotation
 	-- s more a clip waits to be seen in multiplayer: the queue's delay (platform.lua P.net_delay), longer than the one
@@ -352,6 +355,45 @@ return function(E)
 	-- a swing of his can be struck through the cave (P.strike): one man or a unit of one, single player. A unit played
 	-- whole swings every man and fights through the engine's own melee between swings; no blow is posted for it
 	local function strikes() return P.features.strike and not P.features.net and (F.model or F.single) ~= nil end
+	-- and a sync kill tried first (P.sync): a unit of one, where the platform has CA's check and the setting is on. CA pairs
+	-- a man only inside its own melee, which for one man of a regiment is his regiment's order, never his (order).
+	-- Only where CA has a pair for his table and the enemy's (data.lua mc_): a try with none waited out SYNC_WAIT for nothing.
+	-- Ridden, the pair names his mount's clip and his own (mc_rides): Dieter Helsnicht's manticore has the feral one's pairs
+	-- and CA never paired him. A pair CA has not started for him in SYNC_TRIES tries is not tried again this battle: a
+	-- Terrorgheist's on Swordsmen, 1 in 40 s of CA's own melee at 100% (both measured 2026-11-27)
+	local kill_sets = {tried = {}}
+	local function syncs(m, foe)
+		if not (F.single ~= nil and strikes() and P.features.sync == true and E.S.sync ~= false) then return false end
+		local D, mount = E.D, P.mount(m)
+		local k
+		if mount then
+			local rides = D.mc_rides[D.mc_mounts[P.anim_table(mount)] or 0]
+			k = rides and rides[D.mc_riders[P.anim_table(m)] or 0]
+		else
+			k = D.mc_attacks[P.anim_table(m)]
+		end
+		local ks = k and D.mc_kills[k]
+		if not ks then return false end
+		if not kill_sets[k] then
+			kill_sets[k] = {}
+			for _, d in ipairs(ks) do kill_sets[k][d] = true end
+		end
+		for _, v in ipairs({P.anim_table(foe) or false, P.mount(foe) and P.anim_table(P.mount(foe)) or false}) do
+			local d = v and D.mc_deaths[v]
+			local key = d and kill_sets[k][d] and k .. ":" .. d
+			local n = key and kill_sets.tried[key] or 0
+			if key and (n == true or n < SYNC_TRIES) then
+				F.sync_pair = {kill_sets.tried, key}
+				return true
+			end
+		end
+		return false
+	end
+	local function unsync()
+		if F.native_attack ~= "sync" then return end
+		F.native_attack = nil
+		send(function() F.uc:halt() end)
+	end
 
 	-- where slot's blow lands, {x right, z ahead}; nil when data.lua has no point for it
 	local function impact(slot)
@@ -378,7 +420,7 @@ return function(E)
 		local c, sn = math.cos(yaw), math.sin(yaw)
 		local ix, iz = x + rx * c + rz * sn, z - rx * sn + rz * c
 		local dx, dz = (ix - x) / reach, (iz - z) / reach
-		local best, best_d
+		local best, best_d, best_u
 		local function men_of(u, extra, ax, az)
 			ax, az = ax or dx, az or dz
 			local q = u:position()
@@ -393,7 +435,7 @@ return function(E)
 						local d = math.sqrt(ox * ox + oz * oz)
 						if d - r <= reach + STRIKE_SLACK + (extra or 0) and (d <= r or ox * ax + oz * az >= STRIKE_COS * d) then
 							local di = (ex - ix) ^ 2 + (ez - iz) ^ 2
-							if not best_d or di < best_d then best, best_d = vm, di end
+							if not best_d or di < best_d then best, best_d, best_u = vm, di, u end
 						end
 					end
 				end
@@ -411,7 +453,7 @@ return function(E)
 				for i = 1, list:count() do men_of(list:item(i)) end
 			end
 		end
-		return best, best and math.sqrt(best_d)
+		return best, best and math.sqrt(best_d), best_u
 	end
 
 	local function swing(slots, primary, now, hold, mask)
@@ -464,10 +506,12 @@ return function(E)
 		-- a blow struck here (C.strike) comes from the next clip of the button that reaches a man, when its turn's reaches
 		-- nobody: Tyrion's ATTACK_1 lands 1.9 m ahead, on nobody against Grimgor alone 2.7 m off, 5 times of 5 (a player,
 		-- 2026-11-16; measured 2026-11-18). With none in reach, the turn's
+		local foe, _, foe_unit
 		if attack and not air and strikes() then
 			for j = 0, #has - 1 do
 				local s = has[(k + j) % #has + 1]
-				if victim(mount or first, s) then slot = s break end
+				foe, _, foe_unit = victim(mount or first, s)
+				if foe then slot = s break end
 			end
 		end
 		turn[key], F.swings = k + 1, F.swings + 1
@@ -544,6 +588,12 @@ return function(E)
 					if not ok then E.pending = err end -- E.fail registers a timer: not from in here
 				end, TURN_WAIT_MS, "derpy_tp_swing_" .. F.swings)
 			end)
+		elseif foe and foe_unit and F.lock and syncs(first, foe) and math.random() < SYNC_CHANCE and P.sync(first, foe) then
+			-- CA pairs him only inside its own melee, which the guard keeps him out of: the attack order lets him in for the
+			-- wait (measured 2026-11-27, docs/BATTLE_ENGINE_RE.md section 12b)
+			F.native_attack = "sync"
+			send(function() F.uc:attack_unit(foe_unit, true, false) end)
+			F.lock.sync = {body = mount or first, man = first, foe = foe, till = now + SYNC_WAIT, go = go, pair = F.sync_pair}
 		else
 			go()
 		end
@@ -1114,7 +1164,33 @@ return function(E)
 	-- 2026-10-15: "it should let its animation play without being overrided with different buttons")
 	function C.locked(now)
 		local L = F.lock
+		if not L or not L.sync then unsync() end
 		if not L then return false end
+		-- a sync kill asked of the cave (swing), asked again each frame until the pair shows on him: then he is the pair's
+		-- until it lets him go, and nothing here turns or moves him (main.lua faces him only while turns, seen and faced are
+		-- not all set). None by SYNC_WAIT: the order ends and his own swing goes now, its lock timed from here
+		local Y = L.sync
+		if Y then
+			local paired = P.matched(Y.body)
+			if paired and not Y.on then
+				Y.on, L.till, L.turns, L.seen, L.faced = now, now + SYNC_MAX, true, true, true
+				Y.pair[1][Y.pair[2]] = true
+				E.log("sync kill started")
+			end
+			if Y.on then
+				if paired and now < L.till then return true end
+				E.log("sync kill over after " .. math.floor((now - Y.on) * 10 + 0.5) / 10 .. " s")
+				F.lock, F.man_hold = nil, nil
+				return false
+			end
+			if now < Y.till then P.sync(Y.man, Y.foe) return true end
+			unsync()
+			local n = Y.pair[1][Y.pair[2]]
+			if n ~= true then Y.pair[1][Y.pair[2]] = (n or 0) + 1 end
+			L.sync, L.from, L.till = nil, now, now + L.till - L.from
+			Y.go()
+			if F.lock ~= L then return F.lock ~= nil end
+		end
 		-- over once the engine has reported the clip and then something else; never reported, after LOCK_WAIT
 		local slot = L.m and P.anim_slot(L.m)
 		-- no clip sent yet (a turn order's wait) is nothing reported: read as seen, the lock ended as the clip was sent

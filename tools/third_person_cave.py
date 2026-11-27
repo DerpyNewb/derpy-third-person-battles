@@ -41,12 +41,18 @@ from the cave's first instruction, mov rax, <block>):
                strike's rolled blow is the swing's damage instead. 0: untouched
     steady     1: on every update of man or strike_man, before anything else, clear his +0xb20 when it points at one of
                the engine's two collision interactions (collide_vt, collide_vt2: exe+3ad5850 and exe+39169e0 on
-               6ae2a00b, made by exe+2f7b32c / exe+2f7b418). Set, his update takes the branch through his command's
+               6ae2a00b, made by exe+2f7b32c / exe+2f7b418; never the matched-combat class exe+3ad5918 a sync kill
+               puts there). Set, his update takes the branch through his command's
                vtable +0x490, which resets the clip action a clip played here parks and drops the clip one tick after it
                starts: a swing at an enemy who is not fighting him was cut on its first tick and dealt nothing (a
                player, 2026-11-27; measured the same day). The interaction keeps his bit in its manager, so none is made
                again, and its own tick (exe+2f93098) sets +0xb20 back every tick until it ends. steadies counts the
                clears (probes). Never in multiplayer: it changes one machine's simulation
+    sync       1: a sync kill tried for strike_man on sync_victim (exchanged with 0 as it is read): if both live, CA's
+               kill-move check sync_check (exe+3089c94) is called with the block's fake attack object (fake: FAKE's
+               fields) and the victim, and decides and starts it as CA's melee does (SYNC_RVA's comment). sync_tries
+               counts the calls and synced the pairs it started (bit 4 of the fake's +0x88). After the strike on the same
+               update. Never in multiplayer: the check rolls the battle's RNG on one machine
 
 Two caves share this block. The UPDATE cave (ASM, exe+3086f04) guards the one man played in single player from man/guard/
 walk as it always has, and in multiplayer also scans the guard table and stops the engine's four orders on every man with
@@ -73,10 +79,12 @@ MB = {"man": 0x00, "walk_a": 0x08, "move_a": 0x10, "move_b": 0x18, "melee": 0x20
       "walk_start": 0x38, "guard": 0x40, "walk": 0x44, "stops": 0x48, "met": 0x4c, "has_angle": 0x50, "near": 0x51,
       "nosplash": 0x52, "steady": 0x53, "count": 0x54, "nfrags": 0x58, "hello": 0x5c, "fragtab": 0x60, "find": 0x68, "strike": 0x6c, "strike_man": 0x70,
       "strike_victim": 0x78, "buf": 0x80, "strike_slot": 0xe0, "struck": 0xe4, "skip": 0xe8, "map_lookup": 0xf0,
-      "roll": 0xf8, "guards": 0x100, "collide_vt": 0x200, "collide_vt2": 0x208, "steadies": 0x210, "size": 0x218}
+      "roll": 0xf8, "guards": 0x100, "collide_vt": 0x200, "collide_vt2": 0x208, "steadies": 0x210, "sync": 0x214,
+      "synced": 0x218, "sync_tries": 0x21c, "sync_victim": 0x220, "sync_check": 0x228, "fake": 0x230, "size": 0x2c0}
 # the fields a cave calls or jumps through: written over, never zeroed (a cave already past its match goes through
 # them), so platform.lua keeps them outside every range check_mailbox zeroes; a harness test pins it
-FUNCS = ("walk_a", "move_a", "move_b", "melee", "walk_b", "walk_stop", "walk_start", "skip", "map_lookup", "roll")
+FUNCS = ("walk_a", "move_a", "move_b", "melee", "walk_b", "walk_stop", "walk_start", "skip", "map_lookup", "roll",
+         "sync_check")
 # multiplayer guard table: ENTRIES entries of GE bytes at MB guards, {man pointer (+0), his +0x258 id (u32, +8)}.
 # count (MB count) is how many are claimed, so single player (count 0) skips the scan with no register traffic.
 # The fragment copy table is its OWN game_alloc (platform makes the copies, byte-identical to single player's), and the
@@ -119,6 +127,17 @@ SPLASH_BIT = 0x10
 # than its vanilla caller's locals show lands in the cave's own frame and not on the saved xmm registers
 WORLD_BATTLE, BATTLE_RESOLVER = 0x440, 0xf8
 ROLL_RVA, ROLL_BYTES = 0x30b008c, bytes.fromhex("488bc4 55 53 56 57 4156 4157")  # mov rax, rsp; push rbp .. r15
+# The sync kill: CA's kill-move check exe+3089c94(attack, victim) on 6ae2a00b, what an engine swing's attack object runs
+# before its plain attack (exe+3092b58 and two siblings). It applies CA's whole rule - both fragments carry COMBAT_1
+# (slot 534), his hit points at least matched_combat_min_hitpoints_to_initiate, each man inside the other's facing limit,
+# the pair check exe+2f8c9c8, the chance (the unit's set_matched_combat_chance, else matched_combat_percentage, over the
+# unit's +0x184, held to 10-100) rolled on the battle's RNG - and starts the pair itself with exe+2f72e6c(*(battle +
+# 0x188), him, victim), then sets bit 4 of the attack's +0x88. The swing here has no attack object, so the cave hands it
+# FAKE, which carries the only fields the check reads: the man, the world (his +0x58: +0x430 and +0x440, the battle),
+# +0x80 an action (null: exe+30623c8 then says none) and the flags +0x88/+0x8c (0: no range test, nothing started yet)
+SYNC_RVA, SYNC_BYTES = 0x3089c94, bytes.fromhex("488bc4 48895810 48897018 57")  # mov rax, rsp .. push rdi
+FAKE = {"man": 0x8, "world": 0x28, "action": 0x80, "flags": 0x88}
+SYNC_STARTED = 4
 
 # At the site: a virtual call's entry, so the standard ABI - rsp is 8 past a 16-byte boundary, rcx/rdx/r8/r9 and
 # xmm0-3 may hold arguments, rax and the flags are dead (the next instruction is mov rax, rsp). Anything else the cave
@@ -278,7 +297,10 @@ restore:
     jmp done
 strike:
     cmp dword ptr [rax + {strike}], 0
+    jne s_go
+    cmp dword ptr [rax + {sync}], 0
     je main
+s_go:
     push rbx
     push rsi
     push rdi
@@ -296,21 +318,21 @@ strike:
     xor eax, eax
     xchg dword ptr [rbx + {strike}], eax
     test eax, eax
-    je s_restore
+    je s_sync
     cmp dword ptr [rsi + {m_hp}], 0
-    jle s_restore
+    jle s_sync
     mov rdi, qword ptr [rbx + {strike_victim}]
     test rdi, rdi
-    je s_restore
+    je s_sync
     cmp dword ptr [rdi + {m_hp}], 0
-    jle s_restore
+    jle s_sync
     movzx eax, word ptr [rsi + {m_slot}]
     cmp ax, word ptr [rbx + {strike_slot}]
-    jne s_restore
+    jne s_sync
     cmp qword ptr [rsi + {m_playing}], 0
     jne s_roll
     cmp dword ptr [rsi + {m_busy}], 0
-    je s_restore
+    je s_sync
 s_roll:
     xor eax, eax
     mov qword ptr [rsp + 0x20], rax
@@ -337,6 +359,31 @@ s_roll:
     mov dword ptr [rsi + {m_r_pending}], 1
     mov qword ptr [rsi + {m_r_victim}], rdi
     inc dword ptr [rbx + {struck}]
+s_sync:
+    xor eax, eax
+    xchg dword ptr [rbx + {sync}], eax
+    test eax, eax
+    je s_restore
+    cmp dword ptr [rsi + {m_hp}], 0
+    jle s_restore
+    mov rdi, qword ptr [rbx + {sync_victim}]
+    test rdi, rdi
+    je s_restore
+    cmp dword ptr [rdi + {m_hp}], 0
+    jle s_restore
+    inc dword ptr [rbx + {sync_tries}]
+    lea rcx, [rbx + {fake}]
+    mov qword ptr [rcx + {f_man}], rsi
+    mov rax, qword ptr [rsi + {m_world}]
+    mov qword ptr [rcx + {f_world}], rax
+    xor eax, eax
+    mov qword ptr [rcx + {f_action}], rax
+    mov qword ptr [rcx + {f_flags}], rax
+    mov rdx, rdi
+    call qword ptr [rbx + {sync_check}]
+    test byte ptr [rbx + {fake_flags}], {sync_started}
+    je s_restore
+    inc dword ptr [rbx + {synced}]
 s_restore:
     movdqu xmm0, xmmword ptr [rsp + 0x60]
     movdqu xmm1, xmmword ptr [rsp + 0x70]
@@ -623,6 +670,8 @@ def fields():
     f = {k: hex(v) for k, v in MB.items()}
     f.update({"b_" + k: hex(MB["buf"] + v) for k, v in BUF.items()})
     f.update({"m_" + k: hex(v) for k, v in MAN.items()})
+    f.update({"f_" + k: hex(v) for k, v in FAKE.items()})
+    f.update({"fake_flags": hex(MB["fake"] + FAKE["flags"]), "sync_started": hex(SYNC_STARTED)})
     f["placeholder"] = hex(PLACEHOLDER)
     f.update({"entries": hex(ENTRIES), "ge": hex(GE), "frag_row": hex(FRAG_ROW), "m_frag": hex(FRAG),
               "world_battle": hex(WORLD_BATTLE), "battle_resolver": hex(BATTLE_RESOLVER),
@@ -730,22 +779,27 @@ def check():
         bad.append("platform.lua's FUNCS is not this file's: run py tools/third_person_cave.py")
     exe_re.pe()
     for rva, want, what in ((SITE_RVA, SITE_BYTES, "his update"), (CARRIER_RVA, CARRIER_SITE, "the RELOAD_TIME float read"),
-                            (ROLL_RVA, ROLL_BYTES, "the melee roll (platform.lua's roll)")):
+                            (ROLL_RVA, ROLL_BYTES, "the melee roll (platform.lua's roll)"),
+                            (SYNC_RVA, SYNC_BYTES, "the kill-move check (platform.lua's sync_check)")):
         on_disk = exe_re._pe[exe_re.off(rva):exe_re.off(rva) + len(want)]
         if on_disk != want:
             bad.append("exe+%x reads %s, not %s: a patch moved %s" % (rva, on_disk.hex(" "), want.hex(" "), what))
     for b in bad:
         print("FAIL " + b)
     if not bad:
-        print("ok: update cave %d bytes (block +%d), carrier cave %d bytes (block +%d); sites exe+%x, exe+%x and the roll "
-              "exe+%x as expected" % (len(code), at, len(ccode), cat, SITE_RVA, CARRIER_RVA, ROLL_RVA))
+        print("ok: update cave %d bytes (block +%d), carrier cave %d bytes (block +%d); sites exe+%x, exe+%x, the roll "
+              "exe+%x and the kill-move check exe+%x as expected" % (len(code), at, len(ccode), cat, SITE_RVA, CARRIER_RVA,
+                                                                       ROLL_RVA, SYNC_RVA))
     return not bad
 
 
 # -- the emulator ----------------------------------------------------------------------------------------------------
 CODE, STUBS, BLOCK, HIM, OTHER, STACK = 0x10000000, 0x20000000, 0x30000000, 0x40000000, 0x41000000, 0x50000000
 COLLIDE = 0x44000000
-STOP, START, ROLL = STUBS, STUBS + 0x100, STUBS + 0x200
+STOP, START, ROLL, SYNC = STUBS, STUBS + 0x100, STUBS + 0x200, STUBS + 0x300
+# the kill-move check's stub: ORs the scenario's SYNC_OUT into the attack's +0x88, as a started pair does (bit 4)
+SYNC_OUT = STUBS + 0x810
+SYNC_HEAD = "mov eax, dword ptr [%d]; or dword ptr [rcx + 0x88], eax; " % SYNC_OUT
 # the strike's world: him +0x58 -> WORLD, whose +0x440 is the battle (WORLD + 0x1000), whose +0xf8 is the resolver
 # the roll is given; VICTIM the man struck. ROLL_OUT: the type and damage the roll stub reports, set per run
 WORLD, VICTIM, RESOLVER, ROLL_OUT = 0x42000000, 0x43000000, 0x5e501e00, STUBS + 0x800
@@ -796,6 +850,7 @@ def run(code, at, setup, rcx=HIM, race=None):
     uc.mem_write(STOP, stub)
     uc.mem_write(START, stub)
     uc.mem_write(ROLL, bytes(ks.asm(ROLL_HEAD + WRECK, ROLL)[0]))
+    uc.mem_write(SYNC, bytes(ks.asm(SYNC_HEAD + WRECK, SYNC)[0]))
     code = code[:at] + struct.pack("<Q", BLOCK) + code[at + 8:]
     uc.mem_write(CODE, code)
 
@@ -806,6 +861,7 @@ def run(code, at, setup, rcx=HIM, race=None):
     q(BLOCK + MB["walk_stop"], STOP)
     q(BLOCK + MB["walk_start"], START)
     q(BLOCK + MB["roll"], ROLL)
+    q(BLOCK + MB["sync_check"], SYNC)
     q(BLOCK + MB["collide_vt"], VT["collide"])
     q(BLOCK + MB["collide_vt2"], VT["collide2"])
     q(BLOCK + MB["man"], HIM)
@@ -838,6 +894,12 @@ def run(code, at, setup, rcx=HIM, race=None):
         if addr in (STOP, START):
             calls.append(("stop" if addr == STOP else "start", u.reg_read(regs["rcx"]), u.reg_read(regs["rdx"]),
                           u.reg_read(regs["rsp"]) % 16))
+        elif addr == SYNC:
+            a = u.reg_read(regs["rcx"])
+
+            def at(o, n=8): return int.from_bytes(u.mem_read(a + o, n), "little")
+            calls.append(("sync", a, u.reg_read(regs["rdx"]), u.reg_read(regs["rsp"]) % 16,
+                          {k: at(FAKE[k]) for k in FAKE}))
         elif addr == ROLL:
             sp, rdx = u.reg_read(regs["rsp"]), u.reg_read(regs["rdx"])
             calls.append(("roll", u.reg_read(regs["rcx"]), rdx, sp % 16,
@@ -1094,6 +1156,56 @@ def scenarios(code, at):
                                         uc.mem_write(HIM + MAN["flags"], bytes([0xff]))))
     expect(collided(r, HIM) == 0 and r["rd"](HIM + MAN["flags"], 1) == 0xef,
            "steady and nosplash on one update: both done")
+
+    # the sync kill: CA's kill-move check called once on strike_man's update, the fake attack in rcx (his pointer, his
+    # world, no action, no flags, whatever an earlier call left there) and the victim in rdx; counted as started only when
+    # the check set bit 4 of the fake's +0x88, and tried whether or not it started
+    def sync(posted=1, hp=80, vhp=60, victim=VICTIM, out=SYNC_STARTED, vt="clip", guard=0):
+        def setup(q, d, uc):
+            cmd(vt, guard=guard, hp=hp)(q, d, uc)
+            q(BLOCK + MB["strike_man"], HIM)
+            q(BLOCK + MB["sync_victim"], victim)
+            d(BLOCK + MB["sync"], posted)
+            d(VICTIM + MAN["hp"], vhp)
+            d(SYNC_OUT, out)
+            fake = BLOCK + MB["fake"]
+            q(fake + FAKE["man"], OTHER)
+            q(fake + FAKE["world"], 0x5a5a5a5a)
+            q(fake + FAKE["action"], 0x5a5a5a5a)
+            q(fake + FAKE["flags"], 0xffffffffffffffff)
+        return setup
+
+    def tally(r): return r["rd"](BLOCK + MB["sync"], 4), r["rd"](BLOCK + MB["sync_tries"], 4), r["rd"](BLOCK + MB["synced"], 4)
+    for name, kw, want in (("started", {}, 1), ("refused", dict(out=0), 0)):
+        r = run(code, at, sync(**kw))
+        kept(r, "sync, " + name)
+        ys = [c for c in r["calls"] if c[0] == "sync"]
+        expect(len(ys) == 1, "sync, %s: one check, got %r" % (name, r["calls"]))
+        if ys:
+            expect(ys[0][1] == BLOCK + MB["fake"] and ys[0][2] == VICTIM,
+                   "sync, %s: the fake attack and the victim: %x %x" % (name, ys[0][1], ys[0][2]))
+            expect(ys[0][4] == {"man": HIM, "world": WORLD, "action": 0, "flags": 0},
+                   "sync, %s: the fake as the check reads it: %r" % (name, ys[0][4]))
+        expect(tally(r) == (0, 1, want), "sync, %s: taken, tried, started %d: %r" % (name, want, tally(r)))
+    for name, kw in (("not posted", dict(posted=0)), ("he is dead", dict(hp=0)), ("the victim is dead", dict(vhp=0)),
+                     ("no victim", dict(victim=0))):
+        r = run(code, at, sync(**kw))
+        kept(r, "sync, " + name)
+        expect(not [c for c in r["calls"] if c[0] == "sync"], "sync, %s: no check, got %r" % (name, r["calls"]))
+        expect(tally(r) == (0, 0, 0), "sync, %s: taken, never tried: %r" % (name, tally(r)))
+    r = run(code, at, sync(), rcx=OTHER)
+    kept(r, "sync, another man")
+    expect(not r["calls"] and tally(r) == (1, 0, 0), "sync, another man: no check, it waits for him")
+    r = run(code, at, sync(vt="melee", guard=1))
+    kept(r, "sync and guard")
+    expect([c[0] for c in r["calls"]] == ["sync", "stop"], "sync then guard: %r" % r["calls"])
+    r = run(code, at, lambda q, d, uc: (strike()(q, d, uc), sync()(q, d, uc)))
+    kept(r, "strike and sync")
+    expect([c[0] for c in r["calls"]] == ["roll", "sync"] and armed(r) == (1, 1, 37, 457, VICTIM) and tally(r) == (0, 1, 1),
+           "a strike and a sync on one update: both, the strike first: %r" % r["calls"])
+    r = run(code, at, lambda q, d, uc: (strike(his_slot=455)(q, d, uc), sync()(q, d, uc)))
+    expect([c[0] for c in r["calls"]] == ["sync"] and tally(r) == (0, 1, 1),
+           "a strike refused and a sync on one update: the sync all the same: %r" % r["calls"])
 
     # the multiplayer table scan (the update cave's second half): man 0 (no single-man path), count > 0, entries at MB
     # guards. The man being updated is rcx; his entry stops the engine's four, a non-engine command runs, a dead man's
@@ -1402,10 +1514,10 @@ MUTANTS = [
      "    lock cmpxchg qword ptr [rdx], rcx\n"),
     # the strike
     ("the strike request never taken", "    xchg dword ptr [rbx + {strike}], eax\n", "    mov eax, dword ptr [rbx + {strike}]\n"),
-    ("a blow for a clip that is not his", "    cmp ax, word ptr [rbx + {strike_slot}]\n    jne s_restore\n", ""),
-    ("a blow with no clip", "    cmp dword ptr [rsi + {m_busy}], 0\n    je s_restore\n", ""),
-    ("a dead man strikes", "    cmp dword ptr [rsi + {m_hp}], 0\n    jle s_restore\n", ""),
-    ("a dead victim struck", "    cmp dword ptr [rdi + {m_hp}], 0\n    jle s_restore\n", ""),
+    ("a blow for a clip that is not his", "    cmp ax, word ptr [rbx + {strike_slot}]\n    jne s_sync\n", ""),
+    ("a blow with no clip", "    cmp dword ptr [rsi + {m_busy}], 0\n    je s_sync\n", ""),
+    ("a dead man strikes", "    cmp dword ptr [rsi + {m_hp}], 0\n    jle s_sync\n", ""),
+    ("a dead victim struck", "    cmp dword ptr [rdi + {m_hp}], 0\n    jle s_sync\n", ""),
     ("the roll misaligned", "    sub rsp, 0xa0\n", "    sub rsp, 0x98\n"),
     ("the result block on the saved xmm", "    lea rdx, [rsp + 0x30]\n", "    lea rdx, [rsp + 0x40]\n"),
     ("type and damage swapped", "    mov eax, dword ptr [rsp + 0x30]\n    mov dword ptr [rsi + {m_r_type}]",
@@ -1413,6 +1525,23 @@ MUTANTS = [
     ("the hit never pending", "    mov dword ptr [rsi + {m_r_pending}], 1\n", ""),
     ("the victim not written", "    mov qword ptr [rsi + {m_r_victim}], rdi\n", ""),
     ("the strike loses the block", "    mov rax, rbx\n    add rsp, 0xa0\n", "    add rsp, 0xa0\n"),
+    # the sync kill (2026-11-27)
+    ("a sync alone never runs", "    jne s_go\n    cmp dword ptr [rax + {sync}], 0\n    je main\n", "    je main\n"),
+    ("no strike skips the sync", "    xchg dword ptr [rbx + {strike}], eax\n    test eax, eax\n    je s_sync\n",
+     "    xchg dword ptr [rbx + {strike}], eax\n    test eax, eax\n    je s_restore\n"),
+    ("a strike skips the sync", "    inc dword ptr [rbx + {struck}]\n", "    inc dword ptr [rbx + {struck}]\n    jmp s_restore\n"),
+    ("the sync request never taken", "    xchg dword ptr [rbx + {sync}], eax\n", "    mov eax, dword ptr [rbx + {sync}]\n"),
+    ("a dead man syncs", "    cmp dword ptr [rsi + {m_hp}], 0\n    jle s_restore\n", ""),
+    ("a dead victim synced", "    cmp dword ptr [rdi + {m_hp}], 0\n    jle s_restore\n", ""),
+    ("no victim synced", "    test rdi, rdi\n    je s_restore\n", ""),
+    ("the fake names nobody", "    mov qword ptr [rcx + {f_man}], rsi\n", ""),
+    ("the fake has no world", "    mov qword ptr [rcx + {f_world}], rax\n", ""),
+    ("a stale action in the fake", "    mov qword ptr [rcx + {f_action}], rax\n", ""),
+    ("a stale started bit counted", "    mov qword ptr [rcx + {f_flags}], rax\n", ""),
+    ("every check counted as started", "    test byte ptr [rbx + {fake_flags}], {sync_started}\n    je s_restore\n", ""),
+    ("the victim not handed over", "    mov rdx, rdi\n    call qword ptr [rbx + {sync_check}]\n",
+     "    mov rdx, rsi\n    call qword ptr [rbx + {sync_check}]\n"),
+    ("the tries not counted", "    inc dword ptr [rbx + {sync_tries}]\n", ""),
     # nosplash (2026-11-25)
     ("the splash never cleared", "    and byte ptr [rcx + {m_flags}], {not_splash}\n", ""),
     ("the splash cleared with the flag off", "    cmp byte ptr [rax + {nosplash}], 0\n    je splashed\n", ""),

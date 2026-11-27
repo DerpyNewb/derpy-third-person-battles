@@ -48,6 +48,7 @@ return function(mct, K, T)
 	S.jump_cooldown = get("combat_jump_cooldown", 100) / 10
 	S.spread = get("combat_spread", 15) / 10
 	S.one_man = get("combat_one_man", true) == true
+	S.sync = get("combat_sync", true) == true
 	S.bars = ({always = "always", guide = "guide", off = false})[get("display_bars_show", "always")]
 	S.bars_range = get("display_bars_range", 40)
 	S.man_bars = get("display_man_bars", true) == true -- a bar over each man too, within bars_range, shown as the bars are

@@ -62,6 +62,11 @@ FLY_ATTACKS, RIDER_ATTACKS, RIDER_FLY_ATTACKS = tuple(range(494, 504)), tuple(ra
 MOVING_FIRES = (1570, 1572, 1573, 1574, 2105, 2108, 2111, 2114)
 FIRE_MOVE = "mounted_fire_move"
 SPLASH = b"\x0d\x00SPLASH_ATTACK"
+# COMBAT_1-200 (9.0 ids): a fragment's matched clips, the attacks it can start and the deaths it can be dealt; the kill-move
+# check wants COMBAT_1 on both men (docs/BATTLE_ENGINE_RE.md section 12b)
+COMBAT = range(534, 734)
+RIDER_COMBAT = range(1786, 1886)
+MATCHED = "animations/matched_combat/attila_generated"
 CA_ANIM = ("anim2.pack", "anim.pack", "anim_3.pack")
 # CA's own packs in data/: everything but these prefixes is a mod
 CA_PREFIX = ("anim", "audio", "boot", "data", "db", "local_", "models", "movies", "shaders", "terrain", "text", "tile",
@@ -355,8 +360,108 @@ def build(*specs, raises=None, runs=None, charges=None, blanks=None, dulls=None,
     return outs if len(specs) > 1 else outs[0]
 
 
+def matched_pairs(b):
+    """(attack clip, rider clip, death clip) for each entry of an animations/matched_combat/attila_generated*.bin, the
+    table the game loads (the paths are in Warhammer3.exe; the JSON under animations/database/matched/ is not). Per entry:
+    an int list, three ints, the attack clip, the attacker's rider clip ("" when he is not ridden), an int list, three ints,
+    the death clip, a string (the AssetEditor fork's MatchedAnimFile, which calls the second clip the mount's), each
+    string a u16 length then its bytes."""
+    o = [8]
+
+    def i32():
+        o[0] += 4
+        return struct.unpack_from("<i", b, o[0] - 4)[0]
+
+    def s():
+        n, = struct.unpack_from("<H", b, o[0])
+        o[0] += 2 + n
+        return b[o[0] - n:o[0]].decode("latin-1").replace("\\", "/").lower()
+
+    out = []
+    for _ in range(struct.unpack_from("<I", b, 4)[0]):
+        for _ in range(i32() + 3):
+            i32()
+        a, rider = s(), s()
+        for _ in range(i32() + 3):
+            i32()
+        d, _ = s(), s()
+        out.append((a, rider, d))
+    if o[0] != len(b):
+        raise ValueError("matched bin: %d trailing bytes" % (len(b) - o[0]))
+    return out
+
+
+def matched(mods):
+    """Which sync kills CA can play, by battle animation table (the name a man's fragment carries, platform.lua
+    P.anim_table). CA's pick looks for an attack clip in the attacker's COMBAT slots that the table pairs with a death clip
+    in the victim's (measured 2026-11-27: the Lord Magistrate's one pair on Orc Boyz is the one the game played, and an Orc
+    Warboss has none on any goblin table, nor did he ever play one). A ridden mount's attack is an entry that also names a
+    clip in its rider's RIDER_COMBAT slots: Dieter Helsnicht's manticore has the feral manticore's pairs and none ridden,
+    and CA's own melee never paired him in 40 s at a 100% chance (measured 2026-11-27). -> (attacks, deaths, kills,
+    mounts, riders, rides): table -> its kill list on foot; table -> the index of its set of death clips; kill list -> the
+    death sets in it; table -> the index of its set of ridden attack clips; table -> the index of its set of rider clips;
+    ridden attack set -> rider set -> kill list. CA's bin wins for a table CA ships, so a mod installed here that overrides
+    one changes nothing for anyone else; the installed mods add their own tables and pairs."""
+    ca = Files([os.path.join(DATA, n) for n in CA_ANIM])
+    mod = Files(mods)
+    feral, ridden = {}, {}
+    for files in (ca, mod):
+        for k in files.at:
+            if k.startswith(MATCHED) and k.endswith(".bin"):
+                try:
+                    for a, m, d in matched_pairs(files.get(k)):
+                        if m:
+                            ridden.setdefault(a, {}).setdefault(m, set()).add(d)
+                        else:
+                            feral.setdefault(a, set()).add(d)
+                except (ValueError, struct.error):
+                    pass
+    dead = {d for ds in feral.values() for d in ds} | {d for rs in ridden.values() for ds in rs.values() for d in ds}
+    riding = {m for rs in ridden.values() for m in rs}
+    sets = {}
+    for files in (ca, mod):
+        for k in files.at:
+            if k.startswith(BIN) and k.endswith(".bin") and k[len(BIN):-4] not in sets:
+                try:
+                    _h, rows = RA.read_bin(files.get(k))
+                except (ValueError, struct.error):
+                    continue
+                clips = lambda slots: {a.replace("\\", "/").lower() for r in rows if r["slot"] in slots
+                                       for a, _m, _s in r["anims"]}
+                combat, rider = clips(COMBAT), clips(RIDER_COMBAT)
+                sets[k[len(BIN):-4]] = (frozenset(c for c in combat if c in feral), frozenset(c for c in combat if c in dead),
+                                        frozenset(c for c in combat if c in ridden), frozenset(c for c in rider if c in riding))
+    d_ids, deaths = {}, {}
+    for t, s in sets.items():
+        if s[1]:
+            deaths[t] = d_ids.setdefault(s[1], len(d_ids) + 1)
+    k_ids = {}
+
+    def kill(hit):
+        got = tuple(sorted(di for d, di in d_ids.items() if d & hit))
+        return got and k_ids.setdefault(got, len(k_ids) + 1)
+    attacks = {t: k for t, s in sets.items() if s[0] for k in [kill({d for c in s[0] for d in feral[c]})] if k}
+    m_ids, r_ids = {}, {}
+    for s in sets.values():
+        if s[2]:
+            m_ids.setdefault(s[2], len(m_ids) + 1)
+        if s[3]:
+            r_ids.setdefault(s[3], len(r_ids) + 1)
+    rides = {}
+    for ms, mi in m_ids.items():
+        for rs, ri in r_ids.items():
+            k = kill({d for a in ms for m, ds in ridden[a].items() if m in rs for d in ds})
+            if k:
+                rides.setdefault(mi, {})[ri] = k
+    used = {ri for r in rides.values() for ri in r}
+    mounts = {t: m_ids[s[2]] for t, s in sets.items() if s[2] and m_ids[s[2]] in rides}
+    riders = {t: r_ids[s[3]] for t, s in sets.items() if s[3] and r_ids[s[3]] in used}
+    kills = {k: list(got) for got, k in k_ids.items()}
+    return attacks, deaths, kills, mounts, riders, rides
+
+
 def _selftest():
-    ev = lambda t: (struct.pack("<H", 8) + b"FIRE_POS" + struct.pack("<Iff", 10, t, t) + struct.pack("<H", 2) + b"ab"
+    ev = lambda t:(struct.pack("<H", 8) + b"FIRE_POS" + struct.pack("<Iff", 10, t, t) + struct.pack("<H", 2) + b"ab"
                     + struct.pack("<i", 0) + struct.pack("<fff", 0.25, 1.5, 0.75))
     assert fire_pos(b"junk" + ev(1.25) + ev(1.0) + b"tail") == [(1.0, 0.25, 1.5, 0.75), (1.25, 0.25, 1.5, 0.75)], \
         "time order, and the position read past a filter string"
@@ -413,6 +518,18 @@ def _selftest():
         assert impact_slots(f, "b") is None, "no IMPACT_POS anywhere: none"
     finally:
         RA.read_bin = real
+    st = lambda t: struct.pack("<H", len(t)) + t
+    side = lambda clip, mount: struct.pack("<I2i3i", 2, 0, 0, 0, 0, 1) + st(clip) + st(mount)
+    entry = side(b"Animations\\a.anim", b"") + side(b"animations/d.anim", b"")
+    mb = struct.pack("<II", 1, 2) + entry + side(b"animations/b.anim", b"m.anim") + side(b"animations/e.anim", b"")
+    assert matched_pairs(mb) == [("animations/a.anim", "", "animations/d.anim"),
+                                 ("animations/b.anim", "m.anim", "animations/e.anim")], \
+        "both entries, the slashes and case folded, the rider clip kept: %s" % matched_pairs(mb)
+    try:
+        matched_pairs(mb + b"x")
+        raise AssertionError("a trailing byte is refused")
+    except ValueError:
+        pass
     print("selftest ok")
 
 

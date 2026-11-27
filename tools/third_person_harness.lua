@@ -101,7 +101,7 @@ function UNIT:is_invulnerable() return self._invulnerable == true end
 function UNIT:is_player_controlled() return not (self._enemy or self._ally) end
 
 local next_id = 0
--- o: type, men, x, z, bearing, range, ammo, start_ammo, arty, general, abilities, can, men_ok, enemy, hp, cavalry, chariot,
+-- o: type, men, x, z, bearing, range, ammo, start_ammo, arty, general, abilities, can, men_ok, enemy, hp, cavalry, chariot, table,
 -- beast, class (default "com" for a general, else "inf_mel")
 function H.unit(o)
 	next_id = next_id + 1
@@ -118,7 +118,7 @@ function H.unit(o)
 	for i = 1, men do -- one rank along x, centred on the unit, facing +z (bearing 0)
 		u._models[i] = {id = next_id * 1000 + i, x = u._x + (i - (men + 1) / 2), y = 0, z = u._z,
 			slots = o.slots, reload = o.reload_slot or not u._type:find("crossbowmen") and 1564, hp = 100, hp_max = 100,
-			clip_ms = o.clip_ms}
+			clip_ms = o.clip_ms, table = o.table}
 		if o.reload_slot == false then u._models[i].reload = false end
 	end
 	local list = o.enemy and H.enemies or o.ally and H.allies or H.units
@@ -146,6 +146,31 @@ local function land_strike()
 	if r and r.m.hp > 0 and r.victim.hp > 0 and r.m.anim_slot == r.slot then
 		H.struck_n = H.struck_n + 1
 		r.m.blow = H.blow_out or {1, 35}
+	end
+end
+-- the cave's sync kill (tools/third_person_cave.py): the request taken on his next update and, while both live, tried
+-- (H.sync_tries); started where H.sync_out (H.synced_n), the pair then on him from a tick later for H.sync_secs model s.
+-- H.sync_drop: the cave never takes it. As measured 2026-11-27, CA pairs him only armed (his own fragment) and inside
+-- its melee: his unit under an attack order for H.fight_after s and no guard posted for him last frame
+local function in_melee(m)
+	if m.armed == false or m.guard_t and H.T - m.guard_t < 1.5 / (H.fps or 60) then return false end
+	for _, u in ipairs(H.units) do
+		for _, x in ipairs(u._models) do
+			if x == m or x.mount == m then return u._attacking ~= nil and H.T - u._attacking >= H.fight_after - 1e-9 end
+		end
+	end
+	return false
+end
+local function land_sync()
+	local r = H.sync_req
+	if not r or H.sync_drop then return end
+	H.sync_req = nil
+	if r.m.hp > 0 and r.victim.hp > 0 then
+		H.sync_tries = H.sync_tries + 1
+		if H.sync_out and in_melee(r.m) and not (r.m.paired_till and H.model_ms() < r.m.paired_till) then
+			H.synced_n = H.synced_n + 1
+			r.m.paired_from, r.m.paired_till = H.model_ms() + 100, H.model_ms() + 100 + H.sync_secs * 1000
+		end
 	end
 end
 local function land_casts()
@@ -194,6 +219,7 @@ UC.__index = function(self, name)
 				if dropped then rec("dropped_order", u._id, name)
 				elseif name == "goto_location" or name == "goto_location_angle_width" then local p = ... u._ordered = {p.x, p.z}
 				else u._ordered = nil end
+				if not dropped then u._attacking = name == "attack_unit" and now or nil end
 			end
 			-- u._faw_lags: fire at will lands on the engine's next tick, as every uc: call does (MP_FEASIBILITY_20261021)
 			if name == "fire_at_will" and not u._faw_lags then u._faw = (...) end
@@ -624,6 +650,7 @@ local function fake_platform()
 	end
 	function P.reload_slot(m) if m.reload ~= false then return m.reload end end
 	function P.mount(m) return m.mount end
+	function P.anim_table(m) return m.table end
 	function P.place(m, x, z) rec("place", m.id, x, z) m.x, m.z = x, z end
 	-- measured 2026-10-14 (probes/zz_tp_unclip.lua): a walk started under a running full-body clip leaves the clip
 	-- latched for good, and he slides in its pose
@@ -635,12 +662,13 @@ local function fake_platform()
 	function P.hold(m, x, z, yaw) rec("hold", m.id, x, z, yaw) if yaw then (m.mount or m).yaw = yaw end end
 	function P.command(m) return m.command or "walk" end
 	function P.walk_ended(m) return m.walk_ended == true end -- a test plays the engine ending his walk
-	function P.guard(m) rec("guard", m and m.id) return false end
+	function P.guard(m) rec("guard", m and m.id) if m then m.guard_t = H.T end return false end
 	function P.unguard(m) rec("unguard", m and m.id) end
 	function P.net_reset() end
 	function P.watch() end
-	function P.disarm(m, shots) rec("disarm", m and m.id, shots) end
-	function P.arm(m) rec("arm", m and m.id) end
+	local function armed(m, on) if m then m.armed = on if m.mount then m.mount.armed = on end end end
+	function P.disarm(m, shots) rec("disarm", m and m.id, shots) armed(m, false) end
+	function P.arm(m) rec("arm", m and m.id) armed(m, true) end
 	-- a blow (platform.lua P.strike): each post recorded with the victim's id, refused ones too (the script asks for none
 	-- where the platform refuses), and taken on the engine's next tick (land_strike) as the cave takes it
 	function P.strike(m, victim, slot)
@@ -650,6 +678,16 @@ local function fake_platform()
 		return true
 	end
 	function P.struck() return H.struck_n end
+	-- a sync kill (platform.lua P.sync): each post recorded, refused ones too, and taken on the next tick (land_sync)
+	function P.sync(m, victim)
+		rec("sync", m.id, victim.id)
+		if not P.features.sync or P.features.net then return false end
+		armed(m, true)
+		H.sync_req = {m = m.mount or m, victim = victim}
+		return true
+	end
+	function P.synced() return H.synced_n, H.sync_tries end
+	function P.matched(m) local t = H.model_ms() return m.paired_from ~= nil and t >= m.paired_from and t < m.paired_till end
 	function P.blow(m) if m.blow then return m.blow[1], m.blow[2] end end
 	-- the clip's splash switched off for him (platform.lua P.nosplash): refused where the cave is not, as there
 	function P.nosplash(on, m)
@@ -771,6 +809,7 @@ function H.step(seconds)
 			for _, t in ipairs({unpack(H.model_timers)}) do if now >= t.at then t.at = now + t.every t.fn() end end
 			land_casts()
 			land_strike()
+			land_sync()
 		end
 		if not H.paused then for _, u in ipairs(H.units) do if u._prior_walk then
 			u._z = u._z + H.speed / fps
@@ -832,6 +871,8 @@ function H.fresh(opts)
 	H.model_timers, H.heard = {}, {}
 	H.casts, H.phases, H.drop_casts = {}, {}, 0
 	H.struck_n, H.blow_out, H.strike_req = 0, opts.blow_out, nil
+	H.synced_n, H.sync_tries, H.sync_req, H.sync_out, H.sync_drop = 0, 0, nil, opts.sync_out ~= false, opts.sync_drop
+	H.sync_secs, H.fight_after = opts.sync_secs or 3, opts.fight_after or 0.3
 	-- the army abilities this army owns: every stat ability (stat_rows gives one to every CA faction), or opts.owned
 	local T, owned = assert(real_loadfile(file("script/derpy_tp/stats")))(), {}
 	for _, s in ipairs(T.order) do for _, step in ipairs(T.steps(s)) do owned[#owned + 1] = T.ability(s, step) end end

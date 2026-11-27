@@ -7,7 +7,10 @@ local function cmd(s) return common.call_context_command("CcoFrontendRoot", "", 
 local function get(s) return common.get_context_value("CcoFrontendRoot", "", R .. s) end
 L.cmd, L.get = cmd, get
 local ME = "LocalPlayerSlotContext"
-local AI = "TeamList.At(0).PlayerSlotList.At(0)"
+local function ai_slot()
+	local i = get("TeamList.At(0).PlayerSlotList.At(0).IsLocalPlayer") and 1 or 0
+	return "TeamList.At(" .. i .. ").PlayerSlotList.At(0)"
+end
 local function fill(slot, faction, units)
 	cmd(slot .. '.SetFaction(DatabaseRecordContext("CcoFactionRecord", "' .. faction .. '"))')
 	cmd(slot .. ".ClearUnits")
@@ -23,7 +26,7 @@ function L.setup(t)
 	local out = {}
 	if t.type then cmd('SettingsContext.SetBattleTypeRecordContext(DatabaseRecordContext("CcoBattleTypeRecord", "' .. t.type .. '"))') end
 	out.mine = fill(ME, t.me, t.mine)
-	out.theirs = fill(AI, t.ai, t.theirs)
+	out.theirs = fill(ai_slot(), t.ai, t.theirs)
 	out.type = get("SettingsContext.BattleTypeRecordContext.Key")
 	return out
 end

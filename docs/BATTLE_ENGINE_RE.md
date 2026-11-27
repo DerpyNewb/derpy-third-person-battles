@@ -578,6 +578,140 @@ clip:
   in each of the two walking-enemy passes that cut 9 and 3 before. The held pass and one entity of a regiment never
   set `+0xb20`, so `steady` cleared nothing there.
 
+## 12b. Matched combat (sync kills)
+
+Measured 2026-11-27 on 6ae2a00b (9.0.5), a Lord Magistrate on foot (`wh3_main_cth_cha_lord_magistrate_0`) against
+Orc Boyz. The handoff is `sessions/HANDOFF_20261127_THIRD_PERSON_SYNC_KILLS.md`.
+
+**The decision.** `exe+3089c94(attack, victim)` is CA's kill-move check. The attack-object updates (`3092b58`,
+`3092e88`, `309661c`) call it after `306287c` and before the plain attack `308945c`; `30899e0` is the generic one for
+slots 530-533. It refuses unless all of these hold: the attack's `+0x88 & 0x18` is clear; the range test when
+`+0x8c & 1`; neither man is in an interaction (`3073030`: `+0xb20` with a non-null vslot 0); the victim's `+0xa34` is 0
+or less; both fragments have slot 534 (`COMBAT_1`); the attacker has 15% of his hit points; each man faces the other
+within 90 degrees (`3075c5c`); the pair check `2f8c9c8`; and the roll. The chance is the unit's override
+(`+0x2e8` then `+0x1c8`, what `set_matched_combat_chance` writes) or the kv `matched_combat_percentage` (50), divided by
+the unit's entity count (`+0x184`) and clamped to 10-100, rolled on the battle's RNG (`battle+0x90`). It then calls
+`2f72e6c(*(battle+0x188), man, victim)` and sets the attack's `+0x88 |= 4` **whether or not anything started**.
+
+**The start and the manager.** `2f72e6c(mgr, man, victim)` does nothing if either man's bit is set in the bitset at
+`*(mgr+0xc8)` (bit = man `+0x60`). Otherwise it builds an interaction (`2f6aa80`, vtable `exe+3ad5918`) and pushes it
+to the pending list. The manager (`battle+0x188`, vtable `exe+3ad5810`; the collision manager of section 12 is another
+object) keeps the active list at `+0xa8` (count `+0xac`, data `+0xb0`) and the pending list at `+0xb8` (count `+0xbc`,
+data `+0xc0`). Its pass, `2f8a068`, moves each pending interaction to active unless its done check (vslot `+0x20`,
+`2f8d66c`) says done, and a done one is **released without ever ticking**. Both men's bits are set from the build, so a
+second start for either man before the release does nothing.
+
+**The pick.** On its first call the done check runs the pair's setup, `2f8e0f8`, which calls CA's clip pick,
+`30af180`. When the pick finds no clips, the interaction is done at once and goes. A pair that runs reads:
+
+| Interaction offset | Working pair |
+|---|---|
+| `+0x20` | 1 (committed; the done check then answers "not done") |
+| `+0x28`, `+0x78` | the participants, and their count (2) |
+| `+0x88` | the end tick, in the battle's tenths of a second (`battle+0x98`) |
+| `+0x160` | 1, the pick's type; 0 when it found nothing |
+| `+0x16c` | 1 |
+| `+0x170`, `+0x178` | attacker, victim |
+| `+0x308` | the chosen clip pair; null when it found nothing |
+
+The pick refused every pair for the man the pack plays, for two reasons, each isolated with the battle paused and the
+same two men in the same tick:
+
+- **His fragment.** On the disarm copy (`P.disarm`), the pick found nothing; one `P.arm` later it paired the same orc.
+  The copy keeps every `COMBAT_n` slot, so the pick keys on the fragment itself, not on its slot table.
+- **CA's melee.** His running action (the object at `+0x4a8`, section 6) must be CA's melee one. Read on him:
+  `exe+3917110` standing under third person or halted, `exe+3915db0` walking under third person, `exe+3ad8c40`
+  closing in under an attack order, `exe+3917b60` in CA's melee between swings, `exe+3917320` swinging (an orc
+  mid-swing was still paired). The update cave's guard (section 9) stops the engine's melee command on the played man
+  every update, so under third person he never gets there, and the pick paired none of his tries, armed or not.
+  Halted with third person off, it paired 1 try in 8, and that pair never ran. Enemies attacking him did not change
+  it: their unit was in melee and his was not. Under CA's attack order his first try paired and ran, and with third
+  person on (the guard dropped by `F.native_attack`) CA's own melee started a pair on him within 0.7 s.
+
+`3089c94` passes him either way, which is why the pack's first build counted "started" pairs that never showed.
+
+**On the men.** While a pair runs, `+0xb20` holds the interaction and its tick (vslot `+0x78`, `2f92eb8`) writes
+`+0xb30` (a slot, `0x8d4` for none), `+0xb38` (position) and `+0xb44` (heading) every tick. The clips play outside the
+fragment's slots: `P.anim_slot` reads nil all through it (`+0x898` null and `+0x284` 0). Pairs ran 3 to 6 s.
+`steady` (section 12) clears only the two collision classes, never this one.
+
+**Which pairs exist.** The game loads its pairs from `animations/matched_combat/attila_generated*.bin` inside the
+`.animpack` files (the paths are in `Warhammer3.exe`; a mod adds `attila_generated_<name>.bin`). Each entry names an
+attack clip and a death clip, with no unit, table or skeleton. The JSON under `animations/database/matched/` (1,739
+entry files and a 1,027-entry combined file that disagree) is CA's source for those and is not read by the game. What
+decides a pair is the two men's fragments: the attacker's battle animation table carries the attack clip in a
+`COMBAT_n` slot (534-733) and the victim's carries the death clip in one. `tools/third_person_fires.py` `matched()` reads
+it that way, and it agrees with every live result: the Lord Magistrate's table (`hu1e_sword_lord`) pairs with Orc
+Boyz' (`hu2_orc_sword_and_shield`) through exactly the clip the game played, the reverse has none, and the orcs' table,
+which the Orc Warboss shares, has no paired attack at all. That is why the first positive control, an Orc Warboss,
+saw nothing, CA's own melee included (an earlier note here blamed goblins' death clips; goblins are humanoid05, and
+the Warboss has no pair on anyone). Of 1,426 vanilla tables, 1,056 have `COMBAT` clips, 325 can start a pair on foot and
+1,312 can be on the receiving end.
+
+**Ridden pairs.** The second clip of an entry is the attacker's rider clip, empty when he is not ridden (the AssetEditor
+fork calls it the mount's). A ridden attacker pairs only through an entry whose attack clip is in his mount's `COMBAT`
+slots and whose rider clip is in his own table's `RIDER_COMBAT` slots (1786-1885). The feral entries of his mount's
+table do not count: Dieter Helsnicht (Mixu) on a manticore has every pair the feral manticore has and no ridden one, and
+CA's own melee, at a 100% chance against mortal Swordsmen, killed 28 of them in 40 s without one pair. 489 of 3,611
+entries are ridden, over 20 mount tables and 251 rider tables. No vanilla manticore rider has a ridden pair on Empire
+Swordsmen; a Sorceress on a Cold One and Luthor Harkon on his Terrorgheist do. Ten entries also name a rider clip on
+the victim's side; the pack ignores that.
+
+**An invincible victim gets no pair.** Against Swordsmen made invincible (`set_invincible`, which the test setup uses),
+CA's own melee at 100% paired a Varghulf 0 times in 40 s; made mortal, 3 times in 30 s. The pick runs after the hit and
+damage rolls, so every pair here whose clip is a death needs a blow that can kill. A live test of sync kills has to
+make the enemy mortal first (the swing pass in `zz_tp_verify_20261125.lua` does, and restores it afterwards).
+
+**A pair in the data is not always played.** A Terrorgheist on Swordsmen and a feral manticore on Swordsmen both have
+one. Under CA's own melee at 100% against mortal men, the Terrorgheist paired once in 40 s; under third person, the
+feral manticore's check started 9 pairs over 3 tries and the pick found a clip for none. Why the pick refuses these is
+not known.
+
+**The table, at runtime.** A man's fragment (`+0x308`) names its battle animation table as a CA string at `+0x08`
+(again at `+0x18`): up to 15 characters inline with `0x80 + length` in its last byte, else a u32 length and a pointer at
+`+0x10`. Read 2026-11-27 on eight units, both forms. It is the table the engine plays, which is not always
+`land_units.man_animation`: Ghorth on a Great Taurus plays his rider clips from `hu3_dlc23_ox1_taurus_wb1_axe_pistol`.
+No skeleton name was found within three pointer levels of the man.
+
+**Engine calls from Lua.** With the battle paused (`bm:modify_battle_speed(0)`), `mr.call` on `2f72e6c` and on an
+interaction's done check ran cleanly a dozen times. One start per man per tick: the bits clear only at the next pass.
+
+**What the pack does** (`combat.lua` `swing` and `C.locked`, built 2026-11-27): for a unit of one, a click with an
+enemy man in the blow's reach rolls CA's odds for one entity (50%). On a pass it arms him (`P.sync`), gives CA's
+attack order on that man's unit (`F.native_attack = "sync"`, which drops the guard), and asks the cave for the check
+again every frame until the pair shows on him (`P.matched`) or 1.5 s pass. Shown, the lock holds until the pair lets
+him go. None by then, the order ends (a halt, sent before the clip, because an order after it can cut the swing) and
+his own swing plays. One man of a regiment is never tried: CA's melee is his regiment's order. Since the second build
+the roll is made only where CA has a pair (`syncs`): one of his tables (his own or his mount's, `P.anim_table`) has an
+attack set in `data.lua`'s `mc_attacks` whose `mc_kills` list holds the death set of one of the enemy man's tables.
+A table the build never read (a mod not installed where it was built) has no set and is never tried. Without this, a
+monster on most enemies, or an Orc Warboss on anyone, waited out the 1.5 s on half his clicks for nothing. Since the
+fourth build a ridden man is looked up by his mount's table and his own together (`mc_mounts`, `mc_riders`,
+`mc_rides`), never by either alone, and a pair (his kill list against one enemy death set) that has not started in 3
+tries is not tried again that battle; one that started once is always tried. Since the fifth, the lock holds a pair
+for up to 30 s, not 10: one of Kroll's ran 15.6 s under CA's own melee, and the 10 s cap let him go in the middle of
+it, after which his next swing never played.
+
+Live, third person, Lord Magistrate against held Orc Boyz at CA's own odds: his unit was in melee 0.1-0.2 s after the
+click and the pair showed 0.3-0.9 s after it, 6 tries of 6 with the 1.5 s wait; every orc in a pair died, and pairs
+ran 5.2-5.4 s. The first build waited 0.8 s: of its four tries one paired inside the wait, one paired at 0.85 s after
+the fallback swing had gone, and two had paired nothing by then. The built pack at default settings, 16 clicks 4 s
+apart: 6 sync kills, every orc in them died, pairs ran 5.1-5.6 s, and the clicks between them swung and hit as
+before.
+
+Other units, third person, 10 clicks 4 s apart against held, mortal Empire Swordsmen (2026-11-27). Vraznak (this
+author's lords pack) paired on 5 of 5 tries. Ghorth on foot has no pair, made no tries, and swung at once. A Sorceress
+on a Cold One (ridden) paired on 3 of 4 tries, 0.2 s after the click. A Supreme Sorceress on a manticore (ridden, no
+ridden pair) made no tries. A feral manticore made 3 tries, paired none and made no more. Kroll (OvN's Fimir), whose
+blows land 9-12 m ahead, paired on 4 of 4 tries. Dieter Helsnicht, under the third build's rule, made 6 tries and
+paired none. A flying unit swings its `FLY_ATTACK` clips, which never try; land it first
+(`button_toggle_flying`, clicked while it is selected and third person is off: clicked under third person, it stayed
+up).
+
+A fallback swing's lock is timed from the end of the wait, keeping the click's hold. Timed from the click, a swing
+cooldown under 1.5 s (the slider goes to 0.5) had it expire on the frame the swing went, which dropped the lock at
+once.
+
 ## 13. Multiplayer and the command queue
 
 (2026-10-21, code only; decision record `docs/sessions/MP_FEASIBILITY_20261021_THIRD_PERSON.md`.) A battle
