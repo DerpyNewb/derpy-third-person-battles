@@ -5292,6 +5292,60 @@ T.hotbar_icons_and_the_portrait_come_from_the_unit_context = function()
 	check(c[2] == "CcoBattleUnit" and c[3] == "cco_1", "read through the card's context id: " .. tostring(c[3]))
 end
 
+-- the author, 2026-11-28: "add borders around the unit portrait, should also use the character portrait IF the unit is a
+-- hero or lord". A lord's or hero's porthole in place of his card, the plate moved beside it
+local PORTHOLE = "ui/portraits/portholes/no_culture/hef_prince_campaign_02_0.png"
+local function lord_on(o)
+	o = o or {}
+	H.fresh({units = {{general = true, abilities = {}, men = 1}}})
+	H.cco = hud_cco({})
+	H.cco.IsCharacter = o.character ~= false
+	H.cco.IconPath = o.card or "ui/portraits/units/no_culture/hef_prince_campaign_02_0.png"
+	H.cco["UnitDetailsContext.CharacterContext.PortraitPath"] = o.campaign
+	H.files = o.files or {["/" .. PORTHOLE] = true}
+	H.tap("F2")
+	return assert(loadfile("/script/derpy_tp/hud_layout"))()
+end
+
+T.a_lord_shows_his_porthole_framed_and_the_plate_moves_beside_it = function()
+	local L = lord_on()
+	local b, plate = hud_part("bust"), hud_part("plate_left")
+	check(b:Visible() and hud_part("bust_frame"):Visible() and hud_part("bust_back"):Visible(), "his porthole, framed")
+	check(b.img[0] == PORTHOLE, "the porthole his card is named after: " .. tostring(b.img[0]))
+	check(not hud_part("portrait"):Visible() and not hud_part("portrait_frame"):Visible(), "his card hidden")
+	check(plate.x == b.x + L.at.plate_left[2] + L.bust_shift and plate.x > b.x + b.w, "the plate beside it: " .. plate.x)
+	check(hud_part("name").x == plate.x + L.at.name[2] - L.at.plate_left[2], "and his name on it")
+end
+
+-- after a lord, in the panel he left: every part starts shown, so only a unit after him shows what each one was set to
+T.a_line_unit_keeps_his_card_in_its_border = function()
+	local L = lord_on()
+	H.tap("F2")
+	H.cco.IsCharacter = false
+	H.tap("F2")
+	check(hud_part("portrait"):Visible() and hud_part("portrait_frame"):Visible(), "his card, framed")
+	check(not hud_part("bust"):Visible() and not hud_part("bust_frame"):Visible() and not hud_part("bust_back"):Visible(),
+		"no porthole")
+	check(hud_part("plate_left").x == hud_part("portrait").x + L.at.plate_left[2], "the plate where it was")
+end
+
+T.a_lord_whose_porthole_is_no_file_keeps_his_card = function()
+	local L = lord_on({files = {}})
+	check(hud_part("portrait"):Visible() and not hud_part("bust"):Visible(), "no file: his card")
+	check(hud_part("plate_left").x == hud_part("portrait").x + L.at.plate_left[2], "the plate where it was")
+end
+
+T.a_campaign_lord_shows_his_own_porthole_and_any_slash_is_read = function()
+	local own = "ui/portraits/portholes/emp/lord_07.png"
+	lord_on({campaign = own, files = {["/" .. own] = true, ["/" .. PORTHOLE] = true}})
+	check(hud_part("bust").img[0] == own, "his character's own, before his card's: " .. tostring(hud_part("bust").img[0]))
+	lord_on({card = "ui\\portraits\\units\\no_culture\\hef_prince_campaign_02_0.png"})
+	check(hud_part("bust").img[0] == PORTHOLE, "a card path in backslashes: " .. tostring(hud_part("bust").img[0]))
+	-- CA's own: the Handmaiden's and the Shadow Walker's general_portrait are "UI/Portraits/portholes/..."
+	lord_on({card = "UI/Portraits/units/no_culture/hef_prince_campaign_02_0.png"})
+	check(hud_part("bust").img[0] == PORTHOLE, "and in capitals: " .. tostring(hud_part("bust").img[0]))
+end
+
 -- the bar is CA's own list, in CA's order (the 2026-10-20 design, Part 2): key 1 casts what slot 1 shows
 T.hotbar_follows_cas_order_and_key_one_casts_slot_one = function()
 	hud_on({abilities = {"a1", "a2"}, order = {"a2", "a1"}})
@@ -8788,54 +8842,58 @@ T.a_killing_blow_inside_his_window_kills_him = function()
 	check(H.count("uc:kill") == 0, "the battle's own: " .. H.count("uc:kill"))
 end
 
--- the block (a player, 2026-11-03: "I can't really defend myself" against heroes; the author, 2026-11-11: a defend clip
--- and the shield, on the sprint's stamina). Harness DEFEND clips run 2.5 s; a full bar blocks 6 s
-local function blocker(slots)
-	H.fresh({units = {{general = true, slots = slots, clip_ms = {[474] = 2500, [475] = 2500, [476] = 2500, [477] = 2500,
-		[1921] = 2500}}}})
+-- the block (the author, 2026-11-28: the shield-up animation, moving as it does; no block for a unit without one).
+-- Harness STAND_SHIELD_UP runs 2.5 s, WALK_SHIELD_UP_1 1 s, RUN_SHIELD_UP_1 0.8 s; a full bar blocks 6 s
+local function blocker(o)
+	o = o or {}
+	H.fresh({units = {{general = true, slots = o.slots, table = o.table or "wh_test_shield",
+		clip_ms = {[1257] = 2500, [1268] = 1000, [1273] = 800}}}})
+	H.E.D.shields = {wh_test_shield = {2.5, 1, 0.8}}
 	H.tap("F2") H.step(0.5)
 	return H.units[1]._models[1]
 end
 
-T.a_held_block_defends_him_on_stamina = function()
+T.a_held_block_raises_his_shield_on_stamina = function()
 	local man = blocker()
 	H.down("F") H.step(0.1)
 	local p = H.last("play")
-	check(p and p[2] == man.id and p[3] == 474 and p[4] == 6, "DEFEND_1, held whole: " .. tostring(p and p[3]))
+	check(p and p[2] == man.id and p[3] == 1257 and p[4] == 6, "STAND_SHIELD_UP, held whole: " .. tostring(p and p[3]))
 	check(invincible() == true, "shielded at once")
 	check(H.last("disarm") and H.count("arm") == 0, "kept disarmed: the engine starts no swing of its own over it")
-	local steers = H.count("steer")
-	H.tap("Left mouse") H.down("W") H.step(0.5) H.up("W")
-	check(plays_of(454) == 0 and H.count("steer") == steers, "no swing and no step while he blocks")
-	H.step(2)
-	check(plays_of(475) == 1, "held: DEFEND_2 follows the first")
+	H.tap("Left mouse") H.step(0.3)
+	check(plays_of(454) == 0, "no swing while his shield is up")
+	H.step(2.2)
+	check(plays_of(1257) == 2 and plays_of(42) == 0, "held: the stand again as it ends, never his walk between: "
+		.. plays_of(1257) .. ", " .. plays_of(42))
 	H.step(2.5)
-	check(plays_of(476) == 1, "and DEFEND_3")
+	check(plays_of(1257) == 3 and invincible() == true, "and again, shielded past LOCK_MAX")
 	local s = H.E.F.stamina
 	check(s > 0.1 and s < 0.2, "5.1 s of a 6 s bar: " .. s)
-	H.step(2.6)
-	-- empty at 6.1 s; the third clip ran on to 7.5 and the bar refills from there
-	check(H.E.F.stamina < 0.05 and plays_of(477) == 0, "empty: no fourth: " .. H.E.F.stamina)
-	H.up("F") H.step(0.1)
-	check(invincible() == false and released_after_each_switch(), "the last clip over: no shield")
-	H.step(3)
+	H.step(1.2)
+	check(H.E.F.stamina < 0.05 and invincible() == false and H.last("play")[3] == 42, "empty: lowered: " .. H.E.F.stamina)
+	check(released_after_each_switch(), "each switch released")
+	H.up("F") H.step(3)
+	local n = plays_of(454)
 	H.tap("Left mouse") H.step(0.3)
-	check(plays_of(454) == 1, "he swings again")
+	check(plays_of(454) == n + 1, "he swings again")
 end
 
--- a tap is the whole of one clip: no second, and its stamina spent for the whole clip, so it buys no free shield
-T.a_tapped_block_is_one_whole_clip = function()
+T.a_block_is_lowered_when_let_go = function()
 	blocker()
-	H.tap("F") H.step(1)
-	check(plays_of(474) == 1 and invincible() == true, "let go: its clip runs on, shielded")
-	H.step(2)
-	check(plays_of(475) == 0 and invincible() == false, "over at its end, no second")
+	H.down("F") H.step(1) H.up("F") H.step(0.1)
+	check(invincible() == false and H.last("play")[3] == 42 and not H.E.F.lock, "let go: lowered, no shield, no lock")
 	local s = H.E.F.stamina
-	check(s > 0.5 and s < 0.72, "drained for the clip, not the tap: " .. s)
-	-- under a quarter, a press starts none; held at a quarter, the run that began goes on
+	check(s > 0.78 and s < 0.88, "drained for the second it was held: " .. s)
+	-- a tap before the engine reports the clip leaves nothing pending, which would keep him armed
+	H.step(2)
+	H.report_ms = 300
+	H.tap("F") H.step(0.1)
+	H.report_ms = nil
+	check(plays_of(1257) == 2 and not H.E.F.lock and not H.E.F.pending, "a tap: raised, lowered, nothing pending")
+	-- under a quarter, a press starts none
 	H.E.F.stamina = 0.2
 	H.tap("F") H.step(0.1)
-	check(plays_of(475) == 0, "under a quarter: none")
+	check(plays_of(1257) == 2, "under a quarter: none")
 end
 
 -- the shield is on from the press, not from the clip's report (0.19-0.31 s late in a busy battle); and a block never cuts
@@ -8843,39 +8901,173 @@ end
 T.a_block_shields_from_the_press_and_waits_for_a_swing = function()
 	blocker()
 	H.report_ms = 300
-	H.tap("F") H.step(0.1)
+	H.down("F") H.step(0.1)
 	check(invincible() == true and H.E.F.lock and H.E.F.lock.block, "shielded before the engine reports the clip")
 	H.report_ms = nil
-	H.step(3)
+	H.up("F") H.step(3)
 	past_swing_gap()
 	H.tap("Left mouse") H.step(0.2)
 	H.down("F") H.step(0.5)
-	check(plays_of(454) == 1 and plays_of(475) == 0, "the swing plays on, no defend over it")
+	check(plays_of(454) == 1 and plays_of(1257) == 1, "the swing plays on, no shield over it")
 	H.step(4)
-	check(plays_of(475) == 1, "the defend once the swing is over")
+	check(plays_of(1257) == 2, "the shield once the swing is over")
 	H.up("F")
 end
 
-T.only_a_single_entity_with_a_defend_clip_blocks = function()
+T.a_blocking_unit_of_one_walks_and_runs_with_his_shield_up = function()
+	local man = blocker()
+	H.down("F") H.step(0.3)
+	local steers = H.count("steer")
+	H.down("W") H.step(0.3)
+	check(H.count("steer") > steers, "he moves with his shield up")
+	check(H.last("play")[3] == 1273 and H.last("play")[4] == 6 and invincible() == true, "running: RUN_SHIELD_UP_1, shielded: "
+		.. H.last("play")[3])
+	-- steered, a latched clip never reports its end (measured 2026-10-16): sent again at its length
+	H.anim_hold = true
+	H.step(0.8)
+	H.anim_hold = false
+	check(plays_of(1273) == 2, "again at its length: " .. plays_of(1273))
+	H.tap("Z") H.step(0.2)
+	check(H.last("play")[3] == 1268, "walking: WALK_SHIELD_UP_1: " .. H.last("play")[3])
+	H.tap("Z") H.down("Shift") H.step(0.5)
+	check(not H.E.F.sprinting and H.last("play")[3] == 1273, "no sprint under the shield")
+	H.up("Shift") H.up("W") H.step(0.2)
+	check(H.last("play")[3] == 1257 and H.E.F.lock and H.E.F.lock.block, "stopped: STAND_SHIELD_UP again")
+	H.up("F") H.step(0.1)
+	check(man.anim_slot == nil and invincible() == false, "let go: lowered")
+end
+
+-- a mod not installed when data.lua was built: his table is in no list, and the slot decides (the author, 2026-11-28),
+-- timed by shield_default while he moves and by the engine's report standing
+T.a_table_data_lua_never_read_blocks_on_its_slot = function()
+	blocker({table = "wh_test_unread"})
+	H.E.D.shield_default = {0, 1.1, 0.9}
+	H.down("F") H.step(0.1)
+	check(H.last("play")[3] == 1257 and invincible() == true, "not listed, the slot there: STAND_SHIELD_UP, shielded")
+	H.step(2.6)
+	check(plays_of(1257) == 2, "its length unread: again as the engine reports its end: " .. plays_of(1257))
+	H.down("W") H.step(0.3)
+	check(H.last("play")[3] == 1273, "running: RUN_SHIELD_UP_1: " .. H.last("play")[3])
+	H.anim_hold = true
+	H.step(0.9)
+	H.anim_hold = false
+	check(plays_of(1273) == 2, "again at shield_default's 0.9 s: " .. plays_of(1273))
+	H.up("W") H.up("F")
+end
+
+-- measured 2026-11-28: the stand clip pushed over his walk kept him walking under it, 3.7 m; from the run it stopped him
+T.a_walking_block_stands_once_his_walk_has_stopped = function()
+	local man = blocker()
+	H.tap("Z") H.down("F") H.down("W") H.step(0.5)
+	check(H.last("play")[3] == 1268, "walking: WALK_SHIELD_UP_1")
+	local steers = H.count("steer")
+	H.up("W") H.step(0.1)
+	check(plays_of(1257) == 0 and H.E.F.unslide == nil, "his walk not stopped yet: no stand over it, no step")
+	man.command = "other" H.step(0.1)
+	check(H.last("play")[3] == 1257 and H.count("steer") == steers, "stopped: STAND_SHIELD_UP, no step of ours")
+	man.command = nil
+	H.down("W") H.step(0.5) H.up("W") H.step(0.1) H.down("W") H.step(0.2) H.up("W") H.step(0.35)
+	check(H.last("play")[3] == 1268, "on again before he stopped, then stopped: a wait of its own, not the first one's")
+	man.command = "other" H.step(0.1) man.command = nil
+	H.down("W") H.step(0.5)
+	H.up("W") H.step(0.7)
+	check(H.last("play")[3] == 1257, "a walk P.hold never stops: stood all the same")
+	H.up("F") H.tap("Z")
+end
+
+T.a_walk_clip_sent_as_he_stops_gets_a_step_of_our_walk = function()
+	local man = blocker()
+	H.tap("Z") H.down("F") H.down("W") H.step(0.3)
+	local n = plays_of(1268)
+	for _ = 1, 120 do H.step(1 / 60) if plays_of(1268) > n then break end end
+	check(plays_of(1268) == n + 1, "sent again")
+	H.up("W") H.step(1 / 60)
+	check(H.E.F.unslide == 1, "armed: the clip went in as he stopped")
+	local steers = H.count("steer")
+	man.command = "other" H.step(1 / 30)
+	check(H.count("steer") == steers + 2 and H.last("steer")[5] == false and H.E.F.unslide == 2,
+		"under the clip's command: our walk, sent until it shows: " .. (H.count("steer") - steers))
+	check(plays_of(1257) == 0, "no stand while he steps")
+	local holds = H.count("hold")
+	man.command = "walk" H.step(1 / 60)
+	check(H.count("hold") == holds + 1 and H.E.F.unslide == nil and plays_of(1257) == 0, "our walk: stopped, still no stand")
+	man.command = "other" H.step(1 / 60)
+	check(H.last("play")[3] == 1257 and H.count("steer") == steers + 2, "stood: STAND_SHIELD_UP, and no second step: "
+		.. H.last("play")[3] .. ", " .. (H.count("steer") - steers))
+	H.down("W") H.step(0.3) man.command = nil
+	n = plays_of(1268)
+	for _ = 1, 120 do H.step(1 / 60) if plays_of(1268) > n then break end end
+	H.up("W") H.step(1 / 60)
+	check(H.E.F.unslide == 1, "armed again")
+	H.down("W") H.step(1 / 60)
+	check(H.E.F.unslide == nil, "walking on: disarmed")
+	H.up("W") H.step(1 / 60) H.tap("F2") H.step(0.2) H.tap("F2") H.step(0.1)
+	check(H.E.F.on and H.E.F.unslide == nil, "cleared at the next start: " .. tostring(H.E.F.unslide))
+end
+
+T.a_blocking_man_drifting_under_a_clip_gets_a_step_of_our_walk = function()
+	local man = blocker()
+	H.down("F") H.step(0.3)
+	man.command = "other"
+	local steers = H.count("steer")
+	man.x = man.x + 0.4 H.step(1 / 60)
+	check(H.count("steer") == steers, "0.4 m: settling, not a slide")
+	man.x = man.x + 0.2 H.step(1 / 60)
+	check(H.count("steer") == steers + 1 and H.E.F.unslide == 2, "past half a metre: a step")
+	man.command = "walk" H.step(1 / 60)
+	man.command = "other" H.step(1 / 60)
+	check(H.E.F.unslide == nil and H.count("steer") == steers + 1, "stopped where the step ended: no second step")
+	H.up("F") H.step(0.2)
+	man.x = man.x + 1 H.step(1 / 60)
+	check(H.count("steer") == steers + 1, "no block, no step")
+end
+
+T.a_knock_or_the_engines_clip_breaks_the_shield = function()
+	local man = blocker()
+	H.down("F") H.step(0.5)
+	H.report_ms = 300
+	engine_plays(man, 474, 800) H.step(0.1)
+	check(H.last("play")[3] == 1257 and plays_of(1257) == 2, "the engine's defend over it: raised again at once")
+	H.step(0.3)
+	H.report_ms = nil
+	check(plays_of(42) == 0 and H.E.F.lock and H.E.F.lock.block, "never lowered while the engine still reports its defend")
+	local n = H.count("play")
+	engine_plays(man, 153, 2500) H.step(0.1) -- KNOCKDOWN_1
+	check(H.count("play") == n and not H.E.F.lock and invincible() == false, "a knock lowers it and nothing plays over the knock")
+	H.step(2.6)
+	check(H.last("play")[3] == 1257 and invincible() == true, "up again, still held: raised again")
+	H.up("F")
+end
+
+T.only_a_single_entity_with_a_shield_up_clip_blocks = function()
 	playing({type = "wh_test_melee", men = 21, x = 40})
+	H.E.D.shields = {wh_test_shield = {2.5, 1, 0.8}}
 	H.down("F") H.step(1)
-	check(plays_of(474) == 0 and H.count("uc:set_invincible") == 0, "one man of a regiment: nothing, it would shield them all")
+	check(plays_of(1257) == 0 and H.count("uc:set_invincible") == 0, "one man of a regiment: nothing, it would shield them all")
 	local s = H.last("subtitle")
 	check(s and s[2] == "derpy_tp_block_single" and H.count("subtitle") == 1, "said once a press: " .. H.count("subtitle"))
 	H.up("F")
 	whole_on() H.step(0.5)
 	H.tap("F") H.step(0.5)
 	check(H.count("uc:set_invincible") == 0 and H.last("subtitle")[2] == "derpy_tp_block_single", "nor a regiment played whole")
-	-- a unit of one with no defend clip: no hit reaction in its place
-	blocker({[454] = true, [368] = true})
+	-- a unit of one whose table holds a plain stand in the slot (a Gor's): nothing, and said
+	blocker({table = "wh_test_plain"})
+	H.E.D.shields.wh_test_plain = false
 	H.tap("F") H.step(0.5)
-	check(#H.all("play") == 0 and H.last("subtitle")[2] == "derpy_tp_block_single", "no DEFEND: nothing, and said")
-	-- a rider whose horse has no defend: his own RIDER_DEFEND
-	local man = blocker({[454] = true, [1921] = true})
-	man.mount = {id = 999, x = man.x, y = man.y, z = man.z, hp = 100, hp_max = 100, slots = {}}
+	check(#H.all("play") == 0 and H.last("subtitle")[2] == "derpy_tp_block_single", "a plain stand there: nothing, and said")
+	-- not listed and no such slot: nothing
+	blocker({table = "wh_test_unread", slots = {[454] = true, [474] = true}})
+	H.tap("F") H.step(0.5)
+	check(#H.all("play") == 0, "a table data.lua never read, no STAND_SHIELD_UP slot: nothing")
+	-- listed, but this body has no such slot
+	blocker({slots = {[454] = true, [474] = true}})
+	H.tap("F") H.step(0.5)
+	check(#H.all("play") == 0, "no STAND_SHIELD_UP slot: nothing")
+	-- mounted: nothing, though his own table has it
+	local man = blocker()
+	man.mount = {id = 999, x = man.x, y = man.y, z = man.z, hp = 100, hp_max = 100, slots = {[474] = true}}
 	H.tap("F") H.step(0.1)
-	local p = H.last("play")
-	check(p and p[2] == man.id and p[3] == 1921 and invincible() == true, "RIDER_DEFEND_1 on him: " .. tostring(p and p[3]))
+	check(#H.all("play") == 0 and H.count("uc:set_invincible") == 0, "mounted: nothing")
 end
 
 -- measured 2026-11-11: a lethal knock leaves him at 1 hp and he dies as its clip ends. The pack's defend 0.1 s after it
@@ -8884,6 +9076,7 @@ end
 T.nothing_of_ours_plays_over_a_knock = function()
 	general_on() H.step(0.5)
 	local man = H.units[1]._models[1]
+	man.table, H.E.D.shields = "wh_test_shield", {wh_test_shield = {2.5, 1, 0.8}} -- one who can block
 	engine_plays(man, 153, 2500) -- KNOCKDOWN_1
 	local n = H.count("play")
 	man.hp = 1 H.step(0.1)

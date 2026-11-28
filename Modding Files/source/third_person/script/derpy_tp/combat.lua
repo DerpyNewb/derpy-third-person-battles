@@ -1205,7 +1205,7 @@ return function(E)
 			if P.blow(L.m) ~= nil then L.armed = true elseif L.armed then L.landed = true end
 		end
 		local walked = L.strikes and L.still and L.seen and F.moving and not F.strike and not F.blow and P.blow(L.m) == nil
-		local over = walked or now >= L.till or L.m and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT + late())
+		local over = walked or now >= L.till or L.m and not L.block and (L.seen and slot ~= L.slot or not L.seen and now >= L.from + LOCK_WAIT + late())
 		if not over then return true end
 		-- The engine's own reaction to a blow on him (a defend, a hit reaction: reeling) cut the swing before its blow landed,
 		-- and the swing is lost: 2 of 20 cut at 0.1-0.3 s dealt nothing, one of them armed as a hit (a player, 2026-11-23:
@@ -1365,7 +1365,7 @@ return function(E)
 		F.stamina_t = now
 		local rate = F.sprinting and -1 / STAMINA_DRAIN or F.block and -1 / BLOCK_DRAIN or 1 / STAMINA_FILL
 		F.stamina = math.max(0, math.min(1, F.stamina + dt * rate))
-		F.sprinting = want and (not C.locked(now) or F.lock.runs) and F.stamina > 0 and (F.sprinting or F.stamina >= STAMINA_AGAIN)
+		F.sprinting = want and (not C.locked(now) or F.lock.runs and not F.lock.block) and F.stamina > 0 and (F.sprinting or F.stamina >= STAMINA_AGAIN)
 		C.charge(now)
 		C.charge_run(now, F.sprinting)
 	end
@@ -1437,50 +1437,72 @@ return function(E)
 		return slot ~= nil and P.play(body, slot, 6)
 	end
 
-	-- the block (a player, 2026-11-03: "I can't really defend myself" against heroes; the author, 2026-11-11: a defend clip
-	-- and the shield, on the sprint's stamina). A unit of one only, as the shield is (C.invincible). A press starts a
-	-- defend clip and he is held to it, as to a swing (C.locked): no attack, no step; it runs to its end whether the key is
-	-- let go or not, so a tap buys no free shield, and held, the next follows. Stamina drains while a block's clip runs
-	-- (C.sprint). DEFEND_1-10 (FLY_DEFEND in the air) on the body that carries his clips, else a rider's own RIDER_DEFEND
-	-- (RIDER_FLY_DEFEND); never a hit reaction
+	-- the block (the author, 2026-11-28: the shield-up animation, moving as it does, and no block for a unit without one).
+	-- A unit of one on foot only, as the shield is (C.invincible). Held, his shield is up and he walks or runs with it, on
+	-- the sprint's stamina; let go or out of stamina, it is lowered. Its lock runs (main.lua drives him) and keeps every
+	-- attack out
+	local SHIELD_UP, WALK_SHIELD_UP, RUN_SHIELD_UP, STOP_WAIT = 1257, 1268, 1273, 0.6
 	local function block_clip(man)
-		local air = F.unit:is_currently_flying()
-		local body = P.mount(man) or man
-		local slot = pick(body, {air and {504, 513} or {474, 483}})
-		if slot then return body, slot end
-		if body ~= man then
-			slot = pick(man, {air and {1951, 1960} or {1921, 1930}})
-			if slot then return man, slot end
+		if F.unit:is_currently_flying() or P.mount(man) or not P.has_slot(man, SHIELD_UP) then return end
+		-- false: a plain stand in the slot; not listed: a mod not installed when data.lua was built, taken at the slot's word
+		local lens = E.D.shields and E.D.shields[P.anim_table(man)]
+		if lens == false then return end
+		lens = lens or E.D.shield_default or {0, 0, 0}
+		if F.moving then
+			if F.running and lens[3] > 0 and P.has_slot(man, RUN_SHIELD_UP) then return RUN_SHIELD_UP, lens[3] end
+			if lens[2] > 0 and P.has_slot(man, WALK_SHIELD_UP) then return WALK_SHIELD_UP, lens[2] end
 		end
+		return SHIELD_UP, lens[1]
+	end
+	local function lowered(now)
+		F.lock.till, F.lock.seen, F.block = now, true, nil
 	end
 	-- want: the key held; man: a unit of one's model (main.lua single), else nil
 	function C.block(now, want, man)
 		local pressed = want and not F.block_want
 		F.block_want = want
-		local b = F.block
+		local b, L = F.block, F.lock
+		if b and not (L and L.block) then F.block, b = nil, nil end
 		if b then
+			if not want or F.stamina <= 0 or knocked(b.m) then return lowered(now) end
+			local slot, len = block_clip(b.m)
+			if not slot then return lowered(now) end
 			local s = P.anim_slot(b.m)
 			if s == b.slot then b.seen = true end
-			if b.seen and s ~= b.slot or not b.seen and now >= b.from + LOCK_WAIT + late() then F.block, b = nil, nil end
-		end
-		-- a new block needs a quarter of the bar, as a sprint does; one held on from the last may go on to empty
-		if b or not want or F.stamina <= 0 or not F.blocked and F.stamina < STAMINA_AGAIN then
-			if not b then F.blocked = nil end
+			if slot ~= SHIELD_UP then b.stop_by = nil end
+			if slot ~= b.slot or now >= b.again or b.seen and s ~= b.slot then
+				-- stopped from a walk, a clip over the walk keeps him walking under it (3.7 m in 2.5 s, 2026-11-28; not from
+				-- the run): the stand waits for P.hold to stop the walk, and a walk clip of ours not yet replaced by his walk
+				-- gets move.lua's step (F.unslide)
+				if slot == SHIELD_UP and b.slot == WALK_SHIELD_UP then
+					if not b.stop_by then
+						b.stop_by = now + STOP_WAIT
+						if now - b.pushed < 1.5 * TICK then F.unslide = 1 end
+					end
+					if now < b.stop_by and (F.unslide or P.command(b.m) == "walk") then L.till = now + LOCK_MAX return end
+				end
+				b.stop_by = nil
+				P.play(b.m, slot, 6)
+				b.slot, b.again, b.seen, b.pushed = slot, now + (len > 0 and len - TICK / 2 or LOCK_MAX), false, now
+				L.slot = slot
+			end
+			L.till = now + LOCK_MAX
 			return
 		end
+		-- a new block needs a quarter of the bar, as a sprint does
+		if not want or F.stamina < STAMINA_AGAIN then return end
 		local able = man and P.features.anim and F.men_ok
-		-- a swing under way or a knock plays on; asked first, as picking a clip turns the defends' rotation
 		if able and (C.locked(now) or knocked(man)) then return end
-		local body, slot
-		if able then body, slot = block_clip(man) end
-		if not body then
+		local slot, len
+		if able then slot, len = block_clip(man) end
+		if not slot then
 			if pressed then E.say("derpy_tp_block_single") end
 			return
 		end
 		act(now)
-		P.play(body, slot, 6, now + LOCK_MAX + late())
-		F.lock = {from = now, till = now + LOCK_MAX, yaw = E.rig.yaw, m = body, slot = slot, guard = true, block = true}
-		F.block, F.blocked = {m = body, slot = slot, from = now}, true
+		P.play(man, slot, 6)
+		F.lock = {from = now, till = now + LOCK_MAX, yaw = E.rig.yaw, m = man, slot = slot, guard = true, block = true, runs = true}
+		F.block = {m = man, slot = slot, again = now + (len > 0 and len - TICK / 2 or LOCK_MAX), pushed = now}
 		E.log("block " .. slot)
 	end
 

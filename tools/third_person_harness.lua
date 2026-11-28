@@ -571,7 +571,9 @@ common = {get_context_value = function(kind, id, expr)
 	if type(val) == "function" then return val() end
 	return val
 end, call_context_command = function(kind, id, expr) rec("cco_cmd", kind, id, expr) end,
-	get_localised_string = function(key) return (H.loc or {})[key] or "" end}
+	get_localised_string = function(key) return (H.loc or {})[key] or "" end,
+	-- the packs' files: H.files["/dir/name"]; CA answers the names found, comma-joined, "" for none
+	filesystem_lookup = function(dir, name) return (H.files or {})[dir .. name] and name or "" end}
 function H.default_cco()
 	return {IconPath = "ui/units/icons/test_card.png", Name = "Test Regiment", ["BattleAbilityList.Size"] = 0,
 		ReloadPercentMax = 0, HealthValue = 900, HealthMax = 1000, IsHidden = false, IsUnspottable = false,
@@ -892,7 +894,7 @@ function H.fresh(opts)
 	H.problems = opts.problems
 	H.root = comp("root")
 	H.pinned = {}
-	H.cco, H.cco_ids, H.w2s = H.default_cco(), nil, nil
+	H.cco, H.cco_ids, H.w2s, H.files = H.default_cco(), nil, nil, nil
 	H.eye, H.look, H.ground, H.roof = nil, nil, nil, nil
 	-- H.cam_lag: frames the engine's reported position trails the asked eye (measured 2026-10-15: two)
 	H.cam_lag, H.eyes = opts.cam_lag or 0, {}

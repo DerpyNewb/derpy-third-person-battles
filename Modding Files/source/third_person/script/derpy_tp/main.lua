@@ -801,7 +801,7 @@ return function(E)
 		F.ready_at = ready_by[unit:unique_ui_id()] or 0
 		F.driving, F.dragging, F.running, F.cursor_shown, F.held_fire = false, false, true, nil, false
 		F.walking, F.sprinting, F.stamina, F.stamina_t, F.map = false, false, 1, nil, false
-		F.block, F.blocked, F.block_want = nil, nil, nil -- combat.lua C.block
+		F.block, F.block_want, F.unslide = nil, nil, nil -- combat.lua C.block, move.lua man_drive
 		F.man_hold, F.frames, F.swallow, F.ui_off, F.melee_on, F.face_yaw, F.queued = nil, 0, nil, false, false, nil, nil
 		F.banners = false
 		F.lead = nil -- his steering point at its full distance (move.lua)

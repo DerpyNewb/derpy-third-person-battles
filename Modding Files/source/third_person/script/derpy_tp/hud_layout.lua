@@ -19,10 +19,16 @@ return {
 	fill = {health_fill = 184, ammo_fill = 148, winds_fill = 184, stamina_fill = 184, winds_cost = 184, morale_fill = 184, morale_alarm = 184},
 	lift = 23, -- design px the rows above a caster's winds bar drop for any other unit
 	lifted = {name = true, men_icon = true, men = true, kills_icon = true, kills = true},
+	bust_shift = 70, -- design px a lord's porthole moves the parts beside his portrait right
+	beside = {plate_left = true, plate_left_short = true, name = true, men_icon = true, men = true, kills_icon = true, kills = true, winds_icon = true, winds_back = true, winds_cost = true, winds_fill = true, winds_frame = true, winds = true, hp_icon = true, health_back = true, health_fill = true, health_frame = true, hp = true, morale_icon = true, morale_back = true, morale_fill = true, morale_alarm = true, morale_frame = true, morale_text = true, stamina_icon = true, stamina_back = true, stamina_fill = true, stamina_frame = true, stamina = true},
 	at = {
 		["bars"] = {"screen", 0, 0},
 		["men_bars"] = {"screen", 0, 0},
 		["portrait"] = {"left", 0, 0},
+		["portrait_frame"] = {"left", 0, 0},
+		["bust_back"] = {"left", 0, 0},
+		["bust"] = {"left", 0, 0},
+		["bust_frame"] = {"left", 0, 0},
 		["plate_left"] = {"left", 66, -18},
 		["plate_left_short"] = {"left", 66, 5},
 		["name"] = {"left", 74, -10},
@@ -338,6 +344,10 @@ return {
 		["bars"] = {1, 1},
 		["men_bars"] = {1, 1},
 		["portrait"] = {60, 130},
+		["portrait_frame"] = {60, 130},
+		["bust_back"] = {130, 130},
+		["bust"] = {130, 130},
+		["bust_frame"] = {130, 130},
 		["plate_left"] = {320, 148},
 		["plate_left_short"] = {320, 125},
 		["name"] = {304, 22},

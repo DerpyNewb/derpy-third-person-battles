@@ -29,7 +29,10 @@ HUD = {
     "margin": 24,                      # design px from the screen's edges
     "text": "#FFF8D7FF",               # CA's body text
     "portrait": (60, 130),
-    "column": 320,                     # the plate beside the portrait: name, men, health bar, a caster's winds bar
+    # a lord's or hero's porthole (the author, 2026-11-28: "should also use the character portrait IF the unit is a hero or
+    # lord"): the centre square of CA's 300x164 porthole at the card's height, the plate moved right by the difference
+    "bust": 130, "porthole": (300, 164),
+    "column": 320,                   # the plate beside the portrait: name, men, health bar, a caster's winds bar
     # the author, 2026-10-15: "should be also health and winds of magic(if wizard) on the unit panel". Each bar row is
     # CA's stat icon, the bar, then its figure; "fig" fits "12000 / 12000" in body_12
     "row_icon": 20, "fig": 84,
@@ -130,6 +133,11 @@ EFFECT_EVENTS = {"event0": "UnitAbilityEffectRemoved", "event1": "UnitAbilityEff
 BAR_FILE = os.path.join(SRC, "ui", "derpy_tp", "bar_%d.twui.xml")
 ART = {
     "card": "ui/units/icons/wh3_main_cth_inf_iron_hail_gunners_0.png",   # replaced at run time by the unit's card
+    # the border (the author, 2026-11-28: "add borders around the unit portrait"): CA's battle card frame, 60x130, a 4 px
+    # edge and its 3 px shadow (land_unit_card.twui.xml), and its ground under a porthole, whose own is clear
+    "card_frame": "ui/skins/default/unit_card_frame_plain.png",
+    "card_back": "ui/skins/default/unit_card_background.png",
+    "bust": "ui/portraits/portholes/no_culture/hef_prince_campaign_02_0.png",  # replaced at run time by his porthole
     "bar": "ui/skins/default/bar_white.png",  # CA's banner and reinforcement bars, tinted
     "icon": "ui/battle ui/ability_icons/0_placeholder_active_abilitiy&spell.png",
     "slot": "ui/skins/default/spell_dial_spell_frame.png",
@@ -204,6 +212,13 @@ def _parts():
     # the bars over each man (hud.lua H.men), over the unit bars and under the rest
     P.append(("men_bars", "screen", 0, 0, 1, 1, {}))
     P.append(("portrait", "left", 0, 0, pw, ph, {"image": ART["card"]}))
+    P.append(("portrait_frame", "left", 0, 0, pw, ph, {"image": ART["card_frame"]}))
+    b, (ow, oh) = H["bust"], H["porthole"]
+    iw_b = int(round(ph * ow / float(oh)))
+    P.append(("bust_back", "left", 0, 0, b, ph, {"image": ART["card_back"]}))
+    P.append(("bust", "left", 0, 0, b, ph, {"clipimages": True, "layers": [
+        {"path": ART["bust"], "offset": ((b - iw_b) // 2, 0), "dw": iw_b - b, "dh": 0, "dock": None, "margin": 0}]}))
+    P.append(("bust_frame", "left", 0, 0, b, ph, {"image": ART["card_frame"], "imagemargin": 8}))
     # the plate a caster's four rows sit on, and the one for the other three (hud.lua shows one, lifts LIFTED for it)
     P.append(("plate_left", "left", cx, ny - pad, col, ph - ny + pad, {"image": ART["plate"], "imagemargin": 8}))
     P.append(("plate_left_short", "left", cx, ny + _lift() - pad, col, ph - ny - _lift() + pad,
@@ -551,6 +566,10 @@ def build():
                  width["morale_fill"], width["morale_alarm"]),
              "\tlift = %d, -- design px the rows above a caster's winds bar drop for any other unit" % _lift(),
              "\tlifted = {%s}," % ", ".join("%s = true" % k for k in LIFTED),
+             "\tbust_shift = %d, -- design px a lord's porthole moves the parts beside his portrait right" % (
+                 HUD["bust"] - HUD["portrait"][0]),
+             "\tbeside = {%s}," % ", ".join("%s = true" % p[0] for p in parts
+                                            if p[1] == "left" and p[2] >= HUD["portrait"][0] + HUD["gap"]),
              "\tat = {"]
     for pid, grp, dx, dy, _w, _h, _kw in parts:
         lines.append('\t\t["%s"] = {"%s", %d, %d},' % (pid, grp, dx, dy))

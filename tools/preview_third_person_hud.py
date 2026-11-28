@@ -61,10 +61,13 @@ def too_wide(text, box_w, size):
     return d.textlength(text, font=_font(size)) > box_w - 4
 
 
-def dump(page=1):
-    """[(id, x, y, w, h, visible, image, text)] as the shipped hud.lua left the harness's tree, on that page of the bar."""
+def dump(page=1, lord=False):
+    """[(id, x, y, w, h, visible, image, text)] as the shipped hud.lua left the harness's tree, on that page of the bar;
+    lord: the unit is a character, whose porthole takes his card's place."""
     out = os.path.join(tempfile.gettempdir(), "tp_hud_dump.tsv")
     env = dict(os.environ, TP_HUD_DUMP=out, TP_HUD_PAGE=str(page))
+    if lord:
+        env["TP_HUD_LORD"] = "1"
     src = os.path.join(ROOT, "Modding Files", "source", "third_person").replace(os.sep, "/")
     r = subprocess.run([LUA, os.path.join(ROOT, "tools", "third_person_harness.lua"), src,
                         os.path.join(ROOT, "tools", "third_person_hud_dump.lua"), "dump"],
@@ -84,13 +87,13 @@ def _asset(path):
     return Path(p) if os.path.isfile(p) else None
 
 
-def render(width, page=1):
+def render(width, page=1, lord=False):
     """One picture at this screen width, scaled from the 1920 the harness lays out at, on that page of the bar."""
     from PIL import Image, ImageDraw
     model, rendering = PG._studio()
     doc = model.Document(io.open(GEN.UI_FILE, encoding="utf-8").read())
     named = dict((c.get("id", c.tag), c) for c in doc.components)
-    rows = dump(page)
+    rows = dump(page, lord)
     _n, missing = PG.extract_art("hud", extra=sorted({r[6] for r in rows if r[6]}), folder=FOLDER)
     if missing:
         raise SystemExit("art not found in CA's packs: %s" % missing)
@@ -125,10 +128,20 @@ def render(width, page=1):
             images[slots[0]] = image
         st = doc.state(comp)
         metrics = st.child("imagemetrics") if st is not None else None
+        clip = comp.get("clipimagestocomponent") == "true"
         for n in (metrics.children if metrics is not None else []):
             asset = _asset(images.get(n.get("componentimage")) or "")
-            if asset:
+            if not asset:
+                continue
+            if not clip:
                 canvas.alpha_composite(rendering.raster(asset, W, Hh, n), (int(X), int(Y)))
+                continue
+            # its layer at its own size and offset, cut at the component's edge as the engine cuts it
+            ox, oy = (float(v) * scale for v in n.get("offset", "0,0").split(","))
+            mw, mh = (max(1, int(float(n.get(k)) * scale + 0.5)) for k in ("width", "height"))
+            layer = Image.new("RGBA", (W, Hh), (0, 0, 0, 0))
+            layer.alpha_composite(rendering.raster(asset, mw, mh, n).crop((int(-ox), int(-oy), int(-ox) + W, int(-oy) + Hh)))
+            canvas.alpha_composite(layer, (int(X), int(Y)))
         if text.strip():
             texts.append((pid, X, Y, W, Hh, text, st.child("component_text")))
     # text last, over every plate, the way the engine draws a label over its own and its elders' art
@@ -145,7 +158,8 @@ def render(width, page=1):
         if too_wide(text, W, px):
             OVER.append("%d p%d: %s %r is wider than its %dpx box" % (width, page, pid, text, W))
         draw.text((tx, ty), text, fill=TEXT, font=f)
-    out = os.path.join(PG.CACHE, "tp_hud_%d.png" % width if page == 1 else "tp_hud_%d_p%d.png" % (width, page))
+    name = "tp_hud_%d.png" % width if page == 1 else "tp_hud_%d_p%d.png" % (width, page)
+    out = os.path.join(PG.CACHE, name.replace(".png", "_lord.png") if lord else name)
     canvas.convert("RGB").save(out)
     return out
 
@@ -262,6 +276,8 @@ def main(argv):
     for w in WIDTHS:
         print("drew %s" % render(w))
     print("drew %s" % render(1920, 3))  # the spells page (the dump scene's third)
+    for w in WIDTHS:  # a lord's porthole, the plate moved right beside it
+        print("drew %s" % render(w, 1, True))
     for line in LOW + OVER:
         print("FINDING: %s" % line)
     return 1 if (problems or LOW or OVER) else 0

@@ -12,6 +12,7 @@ local STEER_LEAD = 15
 local LEAD_MIN, LEAD_RETRY, LEAD_BACK = 1.5, 0.5, 2
 local TOOK = 2 -- m between the engine's ordered position and ours: further, the order was dropped
 local WALK_1, UNLATCH_GAP = 42, 0.3 -- 9.0 slot id; s between two walking clips
+local SLID = 0.5 -- m a blocking man may drift from where he stopped before man_drive ends the slide
 -- a unit of one walked on the keys keeps CA's move order (single_order): m ahead, re-sent past ORDER_DEG of turn or within
 -- ORDER_NEAR m of its point
 local ORDER_LEAD, ORDER_DEG, ORDER_NEAR = 30, 30, 12
@@ -169,6 +170,18 @@ return function(E)
 		-- clears it and he faces the crosshair again
 		if dx == 0 and dz == 0 then
 			F.man_hold, F.lead = F.man_hold or {x, z}, nil
+			-- the block's walk clip pushed in the tick he stopped walks him on under it, where P.hold cannot reach (2.9 m,
+			-- 2026-11-28): a step of our own walk, which it can stop, ends it. 1: armed by C.block; 2: stepping
+			local hx, hz = F.man_hold[1], F.man_hold[2]
+			local cmd = F.block and P.command(m)
+			if F.unslide == 1 and cmd == "other" then F.unslide = 2 end
+			if cmd == "other" and (F.unslide == 2 or (x - hx) ^ 2 + (z - hz) ^ 2 > SLID * SLID) then
+				local f = F.face_yaw or E.rig.yaw
+				F.unslide, F.man_hold = 2, nil
+				P.steer(m, x + math.sin(f) * SLID, z + math.cos(f) * SLID, false, f)
+				return
+			end
+			if F.unslide == 2 or not F.block then F.unslide = nil end
 			-- standing past a swing's hold, its clip still playing: no facing written over the clip's turn (the author,
 			-- 2026-10-15: "still looking at the right ... at the last part of the animation")
 			local sw = F.swung
@@ -180,7 +193,7 @@ return function(E)
 			local face = M.turn(m, math.atan2(dx, dz))
 			F.face_yaw = face
 			dx, dz = math.sin(face), math.cos(face)
-			F.man_hold = nil
+			F.man_hold, F.unslide = nil, nil
 			-- the author, 2026-10-18: in sieges "the unit cannot move normally forward, as if theres a barrier", "everywhere".
 			-- Measured in a dwarf hold (probes/zz_tp_siege_walk.lua): his point 15 m ahead inside a building, the walk ended and
 			-- stood there, still his (west 0.2 m in 4 s; 8.7 m with the point 3 m ahead). Stopped, the next steer builds anew

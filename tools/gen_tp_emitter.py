@@ -283,6 +283,10 @@ def component(c):
         attrs.append('moveable="%s"' % kw["moveable"])
     if kw.get("allowhresize") is False:
         attrs.append('allowhorizontalresize="false"')
+    # an image layer larger than its component is cut at the component's edge, as CA's card_image_holder
+    # (land_unit_card.twui.xml) cuts a card to its slot
+    if kw.get("clipimages"):
+        attrs.append('clipimagestocomponent="true"')
 
     attrs += ['uniqueguid="%s"' % c.gid,
               'currentstate="%s"' % c.sid, 'defaultstate="%s"' % c.sid]

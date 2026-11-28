@@ -23,6 +23,10 @@ T.dump = function()
 	t["BattleAbilityList.At(13).ManaUsed"] = 27
 	t["ArmyContext.WindsOfMagicPoolContext.CurrentWind"], t["ArmyContext.WindsOfMagicPoolContext.MaxWind"] = 47.6, 100
 	if os.getenv("TP_HUD_PAGE") == "3" then t.MoraleState, t.MoralePercent = 6, 0.3 end -- the red morale bar, its longest word
+	if os.getenv("TP_HUD_LORD") then -- a lord: his porthole in place of the card, the plate beside it
+		t.IsCharacter, t.IconPath = true, "ui/portraits/units/no_culture/hef_prince_campaign_02_0.png"
+		H.files = {["/ui/portraits/portholes/no_culture/hef_prince_campaign_02_0.png"] = true}
+	end
 	for i, k in ipairs(ab) do
 		local at = "BattleAbilityList.At(" .. (i - 1) .. ")."
 		t[at .. "SetupAbilityContext.RecordKey"] = k

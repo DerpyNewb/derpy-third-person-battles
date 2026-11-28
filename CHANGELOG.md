@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-11-28
+
+Workshop manifest 6692448949493379052 (build `AF3C8902`). Patch notes: `docs/history/PATCH_NOTES_20261128_THIRD_PERSON.md`.
+
+- The block plays CA's shield-up animations instead of a defend clip, which looked the same as getting hit: STAND_SHIELD_UP
+  standing, WALK_SHIELD_UP_1 and RUN_SHIELD_UP_1 on the move, while F is held and stamina lasts. He can walk and run
+  with the shield up, but not sprint. A unit without a shield-up animation doesn't block, and there is no defend
+  fallback.
+- Who can block is decided by the animation slot: any unit of one on foot, not mounted or flying, whose battle
+  animation table has a STAND_SHIELD_UP row. `data.lua` `shields` lists the tables CA and the mods installed here ship
+  with that row (287 with clip lengths, 9 marked `false` because the row holds a plain stand). A table it never read,
+  from a mod that wasn't installed when it was built, blocks on its slot alone, timed by `shield_default`.
+- The raise is found in the clip, in a `SPLICE` in the row's `.anm.meta` (how the Dwarfs, Empire, Chaos and Orcs do it)
+  or in a `TRANSFORM` there (the High Elf Prince). The generator also used to check a mod's table against that mod's
+  own files only, which missed 55 modded tables that reuse CA's clips.
+- A walking stop with the shield up no longer slides him on for 3.7-3.9 m. The engine keeps a man walking under a clip
+  pushed over his walk, and the mod's stop only replaces a walk command, so the standing clip now waits until his walk
+  has stopped, and a replay that lands on the release gets one short step of the mod's own walk.
+- The HUD portrait has CA's battle card frame, and a lord or hero shows his character portrait (the porthole) instead
+  of his card, with the stat panel moved beside it. The porthole comes from the campaign character, or in a custom
+  battle from the portrait his card is named after, checked with `common.filesystem_lookup`; a character with none
+  keeps his card.
+- Tested in game: a Dwarf Thane, Dwarf Lord and High Elf Prince block standing, walking and running, the Runesmith
+  refuses, and every stop ends within 0.29-0.65 m; the HUD shows the portrait for a Prince and a High Mage and the
+  framed card for Spearmen. Harness 771 + 49, mutants rounds 78 to 81 (39) all caught.
+
 ## 2026-11-27, second update
 
 Workshop manifest 6639109647013672360 (build `1F016454`).

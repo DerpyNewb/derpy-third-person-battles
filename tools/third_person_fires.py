@@ -21,6 +21,7 @@ wins over CA's, the first mod in name order over the rest. A table's meta path m
 """
 import glob
 import os
+import re
 import struct
 import sys
 
@@ -68,6 +69,39 @@ COMBAT = range(534, 734)
 RIDER_COMBAT = range(1786, 1886)
 MATCHED = "animations/matched_combat/attila_generated"
 CA_ANIM = ("anim2.pack", "anim.pack", "anim_3.pack")
+# STAND_SHIELD_UP, WALK_SHIELD_UP_1, RUN_SHIELD_UP_1 (9.0 ids). The raise is the row's clip, a SPLICE in its .anm.meta
+# over a plain stand (163 of CA's tables, the Dwarfs' hu3_axs_shield_up_01 among them) or a TRANSFORM there (the High
+# Elf Prince's); 9 of CA's tables put a plain stand in the slot (read 2026-11-28)
+SHIELD_UPS = (1257, 1268, 1273)
+META_TAG = re.compile(rb"([\x01-\x40])\x00([A-Z][A-Z0-9_ ]{2,63})")
+META_ANIM = re.compile(rb"[A-Za-z0-9_/\.\\]{6,}\.anim")
+
+
+def meta_tags(meta):
+    """(tag name, offset past it) for each tag of an .anm.meta."""
+    return [(m.group(2), m.end()) for m in META_TAG.finditer(meta, 8) if len(m.group(2)) == m.group(1)[0]]
+
+
+def spliced(meta):
+    """The .anim paths an .anm.meta's SPLICE and SPLICE_OVERRIDE tags name."""
+    if not meta:
+        return []
+    at = meta_tags(meta)
+    out = []
+    for k, (name, start) in enumerate(at):
+        if name in (b"SPLICE", b"SPLICE_OVERRIDE"):
+            end = at[k + 1][1] if k + 1 < len(at) else len(meta)
+            out += [p.decode() for p in META_ANIM.findall(meta[start:end])]
+    return out
+
+
+def raises_shield(files, anim, meta):
+    """A sign the row raises the shield: "shield" in its clip's, its meta's or a spliced clip's file name (a modder's
+    "tigashield1up" too), or a TRANSFORM in its meta, which moves a bone itself."""
+    data = files.get(meta) if meta else None
+    names = [anim] + ([meta] if meta else []) + spliced(data)
+    return (any("shield" in p.replace("\\", "/").lower().rsplit("/", 1)[-1] for p in names)
+            or bool(data and any(n == b"TRANSFORM" for n, _e in meta_tags(data))))
 # CA's own packs in data/: everything but these prefixes is a mod
 CA_PREFIX = ("anim", "audio", "boot", "data", "db", "local_", "models", "movies", "shaders", "terrain", "text", "tile",
              "ui", "variants", "warmscape", "derpy_third_person")
@@ -460,6 +494,41 @@ def matched(mods):
     return attacks, deaths, kills, mounts, riders, rides
 
 
+def shield_ups(mods):
+    """Battle animation table -> (stand, walk, run), the longest clip of each of SHIELD_UPS, s, 0 unread, for each table
+    with a STAND_SHIELD_UP row and a sign it raises the shield; False for one whose rows show none. combat.lua C.block:
+    False never blocks, a table not listed (a mod not installed here) blocks on the slot alone. CA's bin wins for a table
+    CA ships; a mod's table finds the clips and metas it borrows from CA's packs."""
+    ca = [os.path.join(DATA, n) for n in CA_ANIM]
+    out, seen = {}, set()
+    for files in (Files(ca), Files(mods + ca)):
+        for k in files.at:
+            t = k[len(BIN):-4]
+            if not (k.startswith(BIN) and k.endswith(".bin")) or t in seen:
+                continue
+            seen.add(t)
+            try:
+                _h, rows = RA.read_bin(files.get(k))
+            except (ValueError, struct.error, TypeError):
+                continue
+            clips = {s: [(a, m) for r in rows if r["slot"] == s for a, m, _s in r["anims"]] for s in SHIELD_UPS}
+            if not clips[SHIELD_UPS[0]]:
+                continue
+            if not any(raises_shield(files, a, m) for a, m in clips[SHIELD_UPS[0]]):
+                out[t] = False
+                continue
+            out[t] = tuple(max([x for x in (anim_length(files.get(a)) for a, _m in clips[s]) if x] or [0]) for s in SHIELD_UPS)
+    return out
+
+
+def shield_default(shields):
+    """(0, walk, run) for a table shield_ups could not read: the median of the walking and running lengths it did. The
+    stand's 0 leaves its timing to the engine, which reports a standing clip's end."""
+    med = lambda xs: sorted(xs)[len(xs) // 2] if xs else 0
+    known = [v for v in shields.values() if v]
+    return (0, med([v[1] for v in known if v[1]]), med([v[2] for v in known if v[2]]))
+
+
 def _selftest():
     ev = lambda t:(struct.pack("<H", 8) + b"FIRE_POS" + struct.pack("<Iff", 10, t, t) + struct.pack("<H", 2) + b"ab"
                     + struct.pack("<i", 0) + struct.pack("<fff", 0.25, 1.5, 0.75))
@@ -530,6 +599,27 @@ def _selftest():
         raise AssertionError("a trailing byte is refused")
     except ValueError:
         pass
+    tag = lambda n, body=b"": struct.pack("<H", len(n)) + n + struct.pack("<I", 1) + body
+    meta = lambda *tags: struct.pack("<II", 10, len(tags)) + b"".join(tags)
+    f = Files.__new__(Files)
+    f.at = {"animations/x/splice.anm.meta": meta(tag(b"SPLICE", b"\x20\x00animations/x/hu3_axs_shield_up_01.anim")),
+            "animations/x/plain.anm.meta": meta(tag(b"SPLICE", b"\x20\x00animations/x/hu3_infernal_castellan_stand.anim")),
+            "animations/x/bone.anm.meta": meta(tag(b"DOCK_EQPT_RHAND"), tag(b"TRANSFORM")),
+            "animations/x/hands.anm.meta": meta(tag(b"LHAND_POSE"), tag(b"RHAND_POSE"))}
+    stand = "animations/x/hu6_axs_stand_01.anim"
+    assert raises_shield(f, stand, "animations/x/splice.anm.meta"), "a shield clip spliced over a plain stand"
+    assert raises_shield(f, stand, "animations/x/bone.anm.meta"), "a TRANSFORM moves the shield's bone itself"
+    assert raises_shield(f, "animations\\x\\TigaShield1Up_stand_01.anim", None), "a modder's name, slashes and case folded"
+    assert raises_shield(f, stand, "animations/x/hu1d_sps_shield_up_01.anm.meta"), "a meta named for it, unread here"
+    assert not raises_shield(f, stand, "animations/x/plain.anm.meta"), "another stand spliced: no sign"
+    assert not raises_shield(f, stand, "animations/x/hands.anm.meta") and not raises_shield(f, stand, None), \
+        "hand poses alone, or no meta: no sign"
+    assert not raises_shield(f, "animations/sword_and_shield/stand/hu1_sws_stand_01.anim", None), \
+        "a folder named for the shield is no sign: only the file's own name counts"
+    assert shield_default({"a": (2, 1.0, 0.7), "b": (1, 1.4, 0), "c": False, "d": (2, 1.1, 0.9)}) == (0, 1.1, 0.9), \
+        "the medians of the known walks and runs, a false and a 0 skipped: %s" % (shield_default({"a": (2, 1.0, 0.7),
+                                                                                         "b": (1, 1.4, 0), "c": False,
+                                                                                         "d": (2, 1.1, 0.9)}),)
     print("selftest ok")
 
 

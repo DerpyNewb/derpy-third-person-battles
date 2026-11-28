@@ -25,6 +25,7 @@ return function(E)
 	local army_shown_ids = "" -- the army ability buttons CA's bar showed when the pages were built
 	local acts, act_at = {}, {} -- the action buttons this unit shows, in order, and each one's place in that order
 	local caster = false -- an ability of his spends winds: his army's pool and its bar show
+	local bust = false -- a lord's or hero's porthole shows in place of his card (H.unit)
 	local home -- CA's radar's holder and place while the radar is in this panel (H.map): {holder, x, y}
 	local pages, page, list_n = {}, 1, nil -- the bar's pages (build below), the one shown, CA's list's size they came from
 	local tab_text -- the page tab's words while it shows (show_page); H.place sizes the tab to them
@@ -67,7 +68,8 @@ return function(E)
 	local function img(id, path) put(part(id), id .. ".img", path, function(c, x) c:SetImagePath(x, 0) end) end
 
 	-- the parts a failure hides together
-	local GROUPS = {portrait = {"portrait", "name"}, health = {"health_back", "health_fill", "health_frame"},
+	local GROUPS = {portrait = {"portrait", "portrait_frame", "bust_back", "bust", "bust_frame", "name"},
+		health = {"health_back", "health_fill", "health_frame"},
 		hp = {"hp", "hp_icon"}, winds = {"winds", "winds_icon", "winds_back", "winds_fill", "winds_frame", "winds_cost"},
 		stamina = {"stamina", "stamina_icon", "stamina_back", "stamina_fill", "stamina_frame"},
 		men = {"men", "men_icon"}, ammo = {"ammo", "ammo_back", "ammo_fill", "ammo_frame"}, mode = {"mode"}, slots = {}, reload = {},
@@ -201,6 +203,7 @@ return function(E)
 			local c = part(id)
 			local dx, dy = at[2], at[3]
 			if not caster and L.lifted[id] then dy = dy + L.lift end -- no winds row: the rows above it drop into its place
+			if bust and L.beside[id] then dx = dx + L.bust_shift end
 			if at[1] == "actions" then dx = dx + ((act_at[id:match("^act_(%a+)_")] or 1) - 1) * L.action_pitch end
 			if tab_dw and id == "tab_plate" then dx = -tab_w elseif tab_dw and id == "tab" then dx = -tab_w + L.pad end
 			-- the card numbers stand on CA's cards (H.cards)
@@ -369,6 +372,19 @@ return function(E)
 		return true
 	end
 
+	-- a lord's or hero's porthole, CA's character portrait: his campaign character's, else the one his card is named after
+	-- (a custom battle's general_portrait), when it is a file (25 of CA's 1293 cards have no porthole, 2026-11-28)
+	local function porthole()
+		if H.value("IsCharacter") ~= true then return nil end
+		local card = H.value("IconPath")
+		local twin = type(card) == "string" and (card:lower():gsub("portraits(%W)units(%W)", "portraits%1portholes%2", 1)) or ""
+		for _, p in ipairs({H.value("UnitDetailsContext.CharacterContext.PortraitPath") or "", twin}) do
+			local dir, file = tostring(p):lower():match("^(.+[^%w_%-%.])([%w_%-%.]+%.png)$")
+			dir = dir and dir:gsub("[^%w_%-%.]+", "/")
+			if dir and common.filesystem_lookup("/" .. dir, file) ~= "" then return dir .. file end
+		end
+	end
+
 	-- the unit at the start of a session: its card's context, its portrait, and the bar's first page. The context and
 	-- the slots' places in it are read even with the HUD off: abilities.lua casts through them
 	function H.unit()
@@ -382,9 +398,13 @@ return function(E)
 		for _, id in ipairs(GROUPS.hidden) do vis(id, false) end -- till the first read says so
 		show_caster()
 		guard("portrait", function()
-			img("portrait", cco("IconPath"))
+			local ok, p = pcall(porthole)
+			bust = ok and p ~= nil
+			if bust then img("bust", p) else img("portrait", cco("IconPath")) end
 			text("name", cco("Name"))
-			vis("portrait", true) vis("name", true)
+			for _, id in ipairs({"portrait", "portrait_frame"}) do vis(id, not bust) end
+			for _, id in ipairs({"bust_back", "bust", "bust_frame"}) do vis(id, bust) end
+			vis("name", true)
 		end)
 		-- the action buttons: walk and sprint always, attack but for a gun, fire for a shooter, artillery too (its click
 		-- fires the gun), jump when his men have the clips; each with its key

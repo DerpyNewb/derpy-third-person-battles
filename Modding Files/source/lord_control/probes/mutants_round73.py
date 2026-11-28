@@ -6,10 +6,10 @@ MAIN = "script/derpy_tp/main.lua"
 MOVE = "script/derpy_tp/move.lua"
 AZ = "settings_azerty_moves_the_defaults"
 REACH = "locked_on_his_blow_reaches_further_and_follows_the_aim"
-HELD = "a_held_block_defends_him_on_stamina"
-TAP = "a_tapped_block_is_one_whole_clip"
+HELD = "a_held_block_raises_his_shield_on_stamina"
+TAP = "a_block_is_lowered_when_let_go"
 WAIT = "a_block_shields_from_the_press_and_waits_for_a_swing"
-ONLY = "only_a_single_entity_with_a_defend_clip_blocks"
+ONLY = "only_a_single_entity_with_a_shield_up_clip_blocks"
 KNOCK = "nothing_of_ours_plays_over_a_knock"
 MUTANTS = [
     # AZERTY: a key left at its default not moved; a clash falling back to the QWERTY default; the box never read
@@ -19,17 +19,17 @@ MUTANTS = [
     # the lock-on: no further reach; the body's facing, not the swing's aim
     (CMB, "local LOCK_REACH = 1.6", "local LOCK_REACH = 0", REACH),
     (CMB, "men_of(held, LOCK_REACH, aim and math.sin(aim), aim and math.cos(aim))", "men_of(held, LOCK_REACH)", REACH),
-    # the block: over a swing under way; no drain; no shield before the clip's report; a new press under a quarter; the
-    # rider's own defend forgotten; said every frame; a hit reaction in a defend's place; armed under it
+    # the block: over a swing under way; no drain; no shield before the clip's report; a new press under a quarter; said
+    # every frame; armed under it. Re-aimed 2026-11-28 (round 78): the shield up replaced the defend, the mount's and the
+    # rider's own defend went with it, and a held block no longer chains clips below a quarter
     (CMB, "if able and (C.locked(now) or knocked(man)) then return end", "if able and knocked(man) then return end", WAIT),
     (CMB, "or F.block and -1 / BLOCK_DRAIN or 1 / STAMINA_FILL", "or 1 / STAMINA_FILL", HELD),
-    (CMB, "slot = slot, guard = true, block = true}", "slot = slot, block = true}", WAIT),
-    # held on below a quarter: the third clip of a full bar starts at 0.18 (HELD); a new press under it starts none (TAP)
-    (CMB, "not F.blocked and F.stamina < STAMINA_AGAIN", "F.stamina < STAMINA_AGAIN", HELD),
-    (CMB, "not F.blocked and F.stamina < STAMINA_AGAIN", "not F.blocked and F.stamina < 0", TAP),
-    (CMB, "if body ~= man then\n\t\t\tslot = pick(man", "if false then\n\t\t\tslot = pick(man", ONLY),
+    (CMB, "slot = slot, guard = true, block = true, runs = true}", "slot = slot, block = true, runs = true}", WAIT),
+    (CMB, "if not want or F.stamina < STAMINA_AGAIN then return end", "if not want or F.stamina <= 0 then return end", TAP),
+    (CMB, "if F.unit:is_currently_flying() or P.mount(man) or not P.has_slot(man, SHIELD_UP) then return end",
+     "if F.unit:is_currently_flying() or not P.has_slot(man, SHIELD_UP) then return end", ONLY),
     (CMB, "if pressed then E.say(\"derpy_tp_block_single\") end", "E.say(\"derpy_tp_block_single\")", ONLY),
-    (CMB, "local slot = pick(body, {air and {504, 513} or {474, 483}})", "local slot = pick(body, {{474, 483}, {368, 377}})", ONLY),
+    (CMB, "local lens = E.D.shields and E.D.shields[P.anim_table(man)]", "local lens = E.D.shields and E.D.shields[P.anim_table(man)] or {2, 1, 1}", ONLY),
     (MAIN, "if F.lock and not F.lock.block or F.swung", "if F.lock or F.swung", HELD),
     # the knock: the defend over it; the block, a click, the cheer, the jump, the sprint over it; the mount's knock not
     # read; knockbacks left out; a walk sent under it
